@@ -51,12 +51,20 @@ echo "   存储空间: $(df -h . | tail -1 | awk '{print $4}') 可用"
 # 6. 检查数据目录
 echo ""
 echo "📁 数据目录检查:"
-if [ -d "./data/QAS" ]; then
+if [ -d "../QAS" ]; then
     echo "   ✅ QAS数据目录存在"
-    qas_count=$(ls -1 ./data/QAS/ | wc -l)
+    qas_count=$(ls -1 ../QAS/ | wc -l)
     echo "   QAS样本数量: $qas_count"
+    
+    # 检查Labels.xls
+    if [ -f "../QAS/Labels.xls" ]; then
+        echo "   ✅ Labels.xls文件存在"
+    else
+        echo "   ❌ Labels.xls文件不存在"
+    fi
 else
     echo "   ❌ QAS数据目录不存在"
+    echo "   请确保QAS与diagnosis目录同级"
 fi
 
 if [ -d "./data/test" ]; then

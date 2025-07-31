@@ -170,7 +170,7 @@ def main():
         """从Labels.xls加载训练样本ID"""
         try:
             import pandas as pd
-            labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
+            labels_path = '../QAS/Labels.xls'
             df = pd.read_excel(labels_path)
             
             # 提取0-200范围的样本
@@ -201,7 +201,7 @@ def main():
     print("\n📥 加载预计算数据...")
     try:
         # 创建数据集
-        dataset = TransformerBatteryDataset(data_path='/mnt/bz25t/bzhy/zhanglikang/project/QAS', sample_ids=train_samples)
+        dataset = TransformerBatteryDataset(data_path='../QAS', sample_ids=train_samples)
         
         if len(dataset) == 0:
             print("❌ 没有加载到任何训练数据")
@@ -450,7 +450,7 @@ def main():
     print("📥 加载原始vin_2和vin_3数据...")
     for sample_id in train_samples:
         # 加载vin_1数据（用于Transformer预测）
-        vin1_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_1.pkl'
+        vin1_path = f'../QAS/{sample_id}/vin_1.pkl'
         with open(vin1_path, 'rb') as file:
             vin1_data = pickle.load(file)
             if isinstance(vin1_data, torch.Tensor):
@@ -460,7 +460,7 @@ def main():
             all_vin1_data.append(vin1_data)
         
         # 加载vin_2数据
-        vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
+        vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
         with open(vin2_path, 'rb') as file:
             vin2_data = pickle.load(file)
             if isinstance(vin2_data, torch.Tensor):
@@ -470,7 +470,7 @@ def main():
             all_vin2_data.append(vin2_data)
         
         # 加载vin_3数据
-        vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
+        vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
         with open(vin3_path, 'rb') as file:
             vin3_data = pickle.load(file)
             if isinstance(vin3_data, torch.Tensor):
@@ -501,7 +501,7 @@ def main():
         for sample_id in train_samples:
             sample_len = len(all_vin1_data[sample_idx])
             if i < sample_len:
-                targets_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/targets.pkl'
+                targets_path = f'../QAS/{sample_id}/targets.pkl'
                 with open(targets_path, 'rb') as f:
                     targets = pickle.load(f)
                     terminal_voltages = np.array(targets['terminal_voltages'])

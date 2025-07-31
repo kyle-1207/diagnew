@@ -61,7 +61,7 @@ def load_train_samples():
     """从Labels.xls加载训练样本ID"""
     try:
         import pandas as pd
-        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
+        labels_path = '../QAS/Labels.xls'
         df = pd.read_excel(labels_path)
         
         # 提取0-200范围的样本
@@ -93,8 +93,8 @@ all_vin2_data = []
 all_vin3_data = []
 
 for sample_id in train_samples:
-    vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
-    vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
+            vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
+            vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
     
     # 加载原始vin_2和vin_3数据
     with open(vin2_path, 'rb') as file:
@@ -332,7 +332,7 @@ plt.close()
 print(f"✅ BiLSTM训练结果图已保存: {result_dir}/bilstm_training_results.png")
 
 # 1. 创建结果目录
-result_dir = '/mnt/bz25t/bzhy/zhanglikang/project/models'
+    result_dir = './models'
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 

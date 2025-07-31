@@ -63,7 +63,7 @@ def load_test_samples():
     """从Labels.xls加载测试样本"""
     try:
         import pandas as pd
-        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
+        labels_path = '../QAS/Labels.xls'
         df = pd.read_excel(labels_path)
         
         # 提取测试样本
@@ -269,7 +269,7 @@ def three_window_fault_detection(fai_values, threshold1, sample_id):
 #----------------------------------------数据加载函数------------------------------
 def load_test_sample(sample_id):
     """加载测试样本"""
-    base_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}'
+    base_path = f'../QAS/{sample_id}'
     
     # 检查样本目录是否存在
     if not os.path.exists(base_path):

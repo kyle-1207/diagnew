@@ -79,8 +79,8 @@ def main():
         all_vin3_data = []
         
         for sample_id in train_samples:
-            vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
-            vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
+            vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
+            vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
             
             with open(vin2_path, 'rb') as file:
                 vin2_data = pickle.load(file)
@@ -234,7 +234,7 @@ def main():
             if is_main_process() and avg_loss < best_loss_mcae1:
                 best_loss_mcae1 = avg_loss
                 torch.save(net.module.state_dict() if is_distributed else net.state_dict(),
-                         '/mnt/bz25t/bzhy/zhanglikang/project/models/net_model_bilstm_baseline_best.pth')
+                         './models/net_model_bilstm_baseline_best.pth')
             
             # 打印训练信息（仅主进程）
             if is_main_process() and epoch % 50 == 0:
@@ -296,7 +296,7 @@ def main():
             if is_main_process() and avg_loss < best_loss_mcae2:
                 best_loss_mcae2 = avg_loss
                 torch.save(netx.module.state_dict() if is_distributed else netx.state_dict(),
-                         '/mnt/bz25t/bzhy/zhanglikang/project/models/netx_model_bilstm_baseline_best.pth')
+                         './models/netx_model_bilstm_baseline_best.pth')
             
             # 打印训练信息（仅主进程）
             if is_main_process() and epoch % 50 == 0:
@@ -306,9 +306,9 @@ def main():
         if is_main_process():
             # 保存最终模型
             torch.save(net.module.state_dict() if is_distributed else net.state_dict(),
-                     '/mnt/bz25t/bzhy/zhanglikang/project/models/net_model_bilstm_baseline.pth')
+                     './models/net_model_bilstm_baseline.pth')
             torch.save(netx.module.state_dict() if is_distributed else netx.state_dict(),
-                     '/mnt/bz25t/bzhy/zhanglikang/project/models/netx_model_bilstm_baseline.pth')
+                     './models/netx_model_bilstm_baseline.pth')
             
             # 保存训练历史
             history = {
@@ -321,7 +321,7 @@ def main():
                 'amp_enabled': True
             }
             
-            with open('/mnt/bz25t/bzhy/zhanglikang/project/models/bilstm_training_history.pkl', 'wb') as f:
+            with open('./models/bilstm_training_history.pkl', 'wb') as f:
                 pickle.dump(history, f)
             
             # 绘制训练曲线
@@ -348,7 +348,7 @@ def main():
             plt.legend()
             
             plt.tight_layout()
-            plt.savefig('/mnt/bz25t/bzhy/zhanglikang/project/models/bilstm_training_results.png')
+            plt.savefig('./models/bilstm_training_results.png')
             plt.close()
             
             print("\n💾 保存结果:")

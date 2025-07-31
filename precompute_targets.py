@@ -96,7 +96,7 @@ def load_labels(data_path):
 
 def main():
     """主函数"""
-    data_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS'
+    data_path = '../QAS'
     
     # Linux环境检查
     import platform

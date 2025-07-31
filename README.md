@@ -18,9 +18,9 @@ chmod +x *.sh
 ```
 
 ### 2. 数据准备
-确保数据文件结构如下：
+确保数据文件结构如下（QAS与diagnosis目录同级）：
 ```
-/mnt/bz25t/bzhy/zhanglikang/project/QAS/
+../QAS/
 ├── Labels.xls                    # 样本标签文件
 ├── 0/
 │   ├── vin_1.pkl
@@ -50,8 +50,11 @@ chmod +x run_training.sh
 
 #### 方式二：分步运行
 ```bash
-# 第一步：生成targets.pkl
+# 第一步：生成训练样本的targets.pkl
 python3 precompute_targets.py
+
+# 第一步补充：生成测试样本的targets.pkl
+python3 precompute_targets_test.py
 
 # 第二步：训练BiLSTM基准模型
 python3 Train_BILSTM.py
@@ -66,7 +69,8 @@ python3 Test_combine.py
 ## 📁 文件说明
 
 ### 核心脚本
-- `precompute_targets.py` - 预计算真实值数据
+- `precompute_targets.py` - 预计算训练样本真实值数据
+- `precompute_targets_test.py` - 预计算测试样本真实值数据
 - `Train_Transformer.py` - 主训练脚本
 - `data_loader_transformer.py` - 数据加载器
 - `Test_combine.py` - 性能测试脚本
@@ -88,7 +92,7 @@ python3 Test_combine.py
 - CUDA 12.3+ (支持A100 GPU)
 - 内存: 32GB+ (推荐)
 - 存储: 50GB+ (用于数据文件)
-- 数据路径: `/mnt/bz25t/bzhy/zhanglikang/project/QAS/`
+- 数据路径: `../QAS/` (与diagnosis目录同级)
 
 ## 📊 性能优化
 

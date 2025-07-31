@@ -116,7 +116,7 @@ def main():
         
         # 创建数据集
         dataset = TransformerBatteryDataset(
-            data_path='/mnt/bz25t/bzhy/zhanglikang/project/QAS',
+            data_path='../QAS',
             sample_ids=train_samples
         )
         
@@ -218,7 +218,7 @@ def main():
             if is_main_process() and avg_loss < best_loss:
                 best_loss = avg_loss
                 torch.save(model.module.state_dict() if is_distributed else model.state_dict(),
-                         '/mnt/bz25t/bzhy/zhanglikang/project/models/transformer_model_best.pth')
+                         './models/transformer_model_best.pth')
             
             # 打印训练信息（仅主进程）
             if is_main_process() and epoch % 5 == 0:
@@ -228,7 +228,7 @@ def main():
         if is_main_process():
             # 保存最终模型
             torch.save(model.module.state_dict() if is_distributed else model.state_dict(),
-                     '/mnt/bz25t/bzhy/zhanglikang/project/models/transformer_model.pth')
+                     './models/transformer_model.pth')
             
             # 保存训练历史
             history = {
@@ -240,7 +240,7 @@ def main():
                 'world_size': world_size
             }
             
-            with open('/mnt/bz25t/bzhy/zhanglikang/project/models/transformer_training_history.pkl', 'wb') as f:
+            with open('./models/transformer_training_history.pkl', 'wb') as f:
                 pickle.dump(history, f)
             
             print("\n✅ Transformer训练完成!")
@@ -256,7 +256,7 @@ def main():
             plt.ylabel('Loss')
             plt.grid(True)
             plt.legend()
-            plt.savefig('/mnt/bz25t/bzhy/zhanglikang/project/models/transformer_training_results.png')
+            plt.savefig('./models/transformer_training_results.png')
             plt.close()
             
             print("\n💾 保存结果:")
