@@ -190,6 +190,13 @@ def main():
     train_samples = load_train_samples()
     print(f"📊 使用QAS目录中的{len(train_samples)}个样本")
     
+    # 设备配置
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print(f"🔧 使用设备: {device}")
+    if torch.cuda.is_available():
+        print(f"🔧 GPU数量: {torch.cuda.device_count()}")
+        print(f"🔧 当前GPU: {torch.cuda.get_device_name(0)}")
+    
     # 使用新的数据加载器
     print("\n📥 加载预计算数据...")
     try:
