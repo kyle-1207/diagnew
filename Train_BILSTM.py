@@ -172,9 +172,9 @@ def check_data_quality(data, name, sample_id=None):
         'shape': data.shape
     }
 
-def safe_convert_to_tensor(data, name):
-    """安全地转换为tensor，包含数据修复"""
-    print(f"\n🔧 转换 {name} 为tensor...")
+def physics_based_data_processing(data, name, feature_type='general'):
+    """基于物理约束的数据处理（参考论文方法）"""
+    print(f"\n🔧 基于物理约束处理 {name}...")
     
     # 检查原始数据类型
     if isinstance(data, np.ndarray):
@@ -190,32 +190,112 @@ def safe_convert_to_tensor(data, name):
     else:
         data_np = np.array(data)
     
-    # 数据修复
-    print("   执行数据修复...")
+    # 记录原始数据点数量
+    original_data_points = data_np.shape[0]
+    print(f"   原始数据点数量: {original_data_points}")
     
-    # 1. 处理NaN值
+    print("   执行基于物理约束的数据处理...")
+    
+    # 1. 处理缺失数据 (Missing Data) - 用中位数替换全NaN行，保持数据点数量
+    print("   步骤1: 处理缺失数据...")
+    complete_nan_rows = np.isnan(data_np).all(axis=1)
+    if complete_nan_rows.any():
+        print(f"     检测到 {complete_nan_rows.sum()} 行完全缺失的数据")
+        print(f"     用中位数替换全NaN行，保持数据点数量不变")
+        
+        # 对每个特征维度计算中位数
+        for col in range(data_np.shape[1]):
+            valid_values = data_np[~np.isnan(data_np[:, col]), col]
+            if len(valid_values) > 0:
+                median_val = np.median(valid_values)
+                # 替换全NaN行中该特征的值
+                data_np[complete_nan_rows, col] = median_val
+                print(f"       特征{col}: 用中位数 {median_val:.4f} 替换全NaN行")
+            else:
+                # 如果该特征全部为NaN，用0替换
+                data_np[complete_nan_rows, col] = 0.0
+                print(f"       特征{col}: 全部为NaN，用0替换")
+    
+    # 2. 处理异常数据 (Abnormal Data) - 基于物理约束过滤
+    print("   步骤2: 处理异常数据...")
+    if feature_type == 'voltage':
+        # 电压物理约束：0-5V（根据论文）
+        valid_mask = (data_np >= 0) & (data_np <= 5)
+        invalid_count = (~valid_mask).sum()
+        if invalid_count > 0:
+            print(f"     检测到 {invalid_count} 个超出电压范围[0,5]V的异常值")
+            # 将异常值替换为边界值
+            data_np[data_np < 0] = 0
+            data_np[data_np > 5] = 5
+            
+    elif feature_type == 'current':
+        # 电流物理约束：-100A到100A
+        valid_mask = (data_np >= -100) & (data_np <= 100)
+        invalid_count = (~valid_mask).sum()
+        if invalid_count > 0:
+            print(f"     检测到 {invalid_count} 个超出电流范围[-100,100]A的异常值")
+            data_np[data_np < -100] = -100
+            data_np[data_np > 100] = 100
+            
+    elif feature_type == 'temperature':
+        # 温度物理约束：-40°C到80°C
+        valid_mask = (data_np >= -40) & (data_np <= 80)
+        invalid_count = (~valid_mask).sum()
+        if invalid_count > 0:
+            print(f"     检测到 {invalid_count} 个超出温度范围[-40,80]°C的异常值")
+            data_np[data_np < -40] = -40
+            data_np[data_np > 80] = 80
+    
+    # 3. 处理采样故障 (Sampling Faults) - 用中位数替换，保持数据点数量
+    print("   步骤3: 处理采样故障...")
+    
+    # 检测NaN和Inf值（可能是采样故障）
     nan_mask = np.isnan(data_np)
-    if nan_mask.any():
-        print(f"     修复 {nan_mask.sum()} 个NaN值")
-        data_np[nan_mask] = 0.0
-    
-    # 2. 处理无穷大值
     inf_mask = np.isinf(data_np)
-    if inf_mask.any():
-        print(f"     修复 {inf_mask.sum()} 个无穷大值")
-        data_np[inf_mask] = 0.0
+    fault_mask = nan_mask | inf_mask
     
-    # 3. 处理异常大值（可选，根据实际情况决定）
-    extreme_mask = (data_np < -1e6) | (data_np > 1e6)
-    if extreme_mask.any():
-        print(f"     检测到 {extreme_mask.sum()} 个异常大值")
-        print(f"     异常值范围: [{data_np[extreme_mask].min():.2e}, {data_np[extreme_mask].max():.2e}]")
-        # 这里可以选择截断或保持原值，先保持原值观察效果
-        # data_np[extreme_mask] = np.clip(data_np[extreme_mask], -1e6, 1e6)
+    if fault_mask.any():
+        print(f"     检测到 {fault_mask.sum()} 个采样故障点")
+        print(f"     用中位数替换故障点，保持数据点数量不变")
+        
+        # 对每个特征维度分别处理
+        for col in range(data_np.shape[1]):
+            col_fault_mask = fault_mask[:, col]
+            if col_fault_mask.any():
+                # 计算该列的中位数（排除故障值）
+                valid_values = data_np[~col_fault_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    print(f"       特征{col}: 用中位数 {median_val:.4f} 替换 {col_fault_mask.sum()} 个故障值")
+                    data_np[col_fault_mask, col] = median_val
+                else:
+                    # 如果该列全部为故障值，用0替换
+                    print(f"       特征{col}: 全部为故障值，用0替换")
+                    data_np[col_fault_mask, col] = 0.0
+    
+    # 4. 最终检查
+    print("   步骤4: 最终数据质量检查...")
+    final_nan_count = np.isnan(data_np).sum()
+    final_inf_count = np.isinf(data_np).sum()
+    
+    if final_nan_count > 0 or final_inf_count > 0:
+        print(f"     ⚠️  仍有 {final_nan_count} 个NaN和 {final_inf_count} 个Inf值")
+        # 最后的安全处理
+        data_np[np.isnan(data_np)] = 0.0
+        data_np[np.isinf(data_np)] = 0.0
+    else:
+        print("     ✅ 所有异常值已处理完成")
     
     # 转换为tensor
     data_tensor = torch.tensor(data_np, dtype=torch.float32)
-    print(f"   转换完成: {data_tensor.shape}, dtype={data_tensor.dtype}")
+    
+    # 检查数据点数量是否保持一致
+    final_data_points = data_tensor.shape[0]
+    if final_data_points == original_data_points:
+        print(f"   处理完成: {data_tensor.shape}, dtype={data_tensor.dtype}")
+        print(f"   ✅ 数据点数量保持一致: {original_data_points} -> {final_data_points}")
+    else:
+        print(f"   ⚠️  数据点数量发生变化: {original_data_points} -> {final_data_points}")
     
     return data_tensor
 
@@ -242,11 +322,11 @@ for sample_id in train_samples:
         # 数据质量检查
         vin2_quality = check_data_quality(vin2_data, "vin_2", sample_id)
         
-        # 安全转换为tensor
-        vin2_tensor = safe_convert_to_tensor(vin2_data, f"vin_2 (样本{sample_id})")
+        # 基于物理约束的数据处理
+        vin2_tensor = physics_based_data_processing(vin2_data, f"vin_2 (样本{sample_id})", feature_type='voltage')
         
-        # 转换后再次检查
-        check_data_quality(vin2_tensor, "vin_2 (转换后)", sample_id)
+        # 处理后再次检查
+        check_data_quality(vin2_tensor, "vin_2 (处理后)", sample_id)
         
     except Exception as e:
         print(f"❌ 加载样本 {sample_id} 的vin_2数据失败: {e}")
@@ -260,11 +340,11 @@ for sample_id in train_samples:
         # 数据质量检查
         vin3_quality = check_data_quality(vin3_data, "vin_3", sample_id)
         
-        # 安全转换为tensor
-        vin3_tensor = safe_convert_to_tensor(vin3_data, f"vin_3 (样本{sample_id})")
+        # 基于物理约束的数据处理
+        vin3_tensor = physics_based_data_processing(vin3_data, f"vin_3 (样本{sample_id})", feature_type='voltage')
         
-        # 转换后再次检查
-        check_data_quality(vin3_tensor, "vin_3 (转换后)", sample_id)
+        # 处理后再次检查
+        check_data_quality(vin3_tensor, "vin_3 (处理后)", sample_id)
         
     except Exception as e:
         print(f"❌ 加载样本 {sample_id} 的vin_3数据失败: {e}")
