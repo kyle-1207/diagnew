@@ -295,27 +295,27 @@ def physics_based_data_processing(data, name, feature_type='general'):
         # vin_3数据处理（226列）
         print(f"     处理vin_3数据（226列），第224列为特殊保留列")
         
-        # 索引0,1：BiLSTM和Pack SOC预测值 - 限制在[-0.2,1.5]
+        # 索引0,1：BiLSTM和Pack SOC预测值 - 限制在[-0.2,2.0]
         soc_pred_columns = [0, 1]
         for col in soc_pred_columns:
-            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 1.5)
+            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 2.0)
             col_invalid_count = (~col_valid_mask).sum()
             if col_invalid_count > 0:
-                print(f"       SOC预测列{col}: 检测到 {col_invalid_count} 个超出SOC范围[-0.2,1.5]的异常值")
+                print(f"       SOC预测列{col}: 检测到 {col_invalid_count} 个超出SOC范围[-0.2,2.0]的异常值")
                 data_np[data_np[:, col] < -0.2, col] = -0.2
-                data_np[data_np[:, col] > 1.5, col] = 1.5
+                data_np[data_np[:, col] > 2.0, col] = 2.0
             else:
                 print(f"       SOC预测列{col}: SOC值在正常范围内")
         
-        # 索引2-111：110个单体电池真实SOC值 - 限制在[-0.2,1.5]
+        # 索引2-111：110个单体电池真实SOC值 - 限制在[-0.2,2.0]
         cell_soc_columns = list(range(2, 112))
         for col in cell_soc_columns:
-            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 1.5)
+            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 2.0)
             col_invalid_count = (~col_valid_mask).sum()
             if col_invalid_count > 0:
-                print(f"       单体SOC列{col}: 检测到 {col_invalid_count} 个超出SOC范围[-0.2,1.5]的异常值")
+                print(f"       单体SOC列{col}: 检测到 {col_invalid_count} 个超出SOC范围[-0.2,2.0]的异常值")
                 data_np[data_np[:, col] < -0.2, col] = -0.2
-                data_np[data_np[:, col] > 1.5, col] = 1.5
+                data_np[data_np[:, col] > 2.0, col] = 2.0
         
         # 索引112-221：110个单体电池SOC偏差值 - 不限制范围，只处理极端异常值
         soc_dev_columns = list(range(112, 222))
@@ -665,13 +665,15 @@ for epoch in range(EPOCH):
             print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
             print(f"损失值: {loss_u.item()}")
-            # 不跳过，而是使用一个小的固定损失值继续训练
-            loss_u = torch.tensor(0.001, device=device, requires_grad=True)
-            print("使用固定损失值继续训练")
+            # 跳过这个批次，不进行反向传播
+            print("跳过此批次，不进行反向传播")
+            continue
         
         total_loss += loss_u.item()
         num_batches += 1
         optimizer.zero_grad()
+        
+        # 使用混合精度训练
         scaler.scale(loss_u).backward()
         
         # 添加更强的梯度裁剪和数值稳定性检查
@@ -679,12 +681,18 @@ for epoch in range(EPOCH):
         
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
+        has_grad_issue = False
         for name, param in net.named_parameters():
             if param.grad is not None:
                 if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
                     print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
-                    continue
+                    has_grad_issue = True
+                    break
                 grad_norm += param.grad.data.norm(2).item() ** 2
+        
+        if has_grad_issue:
+            continue
+            
         grad_norm = grad_norm ** 0.5
         
         # 更强的梯度裁剪
@@ -693,8 +701,14 @@ for epoch in range(EPOCH):
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_grad_norm)
             print(f"梯度裁剪: {grad_norm:.4f} -> {max_grad_norm}")
         
-        scaler.step(optimizer)
-        scaler.update()
+        # 安全地执行优化器步骤
+        try:
+            scaler.step(optimizer)
+            scaler.update()
+        except Exception as e:
+            print(f"优化器步骤失败: {e}")
+            print("跳过此批次")
+            continue
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
@@ -743,12 +757,14 @@ for epoch in range(EPOCH):
             recon_im, z = netx(x, z, q)
             loss_x = loss_f(y, recon_im)
             
-            # 检查损失值是否为NaN
-            if torch.isnan(loss_x):
-                print(f"警告：第{epoch}轮第{iteration}批次检测到NaN损失值")
-                print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
-                print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
-                continue
+                    # 检查损失值是否为NaN
+        if torch.isnan(loss_x) or torch.isinf(loss_x):
+            print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
+            print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+            print(f"损失值: {loss_x.item()}")
+            print("跳过此批次，不进行反向传播")
+            continue
         
         total_loss += loss_x.item()
         num_batches += 1
@@ -757,16 +773,36 @@ for epoch in range(EPOCH):
         
         # 添加梯度裁剪
         scaler2.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
         
-        # 检查梯度是否为NaN
+        # 检查梯度是否为NaN或无穷大
+        grad_norm = 0
+        has_grad_issue = False
         for name, param in netx.named_parameters():
-            if param.grad is not None and torch.isnan(param.grad).any():
-                print(f"警告：参数 {name} 的梯度出现NaN")
-                continue
+            if param.grad is not None:
+                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                    has_grad_issue = True
+                    break
+                grad_norm += param.grad.data.norm(2).item() ** 2
         
-        scaler2.step(optimizer)
-        scaler2.update()
+        if has_grad_issue:
+            continue
+            
+        grad_norm = grad_norm ** 0.5
+        
+        # 梯度裁剪
+        if grad_norm > MAX_GRAD_NORM:
+            torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
+            print(f"梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
+        
+        # 安全地执行优化器步骤
+        try:
+            scaler2.step(optimizer)
+            scaler2.update()
+        except Exception as e:
+            print(f"优化器步骤失败: {e}")
+            print("跳过此批次")
+            continue
     
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
