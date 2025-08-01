@@ -89,8 +89,11 @@ print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
 # 定义训练参数（提前定义）
 EPOCH = 300
-LR = 5e-4
+LR = 1e-4  # 降低学习率，避免梯度爆炸
 BATCHSIZE = 2000  # 从1000增加到2000，提高GPU利用率
+
+# 添加梯度裁剪
+MAX_GRAD_NORM = 1.0  # 最大梯度范数
 
 # 显示优化后的训练参数
 print(f"\n⚙️  BiLSTM训练参数（优化版本）:")
@@ -227,6 +230,9 @@ for epoch in range(EPOCH):
         num_batches += 1
         optimizer.zero_grad()
         scaler.scale(loss_u).backward()
+        # 添加梯度裁剪
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
         scaler.step(optimizer)
         scaler.update()
     
@@ -242,8 +248,8 @@ for iteration, (x, y, z, q) in enumerate(train_loader2):
     y = y.to(device)
     z = z.to(device)
     q = q.to(device)
-    net = net.double()
-    recon_imtest, recon = net(x, z, q)
+    with torch.cuda.amp.autocast():
+        recon_imtest, recon = net(x, z, q)
 AA = recon_imtest.cpu().detach().numpy()
 yTrainU = y_recovered.cpu().detach().numpy()
 ERRORU = AA - yTrainU
@@ -275,6 +281,9 @@ for epoch in range(EPOCH):
         num_batches += 1
         optimizer.zero_grad()
         scaler2.scale(loss_x).backward()
+        # 添加梯度裁剪
+        scaler2.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
         scaler2.step(optimizer)
         scaler2.update()
     
@@ -290,8 +299,8 @@ for iteration, (x, y, z, q) in enumerate(train_loaderx2):
     y = y.to(device)
     z = z.to(device)
     q = q.to(device)
-    netx = netx.double()
-    recon_imtestx, z = netx(x, z, q)
+    with torch.cuda.amp.autocast():
+        recon_imtestx, z = netx(x, z, q)
 
 BB = recon_imtestx.cpu().detach().numpy()
 yTrainX = y_recovered2.cpu().detach().numpy()
