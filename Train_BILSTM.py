@@ -89,11 +89,19 @@ print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
 # 定义训练参数（提前定义）
 EPOCH = 300
-LR = 1e-4  # 降低学习率，避免梯度爆炸
+INIT_LR = 5e-5  # 进一步降低初始学习率
+MAX_LR = 1e-4   # 最大学习率
 BATCHSIZE = 2000  # 从1000增加到2000，提高GPU利用率
+WARMUP_EPOCHS = 5  # 学习率预热轮数
 
 # 添加梯度裁剪
-MAX_GRAD_NORM = 1.0  # 最大梯度范数
+MAX_GRAD_NORM = 0.5  # 降低最大梯度范数
+
+# 学习率预热函数
+def get_lr(epoch):
+    if epoch < WARMUP_EPOCHS:
+        return INIT_LR + (MAX_LR - INIT_LR) * epoch / WARMUP_EPOCHS
+    return MAX_LR * (0.9 ** (epoch // 50))  # 每50个epoch衰减到90%
 
 # 显示优化后的训练参数
 print(f"\n⚙️  BiLSTM训练参数（优化版本）:")
@@ -194,8 +202,11 @@ class Dataset(Dataset):
 train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=BATCHSIZE, shuffle=False)
 
 # 中文注释：初始化MC-AE模型（使用float32）
-net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).float()
-netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).float()
+net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
+net.apply(lambda m: torch.nn.init.xavier_normal_(m.weight) if isinstance(m, nn.Linear) else None)
+
+netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).to(torch.float32)
+netx.apply(lambda m: torch.nn.init.xavier_normal_(m.weight) if isinstance(m, nn.Linear) else None)
 
 # 启用数据并行
 if torch.cuda.device_count() > 1:
@@ -215,6 +226,12 @@ print("✅ 启用混合精度训练 (AMP)")
 for epoch in range(EPOCH):
     total_loss = 0
     num_batches = 0
+    
+    # 更新学习率
+    current_lr = get_lr(epoch)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = current_lr
+    
     for iteration, (x, y, z, q) in enumerate(train_loader_u):
         x = x.to(device)
         y = y.to(device)
@@ -225,14 +242,29 @@ for epoch in range(EPOCH):
         with torch.cuda.amp.autocast():
             recon_im, recon_p = net(x, z, q)
             loss_u = loss_f(y, recon_im)
+            
+            # 检查损失值是否为NaN
+            if torch.isnan(loss_u):
+                print(f"警告：第{epoch}轮第{iteration}批次检测到NaN损失值")
+                print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
+                print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+                continue
         
         total_loss += loss_u.item()
         num_batches += 1
         optimizer.zero_grad()
         scaler.scale(loss_u).backward()
+        
         # 添加梯度裁剪
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
+        
+        # 检查梯度是否为NaN
+        for name, param in net.named_parameters():
+            if param.grad is not None and torch.isnan(param.grad).any():
+                print(f"警告：参数 {name} 的梯度出现NaN")
+                continue
+        
         scaler.step(optimizer)
         scaler.update()
     
@@ -266,6 +298,12 @@ avg_loss_list_x = []
 for epoch in range(EPOCH):
     total_loss = 0
     num_batches = 0
+    
+    # 更新学习率
+    current_lr = get_lr(epoch)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = current_lr
+    
     for iteration, (x, y, z, q) in enumerate(train_loader_soc):
         x = x.to(device)
         y = y.to(device)
@@ -276,14 +314,29 @@ for epoch in range(EPOCH):
         with torch.cuda.amp.autocast():
             recon_im, z = netx(x, z, q)
             loss_x = loss_f(y, recon_im)
+            
+            # 检查损失值是否为NaN
+            if torch.isnan(loss_x):
+                print(f"警告：第{epoch}轮第{iteration}批次检测到NaN损失值")
+                print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
+                print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+                continue
         
         total_loss += loss_x.item()
         num_batches += 1
         optimizer.zero_grad()
         scaler2.scale(loss_x).backward()
+        
         # 添加梯度裁剪
         scaler2.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
+        
+        # 检查梯度是否为NaN
+        for name, param in netx.named_parameters():
+            if param.grad is not None and torch.isnan(param.grad).any():
+                print(f"警告：参数 {name} 的梯度出现NaN")
+                continue
+        
         scaler2.step(optimizer)
         scaler2.update()
     
