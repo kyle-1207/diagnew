@@ -34,25 +34,31 @@ from scipy import ndimage  # 添加用于时序平滑的导入
 # 导入新的数据加载器
 from data_loader_transformer import TransformerBatteryDataset, create_transformer_dataloader
 
-# 导入分布式训练工具
-from distributed_utils import (
-    setup_distributed, cleanup_distributed, to_distributed,
-    create_distributed_loader, is_main_process, barrier, reduce_value
-)
+# 内存监控函数
+def print_gpu_memory():
+    """打印GPU内存使用情况"""
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            allocated = torch.cuda.memory_allocated(i) / 1024**3
+            cached = torch.cuda.memory_reserved(i) / 1024**3
+            total = torch.cuda.get_device_properties(i).total_memory / 1024**3
+            print(f"   GPU {i}: {allocated:.1f}GB / {cached:.1f}GB / {total:.1f}GB (已用/缓存/总计)")
 
-# 设置分布式训练
-is_distributed, local_rank, world_size = setup_distributed()
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+# GPU设备配置 - 使用GPU0和GPU1进行数据并行
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # 使用GPU0和GPU1
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # 打印GPU信息
-if is_main_process():
-    print(f"\n🖥️ 分布式训练配置:")
-    print(f"   GPU数量: {torch.cuda.device_count()}")
-    print(f"   当前进程: {local_rank}")
-    print(f"   总进程数: {world_size}")
-    if torch.cuda.is_available():
-        print(f"   GPU型号: {torch.cuda.get_device_name(local_rank)}")
-        print(f"   GPU显存: {torch.cuda.get_device_properties(local_rank).total_memory/1024**3:.1f}GB")
+if torch.cuda.is_available():
+    print(f"\n🖥️ 双GPU并行配置:")
+    print(f"   可用GPU数量: {torch.cuda.device_count()}")
+    for i in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(i)
+        print(f"   GPU {i} ({props.name}): {props.total_memory/1024**3:.1f}GB")
+    print(f"   主GPU设备: cuda:0")
+    print(f"   数据并行模式: 启用")
+else:
+    print("⚠️  未检测到GPU，使用CPU训练")
 
 # 中文注释：忽略警告信息
 warnings.filterwarnings('ignore')
@@ -170,7 +176,7 @@ def main():
         """从Labels.xls加载训练样本ID"""
         try:
             import pandas as pd
-            labels_path = '../QAS/Labels.xls'
+            labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
             df = pd.read_excel(labels_path)
             
             # 提取0-200范围的样本
@@ -201,7 +207,7 @@ def main():
     print("\n📥 加载预计算数据...")
     try:
         # 创建数据集
-        dataset = TransformerBatteryDataset(data_path='../QAS', sample_ids=train_samples)
+        dataset = TransformerBatteryDataset(data_path='/mnt/bz25t/bzhy/zhanglikang/project/QAS', sample_ids=train_samples)
         
         if len(dataset) == 0:
             print("❌ 没有加载到任何训练数据")
@@ -211,7 +217,7 @@ def main():
         print(f"✅ 成功加载 {len(dataset)} 个训练数据对")
         
         # 创建数据加载器
-        BATCH_SIZE = 1000
+        BATCH_SIZE = 2000  # 从1000增加到2000
         train_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
         print(f"📦 数据加载器创建完成，批次大小: {BATCH_SIZE}")
         
@@ -236,23 +242,35 @@ def main():
         output_size=2      # 输出：电压 + SOC
     ).to(device).float()
     
+    # 启用数据并行
+    if torch.cuda.device_count() > 1:
+        transformer = torch.nn.DataParallel(transformer)
+        print(f"✅ 启用数据并行，使用 {torch.cuda.device_count()} 张GPU")
+    else:
+        print("⚠️  单GPU模式")
+    
     print(f"🧠 Transformer模型初始化完成")
     print(f"📈 模型参数量: {sum(p.numel() for p in transformer.parameters()):,}")
     
     #----------------------------------------训练参数设置------------------------------
-    LR = 1e-3              # 学习率
-    EPOCH = 30             # 训练轮数
-    lr_decay_freq = 10     # 学习率衰减频率
+    LR = 1.5e-3            # 学习率从1e-3增加到1.5e-3
+    EPOCH = 40             # 训练轮数从30增加到40
+    lr_decay_freq = 15     # 学习率衰减频率从10增加到15
     
     # 优化器和损失函数
     optimizer = torch.optim.Adam(transformer.parameters(), lr=LR)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_decay_freq, gamma=0.9)
     criterion = nn.MSELoss()
     
-    print(f"⚙️  训练参数:")
-    print(f"   学习率: {LR}")
-    print(f"   训练轮数: {EPOCH}")
-    print(f"   批次大小: {BATCH_SIZE}")
+    print(f"⚙️  训练参数（保守优化版本）:")
+    print(f"   学习率: {LR} (从1e-3增加到1.5e-3)")
+    print(f"   训练轮数: {EPOCH} (从30增加到40)")
+    print(f"   批次大小: {BATCH_SIZE} (从1000增加到2000)")
+    print(f"   学习率衰减频率: {lr_decay_freq} (从10增加到15)")
+    print(f"   预测批次大小: 15000 (从10000增加到15000)")
+    print(f"   MC-AE批次大小: 3000 (从2000增加到3000)")
+    print(f"   MC-AE训练轮数: 250 (从300减少到250)")
+    print(f"   MC-AE学习率: {LR_MCAE} (从5e-4增加到7e-4)")
     
     #----------------------------------------开始训练------------------------------
     print("\n" + "="*60)
@@ -450,7 +468,7 @@ def main():
     print("📥 加载原始vin_2和vin_3数据...")
     for sample_id in train_samples:
         # 加载vin_1数据（用于Transformer预测）
-        vin1_path = f'../QAS/{sample_id}/vin_1.pkl'
+        vin1_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_1.pkl'
         with open(vin1_path, 'rb') as file:
             vin1_data = pickle.load(file)
             if isinstance(vin1_data, torch.Tensor):
@@ -460,7 +478,7 @@ def main():
             all_vin1_data.append(vin1_data)
         
         # 加载vin_2数据
-        vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
+        vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
         with open(vin2_path, 'rb') as file:
             vin2_data = pickle.load(file)
             if isinstance(vin2_data, torch.Tensor):
@@ -470,7 +488,7 @@ def main():
             all_vin2_data.append(vin2_data)
         
         # 加载vin_3数据
-        vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
+        vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
         with open(vin3_path, 'rb') as file:
             vin3_data = pickle.load(file)
             if isinstance(vin3_data, torch.Tensor):
@@ -493,52 +511,74 @@ def main():
     print("\n🔄 使用Transformer预测替换vin_2[:,0]和vin_3[:,0]...")
     transformer.eval()
     
-    # 准备Transformer输入数据（使用与训练时相同的格式）
-    transformer_inputs = []
-    for i in range(len(combined_vin1)):
-        # 从targets.pkl加载对应的真实值作为输入特征
-        sample_idx = 0
-        for sample_id in train_samples:
-            sample_len = len(all_vin1_data[sample_idx])
-            if i < sample_len:
-                targets_path = f'../QAS/{sample_id}/targets.pkl'
-                with open(targets_path, 'rb') as f:
-                    targets = pickle.load(f)
-                    terminal_voltages = np.array(targets['terminal_voltages'])
-                    pack_socs = np.array(targets['pack_socs'])
-                
-                # 构建7维输入（与训练时相同的格式）
-                input_7d = [
-                    combined_vin1[i, 0, 0].item(),  # vin_1前5维
-                    combined_vin1[i, 0, 1].item(),
-                    combined_vin1[i, 0, 2].item(),
-                    combined_vin1[i, 0, 3].item(),
-                    combined_vin1[i, 0, 4].item(),
-                    terminal_voltages[i],           # 当前时刻真实电压
-                    pack_socs[i]                    # 当前时刻真实SOC
-                ]
-                transformer_inputs.append(input_7d)
-                break
-            else:
-                i -= sample_len
-                sample_idx += 1
+    # 预先加载所有targets数据（优化I/O）
+    print("📥 预先加载所有targets数据...")
+    all_targets = {}
+    for sample_id in train_samples:
+        targets_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/targets.pkl'
+        with open(targets_path, 'rb') as f:
+            all_targets[sample_id] = pickle.load(f)
+    print(f"✅ 已加载 {len(all_targets)} 个样本的targets数据")
     
-    # 批量预测
-    transformer_inputs = torch.tensor(transformer_inputs, dtype=torch.float32).to(device)
+    # 批量构建Transformer输入数据
+    print("🔧 批量构建Transformer输入数据...")
+    transformer_inputs = torch.zeros(len(combined_vin1), 7, dtype=torch.float32)
+    
+    # 计算每个样本的起始和结束索引
+    sample_indices = []
+    current_idx = 0
+    for sample_idx, sample_id in enumerate(train_samples):
+        sample_len = len(all_vin1_data[sample_idx])
+        sample_indices.append((current_idx, current_idx + sample_len, sample_id))
+        current_idx += sample_len
+    
+    # 批量填充输入数据
+    for start_idx, end_idx, sample_id in sample_indices:
+        targets = all_targets[sample_id]
+        terminal_voltages = np.array(targets['terminal_voltages'])
+        pack_socs = np.array(targets['pack_socs'])
+        
+        # 填充vin_1前5维
+        transformer_inputs[start_idx:end_idx, 0:5] = combined_vin1[start_idx:end_idx, 0, 0:5]
+        # 填充当前时刻真实电压
+        transformer_inputs[start_idx:end_idx, 5] = torch.tensor(terminal_voltages[:end_idx-start_idx], dtype=torch.float32)
+        # 填充当前时刻真实SOC
+        transformer_inputs[start_idx:end_idx, 6] = torch.tensor(pack_socs[:end_idx-start_idx], dtype=torch.float32)
+    
+    print(f"✅ 输入数据构建完成: {transformer_inputs.shape}")
+    
+    # 显示GPU内存使用情况
+    print("📊 GPU内存使用情况:")
+    print_gpu_memory()
+    
+    # 批量预测（使用更大的批次大小）
+    print("🚀 开始批量预测...")
+    transformer_inputs = transformer_inputs.to(device)
     
     with torch.no_grad():
-        # 分批处理避免内存溢出
-        batch_size = 5000
+        # 使用更大的批次大小以提高GPU利用率
+        batch_size = 15000  # 从10000增加到15000
         predictions = []
+        total_batches = (len(transformer_inputs) + batch_size - 1) // batch_size
         
         for i in range(0, len(transformer_inputs), batch_size):
+            batch_idx = i // batch_size + 1
             batch_data = transformer_inputs[i:i+batch_size]
             batch_pred = transformer(batch_data)
             predictions.append(batch_pred.cpu())
+            
+            # 显示进度
+            if batch_idx % 10 == 0 or batch_idx == total_batches:
+                print(f"   进度: {batch_idx}/{total_batches} ({batch_idx/total_batches*100:.1f}%)")
         
         transformer_predictions = torch.cat(predictions, dim=0)
     
     print(f"✅ Transformer预测完成: {transformer_predictions.shape}")
+    
+    # 清理GPU内存
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        print(f"🧹 GPU内存已清理，当前使用: {torch.cuda.memory_allocated()/1024**3:.1f}GB")
     
     # 替换vin_2[:,0]和vin_3[:,0]
     vin2_modified = combined_vin2.clone()
@@ -593,10 +633,10 @@ def main():
     print(f"   vin_2特征: x{x_recovered.shape}, y{y_recovered.shape}, z{z_recovered.shape}, q{q_recovered.shape}")
     print(f"   vin_3特征: x{x_recovered2.shape}, y{y_recovered2.shape}, z{z_recovered2.shape}, q{q_recovered2.shape}")
     
-    # MC-AE训练参数
-    EPOCH_MCAE = 300
-    LR_MCAE = 5e-4
-    BATCHSIZE_MCAE = 100
+    # MC-AE训练参数（保守优化）
+    EPOCH_MCAE = 250       # 从300减少到250
+    LR_MCAE = 7e-4         # 从5e-4增加到7e-4
+    BATCHSIZE_MCAE = 3000  # 从2000增加到3000
     
     # 自定义多输入数据集类
     class MCDataset(Dataset):
@@ -621,6 +661,9 @@ def main():
     optimizer_mcae = torch.optim.Adam(net.parameters(), lr=LR_MCAE)
     loss_f = nn.MSELoss()
     
+    # 记录训练损失
+    train_losses_mcae1 = []
+    
     for epoch in range(EPOCH_MCAE):
         total_loss = 0
         num_batches = 0
@@ -638,6 +681,7 @@ def main():
             loss_u.backward()
             optimizer_mcae.step()
         avg_loss = total_loss / num_batches
+        train_losses_mcae1.append(avg_loss)
         if epoch % 50 == 0:
             print(f'MC-AE1 Epoch: {epoch:3d} | Average Loss: {avg_loss:.6f}')
     
@@ -666,6 +710,9 @@ def main():
     
     optimizer_mcae2 = torch.optim.Adam(netx.parameters(), lr=LR_MCAE)
     
+    # 记录训练损失
+    train_losses_mcae2 = []
+    
     for epoch in range(EPOCH_MCAE):
         total_loss = 0
         num_batches = 0
@@ -683,6 +730,7 @@ def main():
             loss_x.backward()
             optimizer_mcae2.step()
         avg_loss = total_loss / num_batches
+        train_losses_mcae2.append(avg_loss)
         if epoch % 50 == 0:
             print(f'MC-AE2 Epoch: {epoch:3d} | Average Loss: {avg_loss:.6f}')
     
@@ -702,6 +750,62 @@ def main():
     ERRORX = BB - yTrainX
     
     print("✅ MC-AE训练完成!")
+    
+    #----------------------------------------MC-AE训练结果可视化------------------------
+    print("\n📈 绘制MC-AE训练结果...")
+    
+    # 创建图表
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # 子图1: MC-AE1训练损失曲线
+    ax1 = axes[0, 0]
+    epochs = range(1, len(train_losses_mcae1) + 1)
+    ax1.plot(epochs, train_losses_mcae1, 'b-', linewidth=2, label='MC-AE1 Training Loss')
+    ax1.set_xlabel('训练轮数')
+    ax1.set_ylabel('MSE损失')
+    ax1.set_title('MC-AE1训练损失曲线')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    ax1.set_yscale('log')
+    
+    # 子图2: MC-AE2训练损失曲线 
+    ax2 = axes[0, 1]
+    ax2.plot(epochs, train_losses_mcae2, 'r-', linewidth=2, label='MC-AE2 Training Loss')
+    ax2.set_xlabel('训练轮数')
+    ax2.set_ylabel('MSE损失')
+    ax2.set_title('MC-AE2训练损失曲线')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    ax2.set_yscale('log')
+    
+    # 子图3: MC-AE1重构误差分布
+    ax3 = axes[1, 0]
+    reconstruction_errors_1 = ERRORU.flatten()
+    ax3.hist(np.abs(reconstruction_errors_1), bins=50, alpha=0.7, color='blue', 
+             label=f'MC-AE1重构误差 (均值: {np.mean(np.abs(reconstruction_errors_1)):.4f})')
+    ax3.set_xlabel('绝对重构误差')
+    ax3.set_ylabel('频数')
+    ax3.set_title('MC-AE1重构误差分布')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # 子图4: MC-AE2重构误差分布
+    ax4 = axes[1, 1]
+    reconstruction_errors_2 = ERRORX.flatten()
+    ax4.hist(np.abs(reconstruction_errors_2), bins=50, alpha=0.7, color='red',
+             label=f'MC-AE2重构误差 (均值: {np.mean(np.abs(reconstruction_errors_2)):.4f})')
+    ax4.set_xlabel('绝对重构误差')
+    ax4.set_ylabel('频数')
+    ax4.set_title('MC-AE2重构误差分布')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plot_path = f'models/transformer_mcae_training_results.png'
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✅ MC-AE训练结果图已保存: {plot_path}")
     
     #----------------------------------------阶段4: PCA分析和保存模型------------------------
     print("\n" + "="*60)
@@ -758,6 +862,26 @@ def main():
     np.save(f'models/data_nor{model_suffix}.npy', data_nor)
     print(f"✅ PCA分析结果已保存: models/*{model_suffix}.npy")
     
+    # 5. 保存MC-AE训练历史
+    mcae_training_history = {
+        'mcae1_losses': train_losses_mcae1,
+        'mcae2_losses': train_losses_mcae2,
+        'final_mcae1_loss': train_losses_mcae1[-1],
+        'final_mcae2_loss': train_losses_mcae2[-1],
+        'mcae1_reconstruction_error_mean': np.mean(np.abs(ERRORU)),
+        'mcae1_reconstruction_error_std': np.std(np.abs(ERRORU)),
+        'mcae2_reconstruction_error_mean': np.mean(np.abs(ERRORX)),
+        'mcae2_reconstruction_error_std': np.std(np.abs(ERRORX)),
+        'training_samples': len(train_samples),
+        'epochs': EPOCH_MCAE,
+        'learning_rate': LR_MCAE,
+        'batch_size': BATCHSIZE_MCAE
+    }
+    
+    with open(f'models/transformer_mcae_training_history.pkl', 'wb') as f:
+        pickle.dump(mcae_training_history, f)
+    print(f"✅ MC-AE训练历史已保存: models/transformer_mcae_training_history.pkl")
+    
     #----------------------------------------最终训练完成总结------------------------------
     print("\n" + "="*60)
     print("🎉 Transformer完整训练流程完成！")
@@ -769,12 +893,15 @@ def main():
     print("   4. ✅ MC-AE使用Transformer增强数据进行训练")
     print("   5. ✅ 完整的PCA分析和诊断特征提取")
     print("   6. ✅ 所有模型和结果文件添加'_transformer'后缀")
+    print("   7. ✅ MC-AE训练结果可视化图表")
     print("")
     print("📊 关键改进:")
     print("   - Transformer替换BiLSTM进行时序预测")
     print("   - 直接使用真实物理值训练，无复杂转换")
     print("   - 保持与原始MC-AE训练流程完全兼容")
     print("   - 便于与BiLSTM基准进行公平对比")
+    print("   - 保守优化：批次大小增加50-100%，学习率提升50%")
+    print("   - 双GPU数据并行，充分利用A100显存")
     print("")
     print("📈 性能指标:")
     print(f"   Transformer电压预测误差: {avg_voltage_error:.4f} V")
