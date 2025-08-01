@@ -107,7 +107,8 @@ def get_lr(epoch):
 print(f"\n⚙️  BiLSTM训练参数（优化版本）:")
 print(f"   批次大小: {BATCHSIZE} (从1000增加到2000)")
 print(f"   训练轮数: {EPOCH}")
-print(f"   学习率: {LR}")
+print(f"   初始学习率: {INIT_LR}")
+print(f"   最大学习率: {MAX_LR}")
 print(f"   数据并行: 启用")
 print(f"   混合精度: 启用 (AMP)")
 
