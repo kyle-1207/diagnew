@@ -54,9 +54,10 @@ warnings.filterwarnings('ignore')
 
 #----------------------------------------BiLSTM基准训练配置------------------------------
 print("="*50)
-print("BiLSTM基准训练模式")
+print("BiLSTM基准训练模式（优化版本）")
 print("直接使用原始vin_2[x[0]]和vin_3[x[0]]数据")
 print("跳过Transformer训练，直接进行MC-AE训练")
+print("启用双GPU数据并行和混合精度训练")
 print("="*50)
 
 #----------------------------------------数据加载------------------------------
@@ -85,6 +86,14 @@ def load_train_samples():
 
 train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
+
+# 显示优化后的训练参数
+print(f"\n⚙️  BiLSTM训练参数（优化版本）:")
+print(f"   批次大小: {BATCHSIZE} (从1000增加到2000)")
+print(f"   训练轮数: {EPOCH}")
+print(f"   学习率: {LR}")
+print(f"   数据并行: 启用")
+print(f"   混合精度: 启用 (AMP)")
 
 #----------------------------------------MC-AE训练数据准备（直接使用原始数据）------------------------
 print("="*50)
@@ -155,10 +164,10 @@ y_recovered2 = combined_tensorx[:, dim_x2:dim_x2 + dim_y2]
 z_recovered2 = combined_tensorx[:, dim_x2 + dim_y2: dim_x2 + dim_y2 + dim_z2]
 q_recovered2 = combined_tensorx[:, dim_x2 + dim_y2 + dim_z2:]
 
-# 训练超参数配置
+# 训练超参数配置（优化版本）
 EPOCH = 300
 LR = 5e-4
-BATCHSIZE = 1000  # 增大批次大小以提高GPU利用率
+BATCHSIZE = 2000  # 从1000增加到2000，提高GPU利用率
 
 # 用于记录训练损失
 train_losses_mcae1 = []
@@ -183,9 +192,21 @@ train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_rec
 net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device)
 netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
 
+# 启用数据并行
+if torch.cuda.device_count() > 1:
+    net = torch.nn.DataParallel(net)
+    netx = torch.nn.DataParallel(netx)
+    print(f"✅ 启用数据并行，使用 {torch.cuda.device_count()} 张GPU")
+else:
+    print("⚠️  单GPU模式")
+
 optimizer = torch.optim.Adam(net.parameters(), lr=LR)
 l1_lambda = 0.01
 loss_f = nn.MSELoss()
+
+# 启用混合精度训练
+scaler = torch.cuda.amp.GradScaler()
+print("✅ 启用混合精度训练 (AMP)")
 for epoch in range(EPOCH):
     total_loss = 0
     num_batches = 0
@@ -194,14 +215,19 @@ for epoch in range(EPOCH):
         y = y.to(device)
         z = z.to(device)
         q = q.to(device)
-        net = net.double()
-        recon_im , recon_p = net(x,z,q)
-        loss_u = loss_f(y,recon_im)
+        
+        # 使用混合精度训练
+        with torch.cuda.amp.autocast():
+            recon_im, recon_p = net(x, z, q)
+            loss_u = loss_f(y, recon_im)
+        
         total_loss += loss_u.item()
         num_batches += 1
         optimizer.zero_grad()
-        loss_u.backward()
-        optimizer.step()
+        scaler.scale(loss_u).backward()
+        scaler.step(optimizer)
+        scaler.update()
+    
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
     if epoch % 50 == 0:
@@ -224,6 +250,10 @@ ERRORU = AA - yTrainU
 train_loader_soc = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=BATCHSIZE, shuffle=False)
 optimizer = torch.optim.Adam(netx.parameters(), lr=LR)
 loss_f = nn.MSELoss()
+
+# 为第二个模型创建新的scaler
+scaler2 = torch.cuda.amp.GradScaler()
+
 avg_loss_list_x = []
 for epoch in range(EPOCH):
     total_loss = 0
@@ -233,14 +263,19 @@ for epoch in range(EPOCH):
         y = y.to(device)
         z = z.to(device)
         q = q.to(device)
-        netx = netx.double()
-        recon_im , z  = netx(x,z,q)
-        loss_x = loss_f(y,recon_im)
+        
+        # 使用混合精度训练
+        with torch.cuda.amp.autocast():
+            recon_im, z = netx(x, z, q)
+            loss_x = loss_f(y, recon_im)
+        
         total_loss += loss_x.item()
         num_batches += 1
         optimizer.zero_grad()
-        loss_x.backward()
-        optimizer.step()
+        scaler2.scale(loss_x).backward()
+        scaler2.step(optimizer)
+        scaler2.update()
+    
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
     train_losses_mcae2.append(avg_loss)
@@ -278,13 +313,39 @@ print("="*50)
 # 绘制训练结果
 print("📈 绘制BiLSTM训练曲线...")
 
-# Linux环境字体设置
-plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial Unicode MS', 'Noto Sans CJK SC', 'Liberation Sans']
-plt.rcParams['axes.unicode_minus'] = False
-
 # Linux环境matplotlib配置
 import matplotlib
 matplotlib.use('Agg')  # 使用非交互式后端
+
+# Linux环境字体设置 - 修复中文显示问题
+import matplotlib.font_manager as fm
+import os
+
+# 尝试多种字体方案
+font_options = [
+    'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
+    'DejaVu Sans', 'Liberation Sans', 'Arial Unicode MS'
+]
+
+# 检查可用字体
+available_fonts = []
+for font in font_options:
+    try:
+        fm.findfont(font)
+        available_fonts.append(font)
+    except:
+        continue
+
+# 设置字体
+if available_fonts:
+    plt.rcParams['font.sans-serif'] = available_fonts
+    print(f"✅ 使用字体: {available_fonts[0]}")
+else:
+    # 如果都不可用，使用英文标签
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    print("⚠️  未找到中文字体，将使用英文标签")
+
+plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.size'] = 10
 
@@ -295,9 +356,9 @@ fig, axes = plt.subplots(2, 2, figsize=(15, 10))
 ax1 = axes[0, 0]
 epochs = range(1, len(train_losses_mcae1) + 1)
 ax1.plot(epochs, train_losses_mcae1, 'b-', linewidth=2, label='MC-AE1 Training Loss')
-ax1.set_xlabel('训练轮数')
-ax1.set_ylabel('MSE损失')
-ax1.set_title('MC-AE1训练损失曲线')
+ax1.set_xlabel('Training Epochs / 训练轮数')
+ax1.set_ylabel('MSE Loss / MSE损失')
+ax1.set_title('MC-AE1 Training Loss / MC-AE1训练损失曲线')
 ax1.grid(True, alpha=0.3)
 ax1.legend()
 ax1.set_yscale('log')
@@ -305,9 +366,9 @@ ax1.set_yscale('log')
 # 子图2: MC-AE2训练损失曲线 
 ax2 = axes[0, 1]
 ax2.plot(epochs, train_losses_mcae2, 'r-', linewidth=2, label='MC-AE2 Training Loss')
-ax2.set_xlabel('训练轮数')
-ax2.set_ylabel('MSE损失')
-ax2.set_title('MC-AE2训练损失曲线')
+ax2.set_xlabel('Training Epochs / 训练轮数')
+ax2.set_ylabel('MSE Loss / MSE损失')
+ax2.set_title('MC-AE2 Training Loss / MC-AE2训练损失曲线')
 ax2.grid(True, alpha=0.3)
 ax2.legend()
 ax2.set_yscale('log')
@@ -315,22 +376,24 @@ ax2.set_yscale('log')
 # 子图3: MC-AE1重构误差分布
 ax3 = axes[1, 0]
 reconstruction_errors_1 = ERRORU.flatten()
+mean_error_1 = np.mean(np.abs(reconstruction_errors_1))
 ax3.hist(np.abs(reconstruction_errors_1), bins=50, alpha=0.7, color='blue', 
-         label=f'MC-AE1重构误差 (均值: {np.mean(np.abs(reconstruction_errors_1)):.4f})')
-ax3.set_xlabel('绝对重构误差')
-ax3.set_ylabel('频数')
-ax3.set_title('MC-AE1重构误差分布')
+         label=f'MC-AE1 Reconstruction Error (Mean: {mean_error_1:.4f}) / MC-AE1重构误差 (均值: {mean_error_1:.4f})')
+ax3.set_xlabel('Absolute Reconstruction Error / 绝对重构误差')
+ax3.set_ylabel('Frequency / 频数')
+ax3.set_title('MC-AE1 Reconstruction Error Distribution / MC-AE1重构误差分布')
 ax3.legend()
 ax3.grid(True, alpha=0.3)
 
 # 子图4: MC-AE2重构误差分布
 ax4 = axes[1, 1]
 reconstruction_errors_2 = ERRORX.flatten()
+mean_error_2 = np.mean(np.abs(reconstruction_errors_2))
 ax4.hist(np.abs(reconstruction_errors_2), bins=50, alpha=0.7, color='red',
-         label=f'MC-AE2重构误差 (均值: {np.mean(np.abs(reconstruction_errors_2)):.4f})')
-ax4.set_xlabel('绝对重构误差')
-ax4.set_ylabel('频数')
-ax4.set_title('MC-AE2重构误差分布')
+         label=f'MC-AE2 Reconstruction Error (Mean: {mean_error_2:.4f}) / MC-AE2重构误差 (均值: {mean_error_2:.4f})')
+ax4.set_xlabel('Absolute Reconstruction Error / 绝对重构误差')
+ax4.set_ylabel('Frequency / 频数')
+ax4.set_title('MC-AE2 Reconstruction Error Distribution / MC-AE2重构误差分布')
 ax4.legend()
 ax4.grid(True, alpha=0.3)
 
