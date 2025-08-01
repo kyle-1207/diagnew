@@ -279,8 +279,8 @@ def physics_based_data_processing(data, name, feature_type='general'):
             data_np[data_np[:, current_col] < -1004, current_col] = -1004
             data_np[data_np[:, current_col] > 162, current_col] = 162
         
-        # 其他列（索引223,225）：只处理极端异常值
-        other_columns = [223, 225] if data_np.shape[1] > 225 else [223]
+        # 其他列（索引223）：只处理极端异常值
+        other_columns = [223]
         for col in other_columns:
             if col < data_np.shape[1]:
                 col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
@@ -307,15 +307,15 @@ def physics_based_data_processing(data, name, feature_type='general'):
             else:
                 print(f"       SOC预测列{col}: SOC值在正常范围内")
         
-        # 索引2-111：110个单体电池真实SOC值 - 限制在[0,1]
+        # 索引2-111：110个单体电池真实SOC值 - 限制在[-0.2,1.5]
         cell_soc_columns = list(range(2, 112))
         for col in cell_soc_columns:
-            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 1)
+            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 1.5)
             col_invalid_count = (~col_valid_mask).sum()
             if col_invalid_count > 0:
-                print(f"       单体SOC列{col}: 检测到 {col_invalid_count} 个超出SOC范围[0,1]的异常值")
-                data_np[data_np[:, col] < 0, col] = 0
-                data_np[data_np[:, col] > 1, col] = 1
+                print(f"       单体SOC列{col}: 检测到 {col_invalid_count} 个超出SOC范围[-0.2,1.5]的异常值")
+                data_np[data_np[:, col] < -0.2, col] = -0.2
+                data_np[data_np[:, col] > 1.5, col] = 1.5
         
         # 索引112-221：110个单体电池SOC偏差值 - 不限制范围，只处理极端异常值
         soc_dev_columns = list(range(112, 222))
