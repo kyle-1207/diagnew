@@ -205,6 +205,11 @@ def physics_based_data_processing(data, name, feature_type='general'):
         
         # 对每个特征维度计算中位数
         for col in range(data_np.shape[1]):
+            # 对于vin_3数据的第224列，跳过处理
+            if data_np.shape[1] == 226 and col == 224:
+                print(f"       特征{col}: 特殊保留列，跳过缺失数据处理")
+                continue
+                
             valid_values = data_np[~np.isnan(data_np[:, col]), col]
             if len(valid_values) > 0:
                 median_val = np.median(valid_values)
@@ -218,15 +223,143 @@ def physics_based_data_processing(data, name, feature_type='general'):
     
     # 2. 处理异常数据 (Abnormal Data) - 基于物理约束过滤
     print("   步骤2: 处理异常数据...")
-    if feature_type == 'voltage':
-        # 电压物理约束：0-5V（根据论文）
-        valid_mask = (data_np >= 0) & (data_np <= 5)
-        invalid_count = (~valid_mask).sum()
-        if invalid_count > 0:
-            print(f"     检测到 {invalid_count} 个超出电压范围[0,5]V的异常值")
-            # 将异常值替换为边界值
-            data_np[data_np < 0] = 0
-            data_np[data_np > 5] = 5
+    
+    if feature_type == 'vin2':
+        # vin_2数据处理（225列）
+        print(f"     处理vin_2数据（225列）")
+        
+        # 索引0,1：BiLSTM和Pack电压预测值 - 限制在[0,5]V
+        voltage_pred_columns = [0, 1]
+        for col in voltage_pred_columns:
+            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                print(f"       电压预测列{col}: 检测到 {col_invalid_count} 个超出电压范围[0,5]V的异常值")
+                data_np[data_np[:, col] < 0, col] = 0
+                data_np[data_np[:, col] > 5, col] = 5
+            else:
+                print(f"       电压预测列{col}: 电压值在正常范围内")
+        
+        # 索引2-111：110个单体电池真实电压值 - 限制在[0,5]V
+        cell_voltage_columns = list(range(2, 112))
+        for col in cell_voltage_columns:
+            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                print(f"       单体电压列{col}: 检测到 {col_invalid_count} 个超出电压范围[0,5]V的异常值")
+                data_np[data_np[:, col] < 0, col] = 0
+                data_np[data_np[:, col] > 5, col] = 5
+        
+        # 索引112-221：110个单体电池电压偏差值 - 不限制范围，只处理极端异常值
+        voltage_dev_columns = list(range(112, 222))
+        for col in voltage_dev_columns:
+            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+            if col_extreme_mask.any():
+                print(f"       电压偏差列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
+                valid_values = data_np[~col_extreme_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_extreme_mask, col] = median_val
+        
+        # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
+        temp_col = 222
+        temp_valid_mask = (data_np[:, temp_col] >= -40) & (data_np[:, temp_col] <= 80)
+        temp_invalid_count = (~temp_valid_mask).sum()
+        if temp_invalid_count > 0:
+            print(f"       温度列{temp_col}: 检测到 {temp_invalid_count} 个超出温度范围[-40,80]°C的异常值")
+            data_np[data_np[:, temp_col] < -40, temp_col] = -40
+            data_np[data_np[:, temp_col] > 80, temp_col] = 80
+        
+        # 索引224：电流数据 - 限制在[-1004,162]A
+        current_col = 224
+        current_valid_mask = (data_np[:, current_col] >= -1004) & (data_np[:, current_col] <= 162)
+        current_invalid_count = (~current_valid_mask).sum()
+        if current_invalid_count > 0:
+            print(f"       电流列{current_col}: 检测到 {current_invalid_count} 个超出电流范围[-1004,162]A的异常值")
+            data_np[data_np[:, current_col] < -1004, current_col] = -1004
+            data_np[data_np[:, current_col] > 162, current_col] = 162
+        
+        # 其他列（索引223,225）：只处理极端异常值
+        other_columns = [223, 225] if data_np.shape[1] > 225 else [223]
+        for col in other_columns:
+            if col < data_np.shape[1]:
+                col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+                if col_extreme_mask.any():
+                    print(f"       其他列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
+                    valid_values = data_np[~col_extreme_mask, col]
+                    if len(valid_values) > 0:
+                        median_val = np.median(valid_values)
+                        data_np[col_extreme_mask, col] = median_val
+    
+    elif feature_type == 'vin3':
+        # vin_3数据处理（226列）
+        print(f"     处理vin_3数据（226列），第224列为特殊保留列")
+        
+        # 索引0,1：BiLSTM和Pack SOC预测值 - 限制在[-0.2,1.5]
+        soc_pred_columns = [0, 1]
+        for col in soc_pred_columns:
+            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 1.5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                print(f"       SOC预测列{col}: 检测到 {col_invalid_count} 个超出SOC范围[-0.2,1.5]的异常值")
+                data_np[data_np[:, col] < -0.2, col] = -0.2
+                data_np[data_np[:, col] > 1.5, col] = 1.5
+            else:
+                print(f"       SOC预测列{col}: SOC值在正常范围内")
+        
+        # 索引2-111：110个单体电池真实SOC值 - 限制在[0,1]
+        cell_soc_columns = list(range(2, 112))
+        for col in cell_soc_columns:
+            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 1)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                print(f"       单体SOC列{col}: 检测到 {col_invalid_count} 个超出SOC范围[0,1]的异常值")
+                data_np[data_np[:, col] < 0, col] = 0
+                data_np[data_np[:, col] > 1, col] = 1
+        
+        # 索引112-221：110个单体电池SOC偏差值 - 不限制范围，只处理极端异常值
+        soc_dev_columns = list(range(112, 222))
+        for col in soc_dev_columns:
+            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+            if col_extreme_mask.any():
+                print(f"       SOC偏差列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
+                valid_values = data_np[~col_extreme_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_extreme_mask, col] = median_val
+        
+        # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
+        temp_col = 222
+        temp_valid_mask = (data_np[:, temp_col] >= -40) & (data_np[:, temp_col] <= 80)
+        temp_invalid_count = (~temp_valid_mask).sum()
+        if temp_invalid_count > 0:
+            print(f"       温度列{temp_col}: 检测到 {temp_invalid_count} 个超出温度范围[-40,80]°C的异常值")
+            data_np[data_np[:, temp_col] < -40, temp_col] = -40
+            data_np[data_np[:, temp_col] > 80, temp_col] = 80
+        
+        # 索引224：特殊保留列 - 保持原值不变
+        special_col = 224
+        print(f"       特殊保留列{special_col}: 保持原值不变")
+        
+        # 索引225：电流数据 - 限制在[-1004,162]A
+        current_col = 225
+        current_valid_mask = (data_np[:, current_col] >= -1004) & (data_np[:, current_col] <= 162)
+        current_invalid_count = (~current_valid_mask).sum()
+        if current_invalid_count > 0:
+            print(f"       电流列{current_col}: 检测到 {current_invalid_count} 个超出电流范围[-1004,162]A的异常值")
+            data_np[data_np[:, current_col] < -1004, current_col] = -1004
+            data_np[data_np[:, current_col] > 162, current_col] = 162
+        
+        # 其他列（索引223）：只处理极端异常值
+        other_columns = [223]
+        for col in other_columns:
+            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+            if col_extreme_mask.any():
+                print(f"       其他列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
+                valid_values = data_np[~col_extreme_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_extreme_mask, col] = median_val
             
     elif feature_type == 'current':
         # 电流物理约束：-100A到100A
@@ -260,6 +393,11 @@ def physics_based_data_processing(data, name, feature_type='general'):
         
         # 对每个特征维度分别处理
         for col in range(data_np.shape[1]):
+            # 对于vin_3数据的第224列，跳过处理
+            if data_np.shape[1] == 226 and col == 224:
+                print(f"       特征{col}: 特殊保留列，跳过采样故障处理")
+                continue
+                
             col_fault_mask = fault_mask[:, col]
             if col_fault_mask.any():
                 # 计算该列的中位数（排除故障值）
@@ -323,7 +461,7 @@ for sample_id in train_samples:
         vin2_quality = check_data_quality(vin2_data, "vin_2", sample_id)
         
         # 基于物理约束的数据处理
-        vin2_tensor = physics_based_data_processing(vin2_data, f"vin_2 (样本{sample_id})", feature_type='voltage')
+        vin2_tensor = physics_based_data_processing(vin2_data, f"vin_2 (样本{sample_id})", feature_type='vin2')
         
         # 处理后再次检查
         check_data_quality(vin2_tensor, "vin_2 (处理后)", sample_id)
@@ -341,7 +479,7 @@ for sample_id in train_samples:
         vin3_quality = check_data_quality(vin3_data, "vin_3", sample_id)
         
         # 基于物理约束的数据处理
-        vin3_tensor = physics_based_data_processing(vin3_data, f"vin_3 (样本{sample_id})", feature_type='voltage')
+        vin3_tensor = physics_based_data_processing(vin3_data, f"vin_3 (样本{sample_id})", feature_type='vin3')
         
         # 处理后再次检查
         check_data_quality(vin3_tensor, "vin_3 (处理后)", sample_id)
