@@ -87,6 +87,11 @@ def load_train_samples():
 train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
+# 定义训练参数（提前定义）
+EPOCH = 300
+LR = 5e-4
+BATCHSIZE = 2000  # 从1000增加到2000，提高GPU利用率
+
 # 显示优化后的训练参数
 print(f"\n⚙️  BiLSTM训练参数（优化版本）:")
 print(f"   批次大小: {BATCHSIZE} (从1000增加到2000)")
@@ -164,10 +169,7 @@ y_recovered2 = combined_tensorx[:, dim_x2:dim_x2 + dim_y2]
 z_recovered2 = combined_tensorx[:, dim_x2 + dim_y2: dim_x2 + dim_y2 + dim_z2]
 q_recovered2 = combined_tensorx[:, dim_x2 + dim_y2 + dim_z2:]
 
-# 训练超参数配置（优化版本）
-EPOCH = 300
-LR = 5e-4
-BATCHSIZE = 2000  # 从1000增加到2000，提高GPU利用率
+# 训练超参数配置（已在前面定义）
 
 # 用于记录训练损失
 train_losses_mcae1 = []
