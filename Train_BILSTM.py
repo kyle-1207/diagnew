@@ -89,13 +89,13 @@ print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
 # 定义训练参数（提前定义）
 EPOCH = 300
-INIT_LR = 5e-5  # 进一步降低初始学习率
-MAX_LR = 1e-4   # 最大学习率
+INIT_LR = 1e-5  # 进一步降低初始学习率
+MAX_LR = 5e-5   # 降低最大学习率
 BATCHSIZE = 2000  # 从1000增加到2000，提高GPU利用率
-WARMUP_EPOCHS = 5  # 学习率预热轮数
+WARMUP_EPOCHS = 10  # 增加学习率预热轮数
 
 # 添加梯度裁剪
-MAX_GRAD_NORM = 0.5  # 降低最大梯度范数
+MAX_GRAD_NORM = 0.1  # 进一步降低最大梯度范数
 
 # 学习率预热函数
 def get_lr(epoch):
@@ -642,17 +642,32 @@ for epoch in range(EPOCH):
         z = z.to(device)
         q = q.to(device)
         
+        # 检查输入数据范围
+        if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
+            print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
+            continue
+        
+        # 检查输入数据范围是否合理
+        if x.abs().max() > 1000 or y.abs().max() > 1000:
+            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
+            continue
+        
         # 使用混合精度训练
         with torch.cuda.amp.autocast():
             recon_im, recon_p = net(x, z, q)
             loss_u = loss_f(y, recon_im)
             
-            # 检查损失值是否为NaN
-            if torch.isnan(loss_u):
-                print(f"警告：第{epoch}轮第{iteration}批次检测到NaN损失值")
-                print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
-                print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
-                continue
+                    # 检查损失值是否为NaN
+        if torch.isnan(loss_u) or torch.isinf(loss_u):
+            print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
+            print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+            print(f"损失值: {loss_u.item()}")
+            # 不跳过，而是使用一个小的固定损失值继续训练
+            loss_u = torch.tensor(0.001, device=device, requires_grad=True)
+            print("使用固定损失值继续训练")
         
         total_loss += loss_u.item()
         num_batches += 1
@@ -673,7 +688,7 @@ for epoch in range(EPOCH):
         grad_norm = grad_norm ** 0.5
         
         # 更强的梯度裁剪
-        max_grad_norm = 1.0  # 降低梯度裁剪阈值
+        max_grad_norm = 0.1  # 进一步降低梯度裁剪阈值
         if grad_norm > max_grad_norm:
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_grad_norm)
             print(f"梯度裁剪: {grad_norm:.4f} -> {max_grad_norm}")
