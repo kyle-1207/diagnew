@@ -240,26 +240,17 @@ def physics_based_data_processing(data, name, feature_type='general'):
             else:
                 print(f"       电压预测列{col}: 电压值在正常范围内")
         
-        # 索引2-111：110个单体电池真实电压值 - 限制在[0,5]V
-        cell_voltage_columns = list(range(2, 112))
-        for col in cell_voltage_columns:
-            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 5)
+        # 索引2-221：220个特征值 - 限制在[-5,5]范围内
+        voltage_columns = list(range(2, 222))
+        for col in voltage_columns:
+            col_valid_mask = (data_np[:, col] >= -5) & (data_np[:, col] <= 5)
             col_invalid_count = (~col_valid_mask).sum()
             if col_invalid_count > 0:
-                print(f"       单体电压列{col}: 检测到 {col_invalid_count} 个超出电压范围[0,5]V的异常值")
-                data_np[data_np[:, col] < 0, col] = 0
+                print(f"       电压相关列{col}: 检测到 {col_invalid_count} 个超出电压范围[-5,5]的异常值")
+                data_np[data_np[:, col] < -5, col] = -5
                 data_np[data_np[:, col] > 5, col] = 5
-        
-        # 索引112-221：110个单体电池电压偏差值 - 不限制范围，只处理极端异常值
-        voltage_dev_columns = list(range(112, 222))
-        for col in voltage_dev_columns:
-            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
-            if col_extreme_mask.any():
-                print(f"       电压偏差列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
-                valid_values = data_np[~col_extreme_mask, col]
-                if len(valid_values) > 0:
-                    median_val = np.median(valid_values)
-                    data_np[col_extreme_mask, col] = median_val
+            else:
+                print(f"       电压相关列{col}: 电压值在正常范围内")
         
         # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
         temp_col = 222
