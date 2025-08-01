@@ -18,7 +18,6 @@ from tqdm import tqdm
 # 添加当前目录到路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from Function_ import load_lstm
 from Class_ import LSTM
 
 def load_labels():
