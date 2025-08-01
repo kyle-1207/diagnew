@@ -33,15 +33,21 @@ import pickle
 # GPU设备配置
 import os
 # 使用指定的GPU设备
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 使用第一张GPU
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'  # 使用GPU2和GPU3
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')  # 这里的cuda:0实际上是物理GPU2
 
 # 打印GPU信息
 if torch.cuda.is_available():
-    print(f"🚀 使用GPU: {torch.cuda.get_device_name(0)}")
-    print(f"   GPU数量: {torch.cuda.device_count()}")
-    print(f"   当前GPU: {torch.cuda.current_device()}")
-    print(f"   GPU内存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+    print("\n🖥️ GPU配置信息:")
+    print(f"   可用GPU数量: {torch.cuda.device_count()}")
+    for i in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(i)
+        print(f"\n   GPU {i} ({props.name}):")
+        print(f"      总显存: {props.total_memory/1024**3:.1f}GB")
+        print(f"      CUDA架构: {props.major}.{props.minor}")
+        print(f"      最大线程数/块: {props.max_threads_per_block}")
+    print(f"\n   当前使用: GPU2和GPU3 (通过CUDA_VISIBLE_DEVICES映射为cuda:0和cuda:1)")
+    print(f"   主GPU设备: cuda:0 (物理GPU2)")
 else:
     print("⚠️  未检测到GPU，使用CPU训练")
 
@@ -93,8 +99,8 @@ all_vin2_data = []
 all_vin3_data = []
 
 for sample_id in train_samples:
-            vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
-            vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
+    vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
+    vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
     
     # 加载原始vin_2和vin_3数据
     with open(vin2_path, 'rb') as file:
@@ -256,6 +262,11 @@ BB = recon_imtestx.cpu().detach().numpy()
 yTrainX = y_recovered2.cpu().detach().numpy()
 ERRORX = BB - yTrainX
 
+# 创建结果目录
+result_dir = './models'
+if not os.path.exists(result_dir):
+    os.makedirs(result_dir)
+
 # 中文注释：诊断特征提取与PCA分析
 df_data = DiagnosisFeature(ERRORU,ERRORX)
 
@@ -331,8 +342,7 @@ plt.close()
 
 print(f"✅ BiLSTM训练结果图已保存: {result_dir}/bilstm_training_results.png")
 
-# 1. 创建结果目录
-    result_dir = './models'
+# 确保结果目录存在
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
