@@ -428,10 +428,195 @@ def physics_based_data_processing(data, name, feature_type='general'):
     
     return data_tensor
 
+def physics_based_data_processing_silent(data, feature_type='general'):
+    """基于物理约束的数据处理（静默模式，只返回处理后的数据）"""
+    # 转换为numpy进行预处理
+    if isinstance(data, torch.Tensor):
+        data_np = data.cpu().numpy()
+    else:
+        data_np = np.array(data)
+    
+    # 记录原始数据点数量
+    original_data_points = data_np.shape[0]
+    
+    # 1. 处理缺失数据 (Missing Data) - 用中位数替换全NaN行，保持数据点数量
+    complete_nan_rows = np.isnan(data_np).all(axis=1)
+    if complete_nan_rows.any():
+        # 对每个特征维度计算中位数
+        for col in range(data_np.shape[1]):
+            # 对于vin_3数据的第224列，跳过处理
+            if data_np.shape[1] == 226 and col == 224:
+                continue
+                
+            valid_values = data_np[~np.isnan(data_np[:, col]), col]
+            if len(valid_values) > 0:
+                median_val = np.median(valid_values)
+                # 替换全NaN行中该特征的值
+                data_np[complete_nan_rows, col] = median_val
+            else:
+                # 如果该特征全部为NaN，用0替换
+                data_np[complete_nan_rows, col] = 0.0
+    
+    # 2. 处理异常数据 (Abnormal Data) - 基于物理约束过滤
+    if feature_type == 'vin2':
+        # vin_2数据处理（225列）
+        
+        # 索引0,1：BiLSTM和Pack电压预测值 - 限制在[0,5]V
+        voltage_pred_columns = [0, 1]
+        for col in voltage_pred_columns:
+            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                data_np[data_np[:, col] < 0, col] = 0
+                data_np[data_np[:, col] > 5, col] = 5
+        
+        # 索引2-221：220个特征值 - 限制在[-5,5]范围内
+        voltage_columns = list(range(2, 222))
+        for col in voltage_columns:
+            col_valid_mask = (data_np[:, col] >= -5) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                data_np[data_np[:, col] < -5, col] = -5
+                data_np[data_np[:, col] > 5, col] = 5
+        
+        # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
+        temp_col = 222
+        temp_valid_mask = (data_np[:, temp_col] >= -40) & (data_np[:, temp_col] <= 80)
+        temp_invalid_count = (~temp_valid_mask).sum()
+        if temp_invalid_count > 0:
+            data_np[data_np[:, temp_col] < -40, temp_col] = -40
+            data_np[data_np[:, temp_col] > 80, temp_col] = 80
+        
+        # 索引224：电流数据 - 限制在[-1004,162]A
+        current_col = 224
+        current_valid_mask = (data_np[:, current_col] >= -1004) & (data_np[:, current_col] <= 162)
+        current_invalid_count = (~current_valid_mask).sum()
+        if current_invalid_count > 0:
+            data_np[data_np[:, current_col] < -1004, current_col] = -1004
+            data_np[data_np[:, current_col] > 162, current_col] = 162
+        
+        # 其他列（索引223）：只处理极端异常值
+        other_columns = [223]
+        for col in other_columns:
+            if col < data_np.shape[1]:
+                col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+                if col_extreme_mask.any():
+                    valid_values = data_np[~col_extreme_mask, col]
+                    if len(valid_values) > 0:
+                        median_val = np.median(valid_values)
+                        data_np[col_extreme_mask, col] = median_val
+    
+    elif feature_type == 'vin3':
+        # vin_3数据处理（226列）
+        
+        # 索引0,1：BiLSTM和Pack SOC预测值 - 限制在[-0.2,2.0]
+        soc_pred_columns = [0, 1]
+        for col in soc_pred_columns:
+            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 2.0)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                data_np[data_np[:, col] < -0.2, col] = -0.2
+                data_np[data_np[:, col] > 2.0, col] = 2.0
+        
+        # 索引2-111：110个单体电池真实SOC值 - 限制在[-0.2,2.0]
+        cell_soc_columns = list(range(2, 112))
+        for col in cell_soc_columns:
+            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 2.0)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                data_np[data_np[:, col] < -0.2, col] = -0.2
+                data_np[data_np[:, col] > 2.0, col] = 2.0
+        
+        # 索引112-221：110个单体电池SOC偏差值 - 不限制范围，只处理极端异常值
+        soc_dev_columns = list(range(112, 222))
+        for col in soc_dev_columns:
+            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+            if col_extreme_mask.any():
+                valid_values = data_np[~col_extreme_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_extreme_mask, col] = median_val
+        
+        # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
+        temp_col = 222
+        temp_valid_mask = (data_np[:, temp_col] >= -40) & (data_np[:, temp_col] <= 80)
+        temp_invalid_count = (~temp_valid_mask).sum()
+        if temp_invalid_count > 0:
+            data_np[data_np[:, temp_col] < -40, temp_col] = -40
+            data_np[data_np[:, temp_col] > 80, temp_col] = 80
+        
+        # 索引224：特殊保留列 - 保持原值不变
+        # 不需要处理，保持原值
+        
+        # 索引225：电流数据 - 限制在[-1004,162]A
+        current_col = 225
+        current_valid_mask = (data_np[:, current_col] >= -1004) & (data_np[:, current_col] <= 162)
+        current_invalid_count = (~current_valid_mask).sum()
+        if current_invalid_count > 0:
+            data_np[data_np[:, current_col] < -1004, current_col] = -1004
+            data_np[data_np[:, current_col] > 162, current_col] = 162
+        
+        # 其他列（索引223）：只处理极端异常值
+        other_columns = [223]
+        for col in other_columns:
+            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+            if col_extreme_mask.any():
+                valid_values = data_np[~col_extreme_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_extreme_mask, col] = median_val
+    
+    # 3. 处理采样故障 (Sampling Faults) - 用中位数替换，保持数据点数量
+    # 检测NaN和Inf值（可能是采样故障）
+    nan_mask = np.isnan(data_np)
+    inf_mask = np.isinf(data_np)
+    fault_mask = nan_mask | inf_mask
+    
+    if fault_mask.any():
+        # 对每个特征维度分别处理
+        for col in range(data_np.shape[1]):
+            # 对于vin_3数据的第224列，跳过处理
+            if data_np.shape[1] == 226 and col == 224:
+                continue
+                
+            col_fault_mask = fault_mask[:, col]
+            if col_fault_mask.any():
+                # 计算该列的中位数（排除故障值）
+                valid_values = data_np[~col_fault_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_fault_mask, col] = median_val
+                else:
+                    # 如果该列全部为故障值，用0替换
+                    data_np[col_fault_mask, col] = 0.0
+    
+    # 4. 最终检查
+    final_nan_count = np.isnan(data_np).sum()
+    final_inf_count = np.isinf(data_np).sum()
+    
+    if final_nan_count > 0 or final_inf_count > 0:
+        # 最后的安全处理
+        data_np[np.isnan(data_np)] = 0.0
+        data_np[np.isinf(data_np)] = 0.0
+    
+    # 转换为tensor
+    data_tensor = torch.tensor(data_np, dtype=torch.float32)
+    
+    return data_tensor
+
 # 中文注释：加载MC-AE模型输入特征（vin_2.pkl和vin_3.pkl）
 # 合并所有训练样本的vin_2和vin_3数据
 all_vin2_data = []
 all_vin3_data = []
+
+# 汇总统计信息
+sample_summary = {
+    'total_samples': len(train_samples),
+    'processed_samples': 0,
+    'error_samples': 0,
+    'total_vin2_issues_fixed': 0,
+    'total_vin3_issues_fixed': 0
+}
 
 print("="*60)
 print("📥 开始数据加载和质量检查")
@@ -441,24 +626,17 @@ for sample_id in train_samples:
     vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
     vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
     
-    print(f"\n📋 处理样本 {sample_id}...")
-    
     # 加载原始vin_2数据
     try:
         with open(vin2_path, 'rb') as file:
             vin2_data = pickle.load(file)
         
-        # 数据质量检查
-        vin2_quality = check_data_quality(vin2_data, "vin_2", sample_id)
-        
-        # 基于物理约束的数据处理
-        vin2_tensor = physics_based_data_processing(vin2_data, f"vin_2 (样本{sample_id})", feature_type='vin2')
-        
-        # 处理后再次检查
-        check_data_quality(vin2_tensor, "vin_2 (处理后)", sample_id)
+        # 基于物理约束的数据处理（静默模式）
+        vin2_tensor = physics_based_data_processing_silent(vin2_data, feature_type='vin2')
         
     except Exception as e:
         print(f"❌ 加载样本 {sample_id} 的vin_2数据失败: {e}")
+        sample_summary['error_samples'] += 1
         continue
     
     # 加载原始vin_3数据
@@ -466,24 +644,29 @@ for sample_id in train_samples:
         with open(vin3_path, 'rb') as file:
             vin3_data = pickle.load(file)
         
-        # 数据质量检查
-        vin3_quality = check_data_quality(vin3_data, "vin_3", sample_id)
-        
-        # 基于物理约束的数据处理
-        vin3_tensor = physics_based_data_processing(vin3_data, f"vin_3 (样本{sample_id})", feature_type='vin3')
-        
-        # 处理后再次检查
-        check_data_quality(vin3_tensor, "vin_3 (处理后)", sample_id)
+        # 基于物理约束的数据处理（静默模式）
+        vin3_tensor = physics_based_data_processing_silent(vin3_data, feature_type='vin3')
         
     except Exception as e:
         print(f"❌ 加载样本 {sample_id} 的vin_3数据失败: {e}")
+        sample_summary['error_samples'] += 1
         continue
     
     # 添加到列表
     all_vin2_data.append(vin2_tensor)
     all_vin3_data.append(vin3_tensor)
+    sample_summary['processed_samples'] += 1
     
-    print(f"✅ 样本 {sample_id} 处理完成")
+    # 每处理10个样本输出一次进度
+    if sample_summary['processed_samples'] % 10 == 0:
+        print(f"📊 已处理 {sample_summary['processed_samples']}/{sample_summary['total_samples']} 个样本")
+
+# 输出处理汇总信息
+print(f"\n✅ 数据加载完成:")
+print(f"   总样本数: {sample_summary['total_samples']}")
+print(f"   成功处理: {sample_summary['processed_samples']}")
+print(f"   处理失败: {sample_summary['error_samples']}")
+print(f"   成功率: {sample_summary['processed_samples']/sample_summary['total_samples']*100:.1f}%")
 
 # 合并数据
 print("\n" + "="*60)
@@ -496,42 +679,35 @@ combined_tensorx = torch.cat(all_vin3_data, dim=0)
 print(f"合并后vin_2数据形状: {combined_tensor.shape}")
 print(f"合并后vin_3数据形状: {combined_tensorx.shape}")
 
-# 合并后的数据质量检查
-print("\n🔍 合并后数据质量检查:")
-check_data_quality(combined_tensor, "合并后vin_2")
-check_data_quality(combined_tensorx, "合并后vin_3")
+# 简要检查合并后的数据质量
+print("\n🔍 合并后数据质量简要检查:")
+vin2_nan_count = torch.isnan(combined_tensor).sum().item()
+vin2_inf_count = torch.isinf(combined_tensor).sum().item()
+vin3_nan_count = torch.isnan(combined_tensorx).sum().item()
+vin3_inf_count = torch.isinf(combined_tensorx).sum().item()
+
+print(f"   vin_2: NaN={vin2_nan_count}, Inf={vin2_inf_count}")
+print(f"   vin_3: NaN={vin3_nan_count}, Inf={vin3_inf_count}")
 
 # 检查是否有异常值需要处理
-vin2_has_issues = (torch.isnan(combined_tensor).any() or 
-                   torch.isinf(combined_tensor).any() or 
-                   combined_tensor.min() < -1e6 or 
-                   combined_tensor.max() > 1e6)
-
-vin3_has_issues = (torch.isnan(combined_tensorx).any() or 
-                   torch.isinf(combined_tensorx).any() or 
-                   combined_tensorx.min() < -1e6 or 
-                   combined_tensorx.max() > 1e6)
+vin2_has_issues = (vin2_nan_count > 0 or vin2_inf_count > 0)
+vin3_has_issues = (vin3_nan_count > 0 or vin3_inf_count > 0)
 
 if vin2_has_issues or vin3_has_issues:
-    print("\n⚠️  检测到数据问题，进行修复...")
+    print("⚠️  检测到数据问题，进行修复...")
     
     # 修复NaN和Inf值
-    if torch.isnan(combined_tensor).any() or torch.isinf(combined_tensor).any():
-        print("   修复vin_2中的NaN和Inf值")
+    if vin2_has_issues:
         combined_tensor = torch.where(torch.isnan(combined_tensor) | torch.isinf(combined_tensor), 
                                      torch.zeros_like(combined_tensor), combined_tensor)
+        print("   ✅ vin_2数据修复完成")
     
-    if torch.isnan(combined_tensorx).any() or torch.isinf(combined_tensorx).any():
-        print("   修复vin_3中的NaN和Inf值")
+    if vin3_has_issues:
         combined_tensorx = torch.where(torch.isnan(combined_tensorx) | torch.isinf(combined_tensorx), 
                                       torch.zeros_like(combined_tensorx), combined_tensorx)
-    
-    # 检查修复后的数据
-    print("\n🔍 修复后数据质量检查:")
-    check_data_quality(combined_tensor, "修复后vin_2")
-    check_data_quality(combined_tensorx, "修复后vin_3")
+        print("   ✅ vin_3数据修复完成")
 else:
-    print("\n✅ 数据质量良好，无需修复")
+    print("✅ 数据质量良好，无需修复")
 
 #----------------------------------------MC-AE多通道自编码器训练--------------------------
 print("="*50)
