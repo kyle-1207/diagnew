@@ -665,8 +665,14 @@ for epoch in range(EPOCH):
             print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
             print(f"损失值: {loss_u.item()}")
-            # 跳过这个批次，不进行反向传播
             print("跳过此批次，不进行反向传播")
+            continue
+        
+        # 检查输入数据范围是否合理
+        if x.abs().max() > 1000 or y.abs().max() > 1000:
+            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
             continue
         
         total_loss += loss_u.item()
@@ -680,6 +686,7 @@ for epoch in range(EPOCH):
         grad_norm = 0
         has_grad_issue = False
         
+        # 安全地处理梯度
         try:
             # 在检查梯度前unscale
             scaler.unscale_(optimizer)
@@ -693,6 +700,8 @@ for epoch in range(EPOCH):
                     grad_norm += param.grad.data.norm(2).item() ** 2
             
             if has_grad_issue:
+                # 重置scaler状态
+                scaler.update()
                 continue
                 
             grad_norm = grad_norm ** 0.5
@@ -709,7 +718,9 @@ for epoch in range(EPOCH):
             
         except Exception as e:
             print(f"优化器步骤失败: {e}")
-            print("跳过此批次")
+            print("跳过此批次并重置scaler状态")
+            # 重置scaler状态
+            scaler.update()
             continue
     
     avg_loss = total_loss / num_batches
@@ -768,6 +779,13 @@ for epoch in range(EPOCH):
             print("跳过此批次，不进行反向传播")
             continue
         
+        # 检查输入数据范围是否合理
+        if x.abs().max() > 1000 or y.abs().max() > 1000:
+            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
+            continue
+        
         total_loss += loss_x.item()
         num_batches += 1
         optimizer.zero_grad()
@@ -777,6 +795,7 @@ for epoch in range(EPOCH):
         grad_norm = 0
         has_grad_issue = False
         
+        # 安全地处理梯度
         try:
             # 在检查梯度前unscale
             scaler2.unscale_(optimizer)
@@ -790,6 +809,8 @@ for epoch in range(EPOCH):
                     grad_norm += param.grad.data.norm(2).item() ** 2
             
             if has_grad_issue:
+                # 重置scaler状态
+                scaler2.update()
                 continue
                 
             grad_norm = grad_norm ** 0.5
@@ -805,7 +826,9 @@ for epoch in range(EPOCH):
             
         except Exception as e:
             print(f"优化器步骤失败: {e}")
-            print("跳过此批次")
+            print("跳过此批次并重置scaler状态")
+            # 重置scaler状态
+            scaler2.update()
             continue
     
     avg_loss = total_loss / num_batches
