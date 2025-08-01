@@ -44,8 +44,6 @@ if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(i)
         print(f"\n   GPU {i} ({props.name}):")
         print(f"      总显存: {props.total_memory/1024**3:.1f}GB")
-        print(f"      CUDA架构: {props.major}.{props.minor}")
-        print(f"      最大线程数/块: {props.max_threads_per_block}")
     print(f"\n   当前使用: GPU2和GPU3 (通过CUDA_VISIBLE_DEVICES映射为cuda:0和cuda:1)")
     print(f"   主GPU设备: cuda:0 (物理GPU2)")
 else:
