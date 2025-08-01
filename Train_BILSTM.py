@@ -117,40 +117,212 @@ print("="*50)
 print("阶段1: 准备MC-AE训练数据（使用原始BiLSTM数据）")
 print("="*50)
 
+# 数据质量检查函数
+def check_data_quality(data, name, sample_id=None):
+    """详细的数据质量检查"""
+    prefix = f"样本 {sample_id} - " if sample_id else ""
+    print(f"\n🔍 {prefix}{name} 数据质量检查:")
+    
+    # 基本信息
+    print(f"   数据类型: {data.dtype}")
+    print(f"   数据形状: {data.shape}")
+    
+    # 数值统计
+    if isinstance(data, torch.Tensor):
+        data_np = data.cpu().numpy()
+    else:
+        data_np = np.array(data)
+    
+    print(f"   数值范围: [{data_np.min():.6f}, {data_np.max():.6f}]")
+    print(f"   均值: {data_np.mean():.6f}")
+    print(f"   标准差: {data_np.std():.6f}")
+    print(f"   中位数: {np.median(data_np):.6f}")
+    
+    # 异常值检查
+    nan_count = np.isnan(data_np).sum()
+    inf_count = np.isinf(data_np).sum()
+    zero_count = (data_np == 0).sum()
+    negative_count = (data_np < 0).sum()
+    
+    print(f"   NaN数量: {nan_count}")
+    print(f"   Inf数量: {inf_count}")
+    print(f"   零值数量: {zero_count}")
+    print(f"   负值数量: {negative_count}")
+    
+    # 异常值比例
+    total_elements = data_np.size
+    print(f"   NaN比例: {nan_count/total_elements*100:.2f}%")
+    print(f"   Inf比例: {inf_count/total_elements*100:.2f}%")
+    print(f"   零值比例: {zero_count/total_elements*100:.2f}%")
+    print(f"   负值比例: {negative_count/total_elements*100:.2f}%")
+    
+    # 异常值警告
+    if nan_count > 0:
+        print(f"   ⚠️  检测到NaN值！")
+    if inf_count > 0:
+        print(f"   ⚠️  检测到无穷大值！")
+    if data_np.min() < -1e6 or data_np.max() > 1e6:
+        print(f"   ⚠️  检测到异常大值！范围: [{data_np.min():.2e}, {data_np.max():.2e}]")
+    
+    return {
+        'has_nan': nan_count > 0,
+        'has_inf': inf_count > 0,
+        'has_extreme_values': data_np.min() < -1e6 or data_np.max() > 1e6,
+        'data_type': data.dtype,
+        'shape': data.shape
+    }
+
+def safe_convert_to_tensor(data, name):
+    """安全地转换为tensor，包含数据修复"""
+    print(f"\n🔧 转换 {name} 为tensor...")
+    
+    # 检查原始数据类型
+    if isinstance(data, np.ndarray):
+        print(f"   原始类型: numpy.ndarray, dtype={data.dtype}")
+    elif isinstance(data, torch.Tensor):
+        print(f"   原始类型: torch.Tensor, dtype={data.dtype}")
+    else:
+        print(f"   原始类型: {type(data)}")
+    
+    # 转换为numpy进行预处理
+    if isinstance(data, torch.Tensor):
+        data_np = data.cpu().numpy()
+    else:
+        data_np = np.array(data)
+    
+    # 数据修复
+    print("   执行数据修复...")
+    
+    # 1. 处理NaN值
+    nan_mask = np.isnan(data_np)
+    if nan_mask.any():
+        print(f"     修复 {nan_mask.sum()} 个NaN值")
+        data_np[nan_mask] = 0.0
+    
+    # 2. 处理无穷大值
+    inf_mask = np.isinf(data_np)
+    if inf_mask.any():
+        print(f"     修复 {inf_mask.sum()} 个无穷大值")
+        data_np[inf_mask] = 0.0
+    
+    # 3. 处理异常大值（可选，根据实际情况决定）
+    extreme_mask = (data_np < -1e6) | (data_np > 1e6)
+    if extreme_mask.any():
+        print(f"     检测到 {extreme_mask.sum()} 个异常大值")
+        print(f"     异常值范围: [{data_np[extreme_mask].min():.2e}, {data_np[extreme_mask].max():.2e}]")
+        # 这里可以选择截断或保持原值，先保持原值观察效果
+        # data_np[extreme_mask] = np.clip(data_np[extreme_mask], -1e6, 1e6)
+    
+    # 转换为tensor
+    data_tensor = torch.tensor(data_np, dtype=torch.float32)
+    print(f"   转换完成: {data_tensor.shape}, dtype={data_tensor.dtype}")
+    
+    return data_tensor
+
 # 中文注释：加载MC-AE模型输入特征（vin_2.pkl和vin_3.pkl）
 # 合并所有训练样本的vin_2和vin_3数据
 all_vin2_data = []
 all_vin3_data = []
 
+print("="*60)
+print("📥 开始数据加载和质量检查")
+print("="*60)
+
 for sample_id in train_samples:
     vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
     vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
     
-    # 加载原始vin_2和vin_3数据
-    with open(vin2_path, 'rb') as file:
-        vin2_data = pickle.load(file)
-        print(f"原始样本 {sample_id} vin_2: {vin2_data.shape}")
+    print(f"\n📋 处理样本 {sample_id}...")
     
-    with open(vin3_path, 'rb') as file:
-        vin3_data = pickle.load(file)
-        print(f"原始样本 {sample_id} vin_3: {vin3_data.shape}")
+    # 加载原始vin_2数据
+    try:
+        with open(vin2_path, 'rb') as file:
+            vin2_data = pickle.load(file)
+        
+        # 数据质量检查
+        vin2_quality = check_data_quality(vin2_data, "vin_2", sample_id)
+        
+        # 安全转换为tensor
+        vin2_tensor = safe_convert_to_tensor(vin2_data, f"vin_2 (样本{sample_id})")
+        
+        # 转换后再次检查
+        check_data_quality(vin2_tensor, "vin_2 (转换后)", sample_id)
+        
+    except Exception as e:
+        print(f"❌ 加载样本 {sample_id} 的vin_2数据失败: {e}")
+        continue
     
-    # 直接使用原始数据，不进行任何替换
-    print(f"样本 {sample_id}: 使用原始BiLSTM输出数据")
-    print(f"  vin_2形状: {vin2_data.shape}")
-    print(f"  vin_3形状: {vin3_data.shape}")
-    print(f"  原始vin_2[x[0]]范围: [{vin2_data[:, 0].min():.3f}, {vin2_data[:, 0].max():.3f}]")
-    print(f"  原始vin_3[x[0]]范围: [{vin3_data[:, 0].min():.3f}, {vin3_data[:, 0].max():.3f}]")
+    # 加载原始vin_3数据
+    try:
+        with open(vin3_path, 'rb') as file:
+            vin3_data = pickle.load(file)
+        
+        # 数据质量检查
+        vin3_quality = check_data_quality(vin3_data, "vin_3", sample_id)
+        
+        # 安全转换为tensor
+        vin3_tensor = safe_convert_to_tensor(vin3_data, f"vin_3 (样本{sample_id})")
+        
+        # 转换后再次检查
+        check_data_quality(vin3_tensor, "vin_3 (转换后)", sample_id)
+        
+    except Exception as e:
+        print(f"❌ 加载样本 {sample_id} 的vin_3数据失败: {e}")
+        continue
     
-    all_vin2_data.append(vin2_data)
-    all_vin3_data.append(vin3_data)
+    # 添加到列表
+    all_vin2_data.append(vin2_tensor)
+    all_vin3_data.append(vin3_tensor)
+    
+    print(f"✅ 样本 {sample_id} 处理完成")
 
 # 合并数据
+print("\n" + "="*60)
+print("🔗 合并所有样本数据")
+print("="*60)
+
 combined_tensor = torch.cat(all_vin2_data, dim=0)
 combined_tensorx = torch.cat(all_vin3_data, dim=0)
 
 print(f"合并后vin_2数据形状: {combined_tensor.shape}")
 print(f"合并后vin_3数据形状: {combined_tensorx.shape}")
+
+# 合并后的数据质量检查
+print("\n🔍 合并后数据质量检查:")
+check_data_quality(combined_tensor, "合并后vin_2")
+check_data_quality(combined_tensorx, "合并后vin_3")
+
+# 检查是否有异常值需要处理
+vin2_has_issues = (torch.isnan(combined_tensor).any() or 
+                   torch.isinf(combined_tensor).any() or 
+                   combined_tensor.min() < -1e6 or 
+                   combined_tensor.max() > 1e6)
+
+vin3_has_issues = (torch.isnan(combined_tensorx).any() or 
+                   torch.isinf(combined_tensorx).any() or 
+                   combined_tensorx.min() < -1e6 or 
+                   combined_tensorx.max() > 1e6)
+
+if vin2_has_issues or vin3_has_issues:
+    print("\n⚠️  检测到数据问题，进行修复...")
+    
+    # 修复NaN和Inf值
+    if torch.isnan(combined_tensor).any() or torch.isinf(combined_tensor).any():
+        print("   修复vin_2中的NaN和Inf值")
+        combined_tensor = torch.where(torch.isnan(combined_tensor) | torch.isinf(combined_tensor), 
+                                     torch.zeros_like(combined_tensor), combined_tensor)
+    
+    if torch.isnan(combined_tensorx).any() or torch.isinf(combined_tensorx).any():
+        print("   修复vin_3中的NaN和Inf值")
+        combined_tensorx = torch.where(torch.isnan(combined_tensorx) | torch.isinf(combined_tensorx), 
+                                      torch.zeros_like(combined_tensorx), combined_tensorx)
+    
+    # 检查修复后的数据
+    print("\n🔍 修复后数据质量检查:")
+    check_data_quality(combined_tensor, "修复后vin_2")
+    check_data_quality(combined_tensorx, "修复后vin_3")
+else:
+    print("\n✅ 数据质量良好，无需修复")
 
 #----------------------------------------MC-AE多通道自编码器训练--------------------------
 print("="*50)
@@ -204,10 +376,23 @@ train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_rec
 
 # 中文注释：初始化MC-AE模型（使用float32）
 net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
-net.apply(lambda m: torch.nn.init.xavier_normal_(m.weight) if isinstance(m, nn.Linear) else None)
 
 netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).to(torch.float32)
-netx.apply(lambda m: torch.nn.init.xavier_normal_(m.weight) if isinstance(m, nn.Linear) else None)
+
+# 使用更稳定的权重初始化
+def stable_weight_init(model):
+    """使用更稳定的权重初始化方法"""
+    for module in model.modules():
+        if isinstance(module, nn.Linear):
+            # 使用Xavier初始化，但限制权重范围
+            nn.init.xavier_uniform_(module.weight, gain=0.3)  # 降低gain值避免梯度爆炸
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+
+# 应用稳定的权重初始化
+stable_weight_init(net)
+stable_weight_init(netx)
+print("✅ 应用稳定的权重初始化")
 
 # 启用数据并行
 if torch.cuda.device_count() > 1:
@@ -256,15 +441,24 @@ for epoch in range(EPOCH):
         optimizer.zero_grad()
         scaler.scale(loss_u).backward()
         
-        # 添加梯度裁剪
+        # 添加更强的梯度裁剪和数值稳定性检查
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
         
-        # 检查梯度是否为NaN
+        # 检查梯度是否为NaN或无穷大
+        grad_norm = 0
         for name, param in net.named_parameters():
-            if param.grad is not None and torch.isnan(param.grad).any():
-                print(f"警告：参数 {name} 的梯度出现NaN")
-                continue
+            if param.grad is not None:
+                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                    continue
+                grad_norm += param.grad.data.norm(2).item() ** 2
+        grad_norm = grad_norm ** 0.5
+        
+        # 更强的梯度裁剪
+        max_grad_norm = 1.0  # 降低梯度裁剪阈值
+        if grad_norm > max_grad_norm:
+            torch.nn.utils.clip_grad_norm_(net.parameters(), max_grad_norm)
+            print(f"梯度裁剪: {grad_norm:.4f} -> {max_grad_norm}")
         
         scaler.step(optimizer)
         scaler.update()
