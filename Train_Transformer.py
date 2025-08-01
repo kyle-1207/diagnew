@@ -44,6 +44,326 @@ def print_gpu_memory():
             total = torch.cuda.get_device_properties(i).total_memory / 1024**3
             print(f"   GPU {i}: {allocated:.1f}GB / {cached:.1f}GB / {total:.1f}GB (已用/缓存/总计)")
 
+# 数据处理函数（从BiLSTM脚本复制）
+def check_data_quality(data, name, sample_id=None):
+    """详细的数据质量检查"""
+    prefix = f"样本 {sample_id} - " if sample_id else ""
+    print(f"\n🔍 {prefix}{name} 数据质量检查:")
+    
+    # 基本信息
+    print(f"   数据类型: {data.dtype}")
+    print(f"   数据形状: {data.shape}")
+    
+    # 数值统计
+    if isinstance(data, torch.Tensor):
+        data_np = data.cpu().numpy()
+    else:
+        data_np = np.array(data)
+    
+    print(f"   数值范围: [{data_np.min():.6f}, {data_np.max():.6f}]")
+    print(f"   均值: {data_np.mean():.6f}")
+    print(f"   标准差: {data_np.std():.6f}")
+    print(f"   中位数: {np.median(data_np):.6f}")
+    
+    # 异常值检查
+    nan_count = np.isnan(data_np).sum()
+    inf_count = np.isinf(data_np).sum()
+    zero_count = (data_np == 0).sum()
+    negative_count = (data_np < 0).sum()
+    
+    print(f"   NaN数量: {nan_count}")
+    print(f"   Inf数量: {inf_count}")
+    print(f"   零值数量: {zero_count}")
+    print(f"   负值数量: {negative_count}")
+    
+    # 异常值比例
+    total_elements = data_np.size
+    print(f"   NaN比例: {nan_count/total_elements*100:.2f}%")
+    print(f"   Inf比例: {inf_count/total_elements*100:.2f}%")
+    print(f"   零值比例: {zero_count/total_elements*100:.2f}%")
+    print(f"   负值比例: {negative_count/total_elements*100:.2f}%")
+    
+    # 异常值警告
+    if nan_count > 0:
+        print(f"   ⚠️  检测到NaN值！")
+    if inf_count > 0:
+        print(f"   ⚠️  检测到无穷大值！")
+    if data_np.min() < -1e6 or data_np.max() > 1e6:
+        print(f"   ⚠️  检测到异常大值！范围: [{data_np.min():.2e}, {data_np.max():.2e}]")
+    
+    return {
+        'has_nan': nan_count > 0,
+        'has_inf': inf_count > 0,
+        'has_extreme_values': data_np.min() < -1e6 or data_np.max() > 1e6,
+        'data_type': data.dtype,
+        'shape': data.shape
+    }
+
+def physics_based_data_processing(data, name, feature_type='general'):
+    """基于物理约束的数据处理（参考论文方法）"""
+    print(f"\n🔧 基于物理约束处理 {name}...")
+    
+    # 检查原始数据类型
+    if isinstance(data, np.ndarray):
+        print(f"   原始类型: numpy.ndarray, dtype={data.dtype}")
+    elif isinstance(data, torch.Tensor):
+        print(f"   原始类型: torch.Tensor, dtype={data.dtype}")
+    else:
+        print(f"   原始类型: {type(data)}")
+    
+    # 转换为numpy进行预处理
+    if isinstance(data, torch.Tensor):
+        data_np = data.cpu().numpy()
+    else:
+        data_np = np.array(data)
+    
+    # 记录原始数据点数量
+    original_data_points = data_np.shape[0]
+    print(f"   原始数据点数量: {original_data_points}")
+    
+    print("   执行基于物理约束的数据处理...")
+    
+    # 1. 处理缺失数据 (Missing Data) - 用中位数替换全NaN行，保持数据点数量
+    print("   步骤1: 处理缺失数据...")
+    complete_nan_rows = np.isnan(data_np).all(axis=1)
+    if complete_nan_rows.any():
+        print(f"     检测到 {complete_nan_rows.sum()} 行完全缺失的数据")
+        print(f"     用中位数替换全NaN行，保持数据点数量不变")
+        
+        # 对每个特征维度计算中位数
+        for col in range(data_np.shape[1]):
+            # 对于vin_3数据的第224列，跳过处理
+            if data_np.shape[1] == 226 and col == 224:
+                print(f"       特征{col}: 特殊保留列，跳过缺失数据处理")
+                continue
+                
+            valid_values = data_np[~np.isnan(data_np[:, col]), col]
+            if len(valid_values) > 0:
+                median_val = np.median(valid_values)
+                # 替换全NaN行中该特征的值
+                data_np[complete_nan_rows, col] = median_val
+                print(f"       特征{col}: 用中位数 {median_val:.4f} 替换全NaN行")
+            else:
+                # 如果该特征全部为NaN，用0替换
+                data_np[complete_nan_rows, col] = 0.0
+                print(f"       特征{col}: 全部为NaN，用0替换")
+    
+    # 2. 处理异常数据 (Abnormal Data) - 基于物理约束过滤
+    print("   步骤2: 处理异常数据...")
+    
+    if feature_type == 'vin2':
+        # vin_2数据处理（225列）
+        print(f"     处理vin_2数据（225列）")
+        
+        # 索引0,1：BiLSTM和Pack电压预测值 - 限制在[0,5]V
+        voltage_pred_columns = [0, 1]
+        for col in voltage_pred_columns:
+            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                print(f"       电压预测列{col}: 检测到 {col_invalid_count} 个超出电压范围[0,5]V的异常值")
+                data_np[data_np[:, col] < 0, col] = 0
+                data_np[data_np[:, col] > 5, col] = 5
+            else:
+                print(f"       电压预测列{col}: 电压值在正常范围内")
+        
+        # 索引2-111：110个单体电池真实电压值 - 限制在[0,5]V
+        cell_voltage_columns = list(range(2, 112))
+        for col in cell_voltage_columns:
+            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                print(f"       单体电压列{col}: 检测到 {col_invalid_count} 个超出电压范围[0,5]V的异常值")
+                data_np[data_np[:, col] < 0, col] = 0
+                data_np[data_np[:, col] > 5, col] = 5
+        
+        # 索引112-221：110个单体电池电压偏差值 - 不限制范围，只处理极端异常值
+        voltage_dev_columns = list(range(112, 222))
+        for col in voltage_dev_columns:
+            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+            if col_extreme_mask.any():
+                print(f"       电压偏差列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
+                valid_values = data_np[~col_extreme_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_extreme_mask, col] = median_val
+        
+        # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
+        temp_col = 222
+        temp_valid_mask = (data_np[:, temp_col] >= -40) & (data_np[:, temp_col] <= 80)
+        temp_invalid_count = (~temp_valid_mask).sum()
+        if temp_invalid_count > 0:
+            print(f"       温度列{temp_col}: 检测到 {temp_invalid_count} 个超出温度范围[-40,80]°C的异常值")
+            data_np[data_np[:, temp_col] < -40, temp_col] = -40
+            data_np[data_np[:, temp_col] > 80, temp_col] = 80
+        
+        # 索引224：电流数据 - 限制在[-1004,162]A
+        current_col = 224
+        current_valid_mask = (data_np[:, current_col] >= -1004) & (data_np[:, current_col] <= 162)
+        current_invalid_count = (~current_valid_mask).sum()
+        if current_invalid_count > 0:
+            print(f"       电流列{current_col}: 检测到 {current_invalid_count} 个超出电流范围[-1004,162]A的异常值")
+            data_np[data_np[:, current_col] < -1004, current_col] = -1004
+            data_np[data_np[:, current_col] > 162, current_col] = 162
+        
+        # 其他列（索引223）：只处理极端异常值
+        other_columns = [223]
+        for col in other_columns:
+            if col < data_np.shape[1]:
+                col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+                if col_extreme_mask.any():
+                    print(f"       其他列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
+                    valid_values = data_np[~col_extreme_mask, col]
+                    if len(valid_values) > 0:
+                        median_val = np.median(valid_values)
+                        data_np[col_extreme_mask, col] = median_val
+    
+    elif feature_type == 'vin3':
+        # vin_3数据处理（226列）
+        print(f"     处理vin_3数据（226列），第224列为特殊保留列")
+        
+        # 索引0,1：BiLSTM和Pack SOC预测值 - 限制在[-0.2,2.0]
+        soc_pred_columns = [0, 1]
+        for col in soc_pred_columns:
+            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 2.0)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                print(f"       SOC预测列{col}: 检测到 {col_invalid_count} 个超出SOC范围[-0.2,2.0]的异常值")
+                data_np[data_np[:, col] < -0.2, col] = -0.2
+                data_np[data_np[:, col] > 2.0, col] = 2.0
+            else:
+                print(f"       SOC预测列{col}: SOC值在正常范围内")
+        
+        # 索引2-111：110个单体电池真实SOC值 - 限制在[-0.2,2.0]
+        cell_soc_columns = list(range(2, 112))
+        for col in cell_soc_columns:
+            col_valid_mask = (data_np[:, col] >= -0.2) & (data_np[:, col] <= 2.0)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                print(f"       单体SOC列{col}: 检测到 {col_invalid_count} 个超出SOC范围[-0.2,2.0]的异常值")
+                data_np[data_np[:, col] < -0.2, col] = -0.2
+                data_np[data_np[:, col] > 2.0, col] = 2.0
+        
+        # 索引112-221：110个单体电池SOC偏差值 - 不限制范围，只处理极端异常值
+        soc_dev_columns = list(range(112, 222))
+        for col in soc_dev_columns:
+            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+            if col_extreme_mask.any():
+                print(f"       SOC偏差列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
+                valid_values = data_np[~col_extreme_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_extreme_mask, col] = median_val
+        
+        # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
+        temp_col = 222
+        temp_valid_mask = (data_np[:, temp_col] >= -40) & (data_np[:, temp_col] <= 80)
+        temp_invalid_count = (~temp_valid_mask).sum()
+        if temp_invalid_count > 0:
+            print(f"       温度列{temp_col}: 检测到 {temp_invalid_count} 个超出温度范围[-40,80]°C的异常值")
+            data_np[data_np[:, temp_col] < -40, temp_col] = -40
+            data_np[data_np[:, temp_col] > 80, temp_col] = 80
+        
+        # 索引224：特殊保留列 - 保持原值不变
+        special_col = 224
+        print(f"       特殊保留列{special_col}: 保持原值不变")
+        
+        # 索引225：电流数据 - 限制在[-1004,162]A
+        current_col = 225
+        current_valid_mask = (data_np[:, current_col] >= -1004) & (data_np[:, current_col] <= 162)
+        current_invalid_count = (~current_valid_mask).sum()
+        if current_invalid_count > 0:
+            print(f"       电流列{current_col}: 检测到 {current_invalid_count} 个超出电流范围[-1004,162]A的异常值")
+            data_np[data_np[:, current_col] < -1004, current_col] = -1004
+            data_np[data_np[:, current_col] > 162, current_col] = 162
+        
+        # 其他列（索引223）：只处理极端异常值
+        other_columns = [223]
+        for col in other_columns:
+            col_extreme_mask = np.isnan(data_np[:, col]) | np.isinf(data_np[:, col])
+            if col_extreme_mask.any():
+                print(f"       其他列{col}: 检测到 {col_extreme_mask.sum()} 个极端异常值")
+                valid_values = data_np[~col_extreme_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    data_np[col_extreme_mask, col] = median_val
+            
+    elif feature_type == 'current':
+        # 电流物理约束：-100A到100A
+        valid_mask = (data_np >= -100) & (data_np <= 100)
+        invalid_count = (~valid_mask).sum()
+        if invalid_count > 0:
+            print(f"     检测到 {invalid_count} 个超出电流范围[-100,100]A的异常值")
+            data_np[data_np < -100] = -100
+            data_np[data_np > 100] = 100
+            
+    elif feature_type == 'temperature':
+        # 温度物理约束：-40°C到80°C
+        valid_mask = (data_np >= -40) & (data_np <= 80)
+        invalid_count = (~valid_mask).sum()
+        if invalid_count > 0:
+            print(f"     检测到 {invalid_count} 个超出温度范围[-40,80]°C的异常值")
+            data_np[data_np < -40] = -40
+            data_np[data_np > 80] = 80
+    
+    # 3. 处理采样故障 (Sampling Faults) - 用中位数替换，保持数据点数量
+    print("   步骤3: 处理采样故障...")
+    
+    # 检测NaN和Inf值（可能是采样故障）
+    nan_mask = np.isnan(data_np)
+    inf_mask = np.isinf(data_np)
+    fault_mask = nan_mask | inf_mask
+    
+    if fault_mask.any():
+        print(f"     检测到 {fault_mask.sum()} 个采样故障点")
+        print(f"     用中位数替换故障点，保持数据点数量不变")
+        
+        # 对每个特征维度分别处理
+        for col in range(data_np.shape[1]):
+            # 对于vin_3数据的第224列，跳过处理
+            if data_np.shape[1] == 226 and col == 224:
+                print(f"       特征{col}: 特殊保留列，跳过采样故障处理")
+                continue
+                
+            col_fault_mask = fault_mask[:, col]
+            if col_fault_mask.any():
+                # 计算该列的中位数（排除故障值）
+                valid_values = data_np[~col_fault_mask, col]
+                if len(valid_values) > 0:
+                    median_val = np.median(valid_values)
+                    print(f"       特征{col}: 用中位数 {median_val:.4f} 替换 {col_fault_mask.sum()} 个故障值")
+                    data_np[col_fault_mask, col] = median_val
+                else:
+                    # 如果该列全部为故障值，用0替换
+                    print(f"       特征{col}: 全部为故障值，用0替换")
+                    data_np[col_fault_mask, col] = 0.0
+    
+    # 4. 最终检查
+    print("   步骤4: 最终数据质量检查...")
+    final_nan_count = np.isnan(data_np).sum()
+    final_inf_count = np.isinf(data_np).sum()
+    
+    if final_nan_count > 0 or final_inf_count > 0:
+        print(f"     ⚠️  仍有 {final_nan_count} 个NaN和 {final_inf_count} 个Inf值")
+        # 最后的安全处理
+        data_np[np.isnan(data_np)] = 0.0
+        data_np[np.isinf(data_np)] = 0.0
+    else:
+        print("     ✅ 所有异常值已处理完成")
+    
+    # 转换为tensor
+    data_tensor = torch.tensor(data_np, dtype=torch.float32)
+    
+    # 检查数据点数量是否保持一致
+    final_data_points = data_tensor.shape[0]
+    if final_data_points == original_data_points:
+        print(f"   处理完成: {data_tensor.shape}, dtype={data_tensor.dtype}")
+        print(f"   ✅ 数据点数量保持一致: {original_data_points} -> {final_data_points}")
+    else:
+        print(f"   ⚠️  数据点数量发生变化: {original_data_points} -> {final_data_points}")
+    
+    return data_tensor
+
 # GPU设备配置 - 使用GPU0和GPU1进行数据并行
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # 使用GPU0和GPU1
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -493,6 +813,8 @@ def main():
     
     print("📥 加载原始vin_2和vin_3数据...")
     for sample_id in train_samples:
+        print(f"\n📋 处理样本 {sample_id}...")
+        
         # 加载vin_1数据（用于Transformer预测）
         vin1_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_1.pkl'
         with open(vin1_path, 'rb') as file:
@@ -503,25 +825,37 @@ def main():
                 vin1_data = torch.tensor(vin1_data)
             all_vin1_data.append(vin1_data)
         
-        # 加载vin_2数据
+        # 加载vin_2数据并进行处理
         vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
         with open(vin2_path, 'rb') as file:
             vin2_data = pickle.load(file)
-            if isinstance(vin2_data, torch.Tensor):
-                vin2_data = vin2_data.cpu()
-            else:
-                vin2_data = torch.tensor(vin2_data)
-            all_vin2_data.append(vin2_data)
         
-        # 加载vin_3数据
+        # 数据质量检查
+        vin2_quality = check_data_quality(vin2_data, "vin_2", sample_id)
+        
+        # 基于物理约束的数据处理
+        vin2_processed = physics_based_data_processing(vin2_data, f"vin_2 (样本{sample_id})", feature_type='vin2')
+        
+        # 处理后再次检查
+        check_data_quality(vin2_processed, "vin_2 (处理后)", sample_id)
+        all_vin2_data.append(vin2_processed)
+        
+        # 加载vin_3数据并进行处理
         vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
         with open(vin3_path, 'rb') as file:
             vin3_data = pickle.load(file)
-            if isinstance(vin3_data, torch.Tensor):
-                vin3_data = vin3_data.cpu()
-            else:
-                vin3_data = torch.tensor(vin3_data)
-            all_vin3_data.append(vin3_data)
+        
+        # 数据质量检查
+        vin3_quality = check_data_quality(vin3_data, "vin_3", sample_id)
+        
+        # 基于物理约束的数据处理
+        vin3_processed = physics_based_data_processing(vin3_data, f"vin_3 (样本{sample_id})", feature_type='vin3')
+        
+        # 处理后再次检查
+        check_data_quality(vin3_processed, "vin_3 (处理后)", sample_id)
+        all_vin3_data.append(vin3_processed)
+        
+        print(f"✅ 样本 {sample_id} 处理完成")
     
     # 合并所有数据
     combined_vin1 = torch.cat(all_vin1_data, dim=0).float()
@@ -532,6 +866,43 @@ def main():
     print(f"   vin_1: {combined_vin1.shape}")
     print(f"   vin_2: {combined_vin2.shape}")
     print(f"   vin_3: {combined_vin3.shape}")
+    
+    # 合并后的数据质量检查
+    print("\n🔍 合并后数据质量检查:")
+    check_data_quality(combined_vin2, "合并后vin_2")
+    check_data_quality(combined_vin3, "合并后vin_3")
+    
+    # 检查是否有异常值需要处理
+    vin2_has_issues = (torch.isnan(combined_vin2).any() or 
+                       torch.isinf(combined_vin2).any() or 
+                       combined_vin2.min() < -1e6 or 
+                       combined_vin2.max() > 1e6)
+    
+    vin3_has_issues = (torch.isnan(combined_vin3).any() or 
+                       torch.isinf(combined_vin3).any() or 
+                       combined_vin3.min() < -1e6 or 
+                       combined_vin3.max() > 1e6)
+    
+    if vin2_has_issues or vin3_has_issues:
+        print("\n⚠️  检测到数据问题，进行修复...")
+        
+        # 修复NaN和Inf值
+        if torch.isnan(combined_vin2).any() or torch.isinf(combined_vin2).any():
+            print("   修复vin_2中的NaN和Inf值")
+            combined_vin2 = torch.where(torch.isnan(combined_vin2) | torch.isinf(combined_vin2), 
+                                       torch.zeros_like(combined_vin2), combined_vin2)
+        
+        if torch.isnan(combined_vin3).any() or torch.isinf(combined_vin3).any():
+            print("   修复vin_3中的NaN和Inf值")
+            combined_vin3 = torch.where(torch.isnan(combined_vin3) | torch.isinf(combined_vin3), 
+                                        torch.zeros_like(combined_vin3), combined_vin3)
+        
+        # 检查修复后的数据
+        print("\n🔍 修复后数据质量检查:")
+        check_data_quality(combined_vin2, "修复后vin_2")
+        check_data_quality(combined_vin3, "修复后vin_3")
+    else:
+        print("\n✅ 数据质量良好，无需修复")
     
     # 使用Transformer进行预测和替换
     print("\n🔄 使用Transformer预测替换vin_2[:,0]和vin_3[:,0]...")
