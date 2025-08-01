@@ -217,7 +217,7 @@ if torch.cuda.device_count() > 1:
 else:
     print("⚠️  单GPU模式")
 
-optimizer = torch.optim.Adam(net.parameters(), lr=LR)
+optimizer = torch.optim.Adam(net.parameters(), lr=INIT_LR)
 l1_lambda = 0.01
 loss_f = nn.MSELoss()
 
@@ -289,7 +289,7 @@ ERRORU = AA - yTrainU
 
 # 中文注释：第二组特征的MC-AE训练
 train_loader_soc = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=BATCHSIZE, shuffle=False)
-optimizer = torch.optim.Adam(netx.parameters(), lr=LR)
+optimizer = torch.optim.Adam(netx.parameters(), lr=INIT_LR)
 loss_f = nn.MSELoss()
 
 # 为第二个模型创建新的scaler
