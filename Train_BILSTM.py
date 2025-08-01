@@ -676,35 +676,37 @@ for epoch in range(EPOCH):
         # 使用混合精度训练
         scaler.scale(loss_u).backward()
         
-        # 添加更强的梯度裁剪和数值稳定性检查
-        scaler.unscale_(optimizer)
-        
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
         has_grad_issue = False
-        for name, param in net.named_parameters():
-            if param.grad is not None:
-                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                    print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
-                    has_grad_issue = True
-                    break
-                grad_norm += param.grad.data.norm(2).item() ** 2
         
-        if has_grad_issue:
-            continue
-            
-        grad_norm = grad_norm ** 0.5
-        
-        # 更强的梯度裁剪
-        max_grad_norm = 0.1  # 进一步降低梯度裁剪阈值
-        if grad_norm > max_grad_norm:
-            torch.nn.utils.clip_grad_norm_(net.parameters(), max_grad_norm)
-            print(f"梯度裁剪: {grad_norm:.4f} -> {max_grad_norm}")
-        
-        # 安全地执行优化器步骤
         try:
+            # 在检查梯度前unscale
+            scaler.unscale_(optimizer)
+            
+            for name, param in net.named_parameters():
+                if param.grad is not None:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                        has_grad_issue = True
+                        break
+                    grad_norm += param.grad.data.norm(2).item() ** 2
+            
+            if has_grad_issue:
+                continue
+                
+            grad_norm = grad_norm ** 0.5
+            
+            # 更强的梯度裁剪
+            max_grad_norm = 0.1  # 进一步降低梯度裁剪阈值
+            if grad_norm > max_grad_norm:
+                torch.nn.utils.clip_grad_norm_(net.parameters(), max_grad_norm)
+                print(f"梯度裁剪: {grad_norm:.4f} -> {max_grad_norm}")
+            
+            # 执行优化器步骤
             scaler.step(optimizer)
             scaler.update()
+            
         except Exception as e:
             print(f"优化器步骤失败: {e}")
             print("跳过此批次")
@@ -771,34 +773,36 @@ for epoch in range(EPOCH):
         optimizer.zero_grad()
         scaler2.scale(loss_x).backward()
         
-        # 添加梯度裁剪
-        scaler2.unscale_(optimizer)
-        
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
         has_grad_issue = False
-        for name, param in netx.named_parameters():
-            if param.grad is not None:
-                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                    print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
-                    has_grad_issue = True
-                    break
-                grad_norm += param.grad.data.norm(2).item() ** 2
         
-        if has_grad_issue:
-            continue
-            
-        grad_norm = grad_norm ** 0.5
-        
-        # 梯度裁剪
-        if grad_norm > MAX_GRAD_NORM:
-            torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
-            print(f"梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
-        
-        # 安全地执行优化器步骤
         try:
+            # 在检查梯度前unscale
+            scaler2.unscale_(optimizer)
+            
+            for name, param in netx.named_parameters():
+                if param.grad is not None:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                        has_grad_issue = True
+                        break
+                    grad_norm += param.grad.data.norm(2).item() ** 2
+            
+            if has_grad_issue:
+                continue
+                
+            grad_norm = grad_norm ** 0.5
+            
+            # 梯度裁剪
+            if grad_norm > MAX_GRAD_NORM:
+                torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
+                print(f"梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
+            
+            # 执行优化器步骤
             scaler2.step(optimizer)
             scaler2.update()
+            
         except Exception as e:
             print(f"优化器步骤失败: {e}")
             print("跳过此批次")
