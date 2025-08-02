@@ -45,12 +45,40 @@ def save_transformer_results():
             print("❌ df_data 不在内存中")
             return
         
-        # 保存诊断特征
+        # 保存诊断特征（分块保存，避免Excel文件过大）
         model_suffix = "_transformer"
-        print(f"\n💾 保存诊断特征...")
-        df_data.to_excel(f'models/diagnosis_feature{model_suffix}.xlsx', index=False)
-        df_data.to_csv(f'models/diagnosis_feature{model_suffix}.csv', index=False)
-        print(f"✅ 诊断特征已保存: models/diagnosis_feature{model_suffix}.xlsx/csv")
+        print(f"\n💾 保存诊断特征（数据量: {df_data.shape}）...")
+        
+        # CSV文件保存（无大小限制）
+        csv_path = f'models/diagnosis_feature{model_suffix}.csv'
+        df_data.to_csv(csv_path, index=False)
+        print(f"✅ 诊断特征CSV已保存: {csv_path}")
+        
+        # Excel文件分块保存（避免超过Excel行数限制）
+        excel_path = f'models/diagnosis_feature{model_suffix}.xlsx'
+        max_rows_per_sheet = 1000000  # Excel限制约104万行，留些余量
+        
+        if len(df_data) > max_rows_per_sheet:
+            print(f"⚠️  数据量过大({len(df_data)}行)，进行分块保存...")
+            
+            with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+                # 计算需要多少个工作表
+                num_sheets = (len(df_data) + max_rows_per_sheet - 1) // max_rows_per_sheet
+                
+                for i in range(num_sheets):
+                    start_idx = i * max_rows_per_sheet
+                    end_idx = min((i + 1) * max_rows_per_sheet, len(df_data))
+                    chunk = df_data.iloc[start_idx:end_idx]
+                    
+                    sheet_name = f'Sheet_{i+1}' if i > 0 else 'Sheet_1'
+                    chunk.to_excel(writer, sheet_name=sheet_name, index=False)
+                    print(f"   工作表 {i+1}/{num_sheets}: {start_idx+1}-{end_idx} 行")
+            
+            print(f"✅ 诊断特征Excel已分块保存: {excel_path} ({num_sheets}个工作表)")
+        else:
+            # 数据量不大，直接保存
+            df_data.to_excel(excel_path, index=False)
+            print(f"✅ 诊断特征Excel已保存: {excel_path}")
         
         # 保存PCA分析结果
         print(f"\n💾 保存PCA分析结果...")

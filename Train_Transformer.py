@@ -44,6 +44,13 @@ def print_gpu_memory():
             total = torch.cuda.get_device_properties(i).total_memory / 1024**3
             print(f"   GPU {i}: {allocated:.1f}GB / {cached:.1f}GB / {total:.1f}GB (已用/缓存/总计)")
 
+# 混合精度训练配置
+def setup_mixed_precision():
+    """设置混合精度训练"""
+    scaler = torch.cuda.amp.GradScaler()
+    print("✅ 启用混合精度训练 (AMP)")
+    return scaler
+
 # 数据处理函数（从BiLSTM脚本复制）
 def check_data_quality(data, name, sample_id=None):
     """详细的数据质量检查"""
@@ -743,9 +750,10 @@ def main():
         print(f"✅ 成功加载 {len(dataset)} 个训练数据对")
         
         # 创建数据加载器
-        BATCH_SIZE = 2000  # 从1000增加到2000
-        train_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
-        print(f"📦 数据加载器创建完成，批次大小: {BATCH_SIZE}")
+        BATCH_SIZE = 4000  # 从2000增加到4000
+        train_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, 
+                                num_workers=4, pin_memory=True)
+        print(f"📦 数据加载器创建完成，批次大小: {BATCH_SIZE}, num_workers: 4")
         
         # 显示数据统计
         sample_input, sample_target = dataset[0]
@@ -788,15 +796,20 @@ def main():
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_decay_freq, gamma=0.9)
     criterion = nn.MSELoss()
     
+    # 设置混合精度训练
+    scaler = setup_mixed_precision()
+    
     print(f"⚙️  训练参数（保守优化版本）:")
     print(f"   学习率: {LR} (从1e-3增加到1.5e-3)")
     print(f"   训练轮数: {EPOCH} (从30增加到40)")
-    print(f"   批次大小: {BATCH_SIZE} (从1000增加到2000)")
+    print(f"   批次大小: {BATCH_SIZE} (从2000增加到4000)")
     print(f"   学习率衰减频率: {lr_decay_freq} (从10增加到15)")
     print(f"   预测批次大小: 15000 (从10000增加到15000)")
-    print(f"   MC-AE批次大小: 3000 (从2000增加到3000)")
+    print(f"   MC-AE批次大小: 6000 (从3000增加到6000)")
     print(f"   MC-AE训练轮数: 250 (从300减少到250)")
     print(f"   MC-AE学习率: 7e-4 (从5e-4增加到7e-4)")
+    print(f"   混合精度训练: 启用")
+    print(f"   DataLoader优化: num_workers=4, pin_memory=True")
     
     #----------------------------------------开始训练------------------------------
     print("\n" + "="*60)
@@ -818,15 +831,15 @@ def main():
             # 梯度清零
             optimizer.zero_grad()
             
-            # 前向传播
-            pred_output = transformer(batch_input)
+            # 混合精度前向传播
+            with torch.cuda.amp.autocast():
+                pred_output = transformer(batch_input)
+                loss = criterion(pred_output, batch_target)
             
-            # 计算损失
-            loss = criterion(pred_output, batch_target)
-            
-            # 反向传播
-            loss.backward()
-            optimizer.step()
+            # 混合精度反向传播
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             
             epoch_loss += loss.item()
             batch_count += 1
@@ -1223,7 +1236,7 @@ def main():
     # MC-AE训练参数（保守优化）
     EPOCH_MCAE = 250       # 从300减少到250
     LR_MCAE = 7e-4         # 从5e-4增加到7e-4
-    BATCHSIZE_MCAE = 3000  # 从2000增加到3000
+    BATCHSIZE_MCAE = 6000  # 从3000增加到6000
     
     # 自定义多输入数据集类
     class MCDataset(Dataset):
@@ -1240,7 +1253,8 @@ def main():
     # 第一组特征（vin_2）的MC-AE训练
     print("\n🔧 训练第一组MC-AE模型（vin_2）...")
     train_loader_u = DataLoader(MCDataset(x_recovered, y_recovered, z_recovered, q_recovered), 
-                               batch_size=BATCHSIZE_MCAE, shuffle=False)
+                               batch_size=BATCHSIZE_MCAE, shuffle=False, 
+                               num_workers=4, pin_memory=True)
     
     net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, 
                     activation_fn=custom_activation, use_dx_in_forward=True).to(device)
@@ -1274,7 +1288,8 @@ def main():
     
     # 获取第一组重构误差
     train_loader2 = DataLoader(MCDataset(x_recovered, y_recovered, z_recovered, q_recovered), 
-                              batch_size=len(x_recovered), shuffle=False)
+                              batch_size=len(x_recovered), shuffle=False,
+                              num_workers=4, pin_memory=True)
     for iteration, (x, y, z, q) in enumerate(train_loader2):
         x = x.to(device)
         y = y.to(device)
@@ -1290,7 +1305,8 @@ def main():
     # 第二组特征（vin_3）的MC-AE训练
     print("\n🔧 训练第二组MC-AE模型（vin_3）...")
     train_loader_soc = DataLoader(MCDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
-                                 batch_size=BATCHSIZE_MCAE, shuffle=False)
+                                 batch_size=BATCHSIZE_MCAE, shuffle=False,
+                                 num_workers=4, pin_memory=True)
     
     netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, 
                      activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
@@ -1323,7 +1339,8 @@ def main():
     
     # 获取第二组重构误差
     train_loaderx2 = DataLoader(MCDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
-                               batch_size=len(x_recovered2), shuffle=False)
+                               batch_size=len(x_recovered2), shuffle=False,
+                               num_workers=4, pin_memory=True)
     for iteration, (x, y, z, q) in enumerate(train_loaderx2):
         x = x.to(device)
         y = y.to(device)
@@ -1339,9 +1356,31 @@ def main():
     # 保存中间结果，避免重新训练
     print("\n💾 保存中间结果...")
     model_suffix = "_transformer"
+    
+    # 确保models目录存在
+    if not os.path.exists('models'):
+        os.makedirs('models')
+    
+    # 保存重构误差数据
     np.save(f'models/ERRORU{model_suffix}.npy', ERRORU)
     np.save(f'models/ERRORX{model_suffix}.npy', ERRORX)
     print(f"✅ 中间结果已保存: ERRORU{model_suffix}.npy, ERRORX{model_suffix}.npy")
+    
+    # 保存MC-AE训练历史（用于断点续算）
+    mcae_intermediate_history = {
+        'train_losses_mcae1': train_losses_mcae1,
+        'train_losses_mcae2': train_losses_mcae2,
+        'final_mcae1_loss': train_losses_mcae1[-1] if train_losses_mcae1 else None,
+        'final_mcae2_loss': train_losses_mcae2[-1] if train_losses_mcae2 else None,
+        'training_samples': len(train_samples),
+        'epochs': EPOCH_MCAE,
+        'learning_rate': LR_MCAE,
+        'batch_size': BATCHSIZE_MCAE
+    }
+    
+    with open(f'models/mcae_intermediate_history{model_suffix}.pkl', 'wb') as f:
+        pickle.dump(mcae_intermediate_history, f)
+    print(f"✅ MC-AE中间训练历史已保存: mcae_intermediate_history{model_suffix}.pkl")
     
     print("✅ MC-AE训练完成!")
     
@@ -1435,10 +1474,39 @@ def main():
     torch.save(netx.state_dict(), f'models/netx_model{model_suffix}.pth')
     print(f"✅ MC-AE模型已保存: models/net_model{model_suffix}.pth, models/netx_model{model_suffix}.pth")
     
-    # 3. 保存诊断特征
-    df_data.to_excel(f'models/diagnosis_feature{model_suffix}.xlsx', index=False)
-    df_data.to_csv(f'models/diagnosis_feature{model_suffix}.csv', index=False)
-    print(f"✅ 诊断特征已保存: models/diagnosis_feature{model_suffix}.xlsx/csv")
+    # 3. 保存诊断特征（分块保存，避免Excel文件过大）
+    print(f"💾 保存诊断特征（数据量: {df_data.shape}）...")
+    
+    # CSV文件保存（无大小限制）
+    csv_path = f'models/diagnosis_feature{model_suffix}.csv'
+    df_data.to_csv(csv_path, index=False)
+    print(f"✅ 诊断特征CSV已保存: {csv_path}")
+    
+    # Excel文件分块保存（避免超过Excel行数限制）
+    excel_path = f'models/diagnosis_feature{model_suffix}.xlsx'
+    max_rows_per_sheet = 1000000  # Excel限制约104万行，留些余量
+    
+    if len(df_data) > max_rows_per_sheet:
+        print(f"⚠️  数据量过大({len(df_data)}行)，进行分块保存...")
+        
+        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+            # 计算需要多少个工作表
+            num_sheets = (len(df_data) + max_rows_per_sheet - 1) // max_rows_per_sheet
+            
+            for i in range(num_sheets):
+                start_idx = i * max_rows_per_sheet
+                end_idx = min((i + 1) * max_rows_per_sheet, len(df_data))
+                chunk = df_data.iloc[start_idx:end_idx]
+                
+                sheet_name = f'Sheet_{i+1}' if i > 0 else 'Sheet_1'
+                chunk.to_excel(writer, sheet_name=sheet_name, index=False)
+                print(f"   工作表 {i+1}/{num_sheets}: {start_idx+1}-{end_idx} 行")
+        
+        print(f"✅ 诊断特征Excel已分块保存: {excel_path} ({num_sheets}个工作表)")
+    else:
+        # 数据量不大，直接保存
+        df_data.to_excel(excel_path, index=False)
+        print(f"✅ 诊断特征Excel已保存: {excel_path}")
     
     # 4. 保存PCA分析结果
     np.save(f'models/v_I{model_suffix}.npy', v_I)
@@ -1496,8 +1564,9 @@ def main():
     print("   - 直接使用真实物理值训练，无复杂转换")
     print("   - 保持与原始MC-AE训练流程完全兼容")
     print("   - 便于与BiLSTM基准进行公平对比")
-    print("   - 保守优化：批次大小增加50-100%，学习率提升50%")
+    print("   - 保守优化：批次大小翻倍，启用混合精度训练")
     print("   - 双GPU数据并行，充分利用A100显存")
+    print("   - DataLoader优化：num_workers=4, pin_memory=True")
     print("")
     print("📈 性能指标:")
     print(f"   Transformer电压预测误差: {avg_voltage_error:.4f} V")
