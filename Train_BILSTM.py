@@ -91,7 +91,7 @@ print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 EPOCH = 300
 INIT_LR = 1e-5  # 进一步降低初始学习率
 MAX_LR = 5e-5   # 降低最大学习率
-BATCHSIZE = 8000  # 从2000增加到8000，充分利用A100显存
+BATCHSIZE = 4000  # 优化为4000，平衡性能和稳定性
 WARMUP_EPOCHS = 10  # 增加学习率预热轮数
 
 # 添加梯度裁剪
