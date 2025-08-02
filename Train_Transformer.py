@@ -578,31 +578,42 @@ matplotlib.use('Agg')  # 使用非交互式后端
 import matplotlib.font_manager as fm
 import os
 
-# 尝试多种字体方案
-font_options = [
-    'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
-    'DejaVu Sans', 'Liberation Sans', 'Arial Unicode MS'
-]
-
-# 检查可用字体
-available_fonts = []
-for font in font_options:
-    try:
-        fm.findfont(font)
-        available_fonts.append(font)
-    except:
-        continue
+# 更全面的字体检测和设置
+def setup_chinese_fonts():
+    """设置中文字体，如果不可用则使用英文"""
+    # 尝试多种中文字体
+    chinese_fonts = [
+        'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
+        'Noto Sans CJK JP', 'Noto Sans CJK TC', 'Source Han Sans CN',
+        'Droid Sans Fallback', 'WenQuanYi Zen Hei', 'AR PL UMing CN'
+    ]
+    
+    # 检查系统字体
+    system_fonts = [f.name for f in fm.fontManager.ttflist]
+    print(f"🔍 系统可用字体数量: {len(system_fonts)}")
+    
+    # 查找可用的中文字体
+    available_chinese = []
+    for font in chinese_fonts:
+        if font in system_fonts:
+            available_chinese.append(font)
+            print(f"✅ 找到中文字体: {font}")
+    
+    if available_chinese:
+        # 使用第一个可用的中文字体
+        plt.rcParams['font.sans-serif'] = available_chinese
+        plt.rcParams['axes.unicode_minus'] = False
+        print(f"🎨 使用中文字体: {available_chinese[0]}")
+        return True
+    else:
+        # 没有中文字体，使用英文
+        plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Liberation Sans', 'Arial']
+        plt.rcParams['axes.unicode_minus'] = False
+        print("⚠️  未找到中文字体，将使用英文标签")
+        return False
 
 # 设置字体
-if available_fonts:
-    plt.rcParams['font.sans-serif'] = available_fonts
-    print(f"✅ 使用字体: {available_fonts[0]}")
-else:
-    # 如果都不可用，使用英文标签
-    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
-    print("⚠️  未找到中文字体，将使用英文标签")
-
-plt.rcParams['axes.unicode_minus'] = False
+use_chinese = setup_chinese_fonts()
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.size'] = 10
 
@@ -952,19 +963,35 @@ def main():
     # 训练损失曲线
     plt.subplot(1, 2, 1)
     plt.plot(train_losses, 'b-', linewidth=2)
-    plt.title('Transformer Training Loss / Transformer训练损失曲线', fontsize=14)
-    plt.xlabel('Training Epochs / 训练轮数', fontsize=12)
-    plt.ylabel('MSE Loss / MSE损失', fontsize=12)
+    if use_chinese:
+        plt.title('Transformer训练损失曲线', fontsize=14)
+        plt.xlabel('训练轮数', fontsize=12)
+        plt.ylabel('MSE损失', fontsize=12)
+    else:
+        plt.title('Transformer Training Loss', fontsize=14)
+        plt.xlabel('Training Epochs', fontsize=12)
+        plt.ylabel('MSE Loss', fontsize=12)
     plt.grid(True, alpha=0.3)
     plt.yscale('log')  # 使用对数坐标
     
     # 误差分布
     plt.subplot(1, 2, 2)
-    plt.hist(voltage_errors, bins=50, alpha=0.7, label=f'Voltage Error (Mean: {avg_voltage_error:.4f}V) / 电压误差 (均值: {avg_voltage_error:.4f}V)', color='red')
-    plt.hist(soc_errors, bins=50, alpha=0.7, label=f'SOC Error (Mean: {avg_soc_error:.4f}) / SOC误差 (均值: {avg_soc_error:.4f})', color='blue')
-    plt.title('Prediction Error Distribution / 预测误差分布', fontsize=14)
-    plt.xlabel('Absolute Error / 绝对误差', fontsize=12)
-    plt.ylabel('Frequency / 频次', fontsize=12)
+    if use_chinese:
+        plt.hist(voltage_errors, bins=50, alpha=0.7, 
+                label=f'电压误差 (均值: {avg_voltage_error:.4f}V)', color='red')
+        plt.hist(soc_errors, bins=50, alpha=0.7, 
+                label=f'SOC误差 (均值: {avg_soc_error:.4f})', color='blue')
+        plt.title('预测误差分布', fontsize=14)
+        plt.xlabel('绝对误差', fontsize=12)
+        plt.ylabel('频次', fontsize=12)
+    else:
+        plt.hist(voltage_errors, bins=50, alpha=0.7, 
+                label=f'Voltage Error (Mean: {avg_voltage_error:.4f}V)', color='red')
+        plt.hist(soc_errors, bins=50, alpha=0.7, 
+                label=f'SOC Error (Mean: {avg_soc_error:.4f})', color='blue')
+        plt.title('Prediction Error Distribution', fontsize=14)
+        plt.xlabel('Absolute Error', fontsize=12)
+        plt.ylabel('Frequency', fontsize=12)
     plt.legend()
     plt.grid(True, alpha=0.3)
     
@@ -1394,9 +1421,14 @@ def main():
     ax1 = axes[0, 0]
     epochs = range(1, len(train_losses_mcae1) + 1)
     ax1.plot(epochs, train_losses_mcae1, 'b-', linewidth=2, label='MC-AE1 Training Loss')
-    ax1.set_xlabel('Training Epochs / 训练轮数')
-    ax1.set_ylabel('MSE Loss / MSE损失')
-    ax1.set_title('MC-AE1 Training Loss / MC-AE1训练损失曲线')
+    if use_chinese:
+        ax1.set_xlabel('训练轮数')
+        ax1.set_ylabel('MSE损失')
+        ax1.set_title('MC-AE1训练损失曲线')
+    else:
+        ax1.set_xlabel('Training Epochs')
+        ax1.set_ylabel('MSE Loss')
+        ax1.set_title('MC-AE1 Training Loss')
     ax1.grid(True, alpha=0.3)
     ax1.legend()
     ax1.set_yscale('log')
@@ -1404,9 +1436,14 @@ def main():
     # 子图2: MC-AE2训练损失曲线 
     ax2 = axes[0, 1]
     ax2.plot(epochs, train_losses_mcae2, 'r-', linewidth=2, label='MC-AE2 Training Loss')
-    ax2.set_xlabel('Training Epochs / 训练轮数')
-    ax2.set_ylabel('MSE Loss / MSE损失')
-    ax2.set_title('MC-AE2 Training Loss / MC-AE2训练损失曲线')
+    if use_chinese:
+        ax2.set_xlabel('训练轮数')
+        ax2.set_ylabel('MSE损失')
+        ax2.set_title('MC-AE2训练损失曲线')
+    else:
+        ax2.set_xlabel('Training Epochs')
+        ax2.set_ylabel('MSE Loss')
+        ax2.set_title('MC-AE2 Training Loss')
     ax2.grid(True, alpha=0.3)
     ax2.legend()
     ax2.set_yscale('log')
@@ -1415,11 +1452,18 @@ def main():
     ax3 = axes[1, 0]
     reconstruction_errors_1 = ERRORU.flatten()
     mean_error_1 = np.mean(np.abs(reconstruction_errors_1))
-    ax3.hist(np.abs(reconstruction_errors_1), bins=50, alpha=0.7, color='blue', 
-             label=f'MC-AE1 Reconstruction Error (Mean: {mean_error_1:.4f}) / MC-AE1重构误差 (均值: {mean_error_1:.4f})')
-    ax3.set_xlabel('Absolute Reconstruction Error / 绝对重构误差')
-    ax3.set_ylabel('Frequency / 频数')
-    ax3.set_title('MC-AE1 Reconstruction Error Distribution / MC-AE1重构误差分布')
+    if use_chinese:
+        ax3.hist(np.abs(reconstruction_errors_1), bins=50, alpha=0.7, color='blue', 
+                label=f'MC-AE1重构误差 (均值: {mean_error_1:.4f})')
+        ax3.set_xlabel('绝对重构误差')
+        ax3.set_ylabel('频数')
+        ax3.set_title('MC-AE1重构误差分布')
+    else:
+        ax3.hist(np.abs(reconstruction_errors_1), bins=50, alpha=0.7, color='blue', 
+                label=f'MC-AE1 Reconstruction Error (Mean: {mean_error_1:.4f})')
+        ax3.set_xlabel('Absolute Reconstruction Error')
+        ax3.set_ylabel('Frequency')
+        ax3.set_title('MC-AE1 Reconstruction Error Distribution')
     ax3.legend()
     ax3.grid(True, alpha=0.3)
     
@@ -1427,11 +1471,18 @@ def main():
     ax4 = axes[1, 1]
     reconstruction_errors_2 = ERRORX.flatten()
     mean_error_2 = np.mean(np.abs(reconstruction_errors_2))
-    ax4.hist(np.abs(reconstruction_errors_2), bins=50, alpha=0.7, color='red',
-             label=f'MC-AE2 Reconstruction Error (Mean: {mean_error_2:.4f}) / MC-AE2重构误差 (均值: {mean_error_2:.4f})')
-    ax4.set_xlabel('Absolute Reconstruction Error / 绝对重构误差')
-    ax4.set_ylabel('Frequency / 频数')
-    ax4.set_title('MC-AE2 Reconstruction Error Distribution / MC-AE2重构误差分布')
+    if use_chinese:
+        ax4.hist(np.abs(reconstruction_errors_2), bins=50, alpha=0.7, color='red',
+                label=f'MC-AE2重构误差 (均值: {mean_error_2:.4f})')
+        ax4.set_xlabel('绝对重构误差')
+        ax4.set_ylabel('频数')
+        ax4.set_title('MC-AE2重构误差分布')
+    else:
+        ax4.hist(np.abs(reconstruction_errors_2), bins=50, alpha=0.7, color='red',
+                label=f'MC-AE2 Reconstruction Error (Mean: {mean_error_2:.4f})')
+        ax4.set_xlabel('Absolute Reconstruction Error')
+        ax4.set_ylabel('Frequency')
+        ax4.set_title('MC-AE2 Reconstruction Error Distribution')
     ax4.legend()
     ax4.grid(True, alpha=0.3)
     
