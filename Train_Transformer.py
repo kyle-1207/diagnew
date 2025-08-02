@@ -1336,6 +1336,13 @@ def main():
     yTrainX = y_recovered2.cpu().detach().numpy()
     ERRORX = BB - yTrainX
     
+    # 保存中间结果，避免重新训练
+    print("\n💾 保存中间结果...")
+    model_suffix = "_transformer"
+    np.save(f'models/ERRORU{model_suffix}.npy', ERRORU)
+    np.save(f'models/ERRORX{model_suffix}.npy', ERRORX)
+    print(f"✅ 中间结果已保存: ERRORU{model_suffix}.npy, ERRORX{model_suffix}.npy")
+    
     print("✅ MC-AE训练完成!")
     
     #----------------------------------------MC-AE训练结果可视化------------------------
