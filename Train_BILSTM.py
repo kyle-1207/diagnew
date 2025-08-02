@@ -30,11 +30,11 @@ import scipy.stats as stats
 import seaborn as sns
 import pickle
 
-# GPU设备配置 - Windows版本
+# GPU设备配置
 import os
-# 使用指定的GPU设备（Windows环境）
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # 使用GPU0和GPU1
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+# 使用指定的GPU设备
+os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'  # 使用GPU2和GPU3
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')  # 这里的cuda:0实际上是物理GPU2
 
 # 打印GPU信息
 if torch.cuda.is_available():
@@ -44,33 +44,17 @@ if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(i)
         print(f"\n   GPU {i} ({props.name}):")
         print(f"      总显存: {props.total_memory/1024**3:.1f}GB")
-    print(f"\n   当前使用: GPU0和GPU1")
-    print(f"   主GPU设备: cuda:0")
+    print(f"\n   当前使用: GPU2和GPU3 (通过CUDA_VISIBLE_DEVICES映射为cuda:0和cuda:1)")
+    print(f"   主GPU设备: cuda:0 (物理GPU2)")
 else:
     print("⚠️  未检测到GPU，使用CPU训练")
 
 # 中文注释：忽略警告信息
 warnings.filterwarnings('ignore')
 
-# Windows环境matplotlib配置
-import matplotlib
-matplotlib.use('TkAgg')  # Windows环境使用TkAgg后端
-
-# Windows环境字体设置
-import matplotlib.font_manager as fm
-try:
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
-    print("✅ Windows字体配置完成")
-except:
-    print("⚠️  字体配置失败，使用默认字体")
-
-plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['font.size'] = 10
-
 #----------------------------------------BiLSTM基准训练配置------------------------------
 print("="*50)
-print("BiLSTM基准训练模式（Windows优化版本）")
+print("BiLSTM基准训练模式（优化版本）")
 print("直接使用原始vin_2[x[0]]和vin_3[x[0]]数据")
 print("跳过Transformer训练，直接进行MC-AE训练")
 print("启用双GPU数据并行和混合精度训练")
@@ -82,8 +66,7 @@ def load_train_samples():
     """从Labels.xls加载训练样本ID"""
     try:
         import pandas as pd
-        # Windows路径格式
-        labels_path = 'F:\\大模型实战\\Batteries over Stochastic\\project\\data\\QAS\\Labels.xls'
+        labels_path = '../QAS/Labels.xls'
         df = pd.read_excel(labels_path)
         
         # 提取0-200范围的样本
@@ -108,36 +91,12 @@ print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 EPOCH = 300
 INIT_LR = 1e-5  # 进一步降低初始学习率
 MAX_LR = 5e-5   # 降低最大学习率
-
-# 根据GPU内存动态调整批次大小
-if torch.cuda.is_available():
-    gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
-    if gpu_memory_gb >= 80:  # A100 80GB
-        BATCHSIZE = 4000  # 您的建议，充分利用80GB显存
-    elif gpu_memory_gb >= 40:  # A100 40GB
-        BATCHSIZE = 2000
-    elif gpu_memory_gb >= 24:  # A100 24GB
-        BATCHSIZE = 1000
-    elif gpu_memory_gb >= 16:  # V100 16GB
-        BATCHSIZE = 500
-    else:  # 其他GPU
-        BATCHSIZE = 200
-    print(f"🖥️  检测到GPU显存: {gpu_memory_gb:.1f}GB，设置批次大小: {BATCHSIZE}")
-    print(f"🖥️  双GPU数据并行，每张卡处理: {BATCHSIZE//2} 个样本")
-else:
-    BATCHSIZE = 100  # CPU模式使用更小的批次
-
+BATCHSIZE = 8000  # 从2000增加到8000，充分利用A100显存
 WARMUP_EPOCHS = 10  # 增加学习率预热轮数
 
 # 添加梯度裁剪
 MAX_GRAD_NORM = 1.0  # 调整到更合理的梯度裁剪阈值
 MIN_GRAD_NORM = 0.1  # 最小梯度范数阈值
-
-# 内存优化参数
-MEMORY_CHECK_INTERVAL = 50  # 每50个批次检查一次内存
-CLEAR_CACHE_INTERVAL = 100  # 每100个批次清理一次缓存
-MAX_MEMORY_THRESHOLD = 0.90  # 内存使用率超过90%时采取措施（A100 80GB可以承受更高使用率）
-EMERGENCY_MEMORY_THRESHOLD = 0.98  # 内存使用率超过98%时紧急处理
 
 # 学习率预热函数
 def get_lr(epoch):
@@ -145,36 +104,14 @@ def get_lr(epoch):
         return INIT_LR + (MAX_LR - INIT_LR) * epoch / WARMUP_EPOCHS
     return MAX_LR * (0.9 ** (epoch // 50))  # 每50个epoch衰减到90%
 
-# 内存监控函数
-def check_gpu_memory():
-    """检查GPU内存使用情况"""
-    if torch.cuda.is_available():
-        for i in range(torch.cuda.device_count()):
-            allocated = torch.cuda.memory_allocated(i) / 1024**3
-            cached = torch.cuda.memory_reserved(i) / 1024**3
-            total = torch.cuda.get_device_properties(i).total_memory / 1024**3
-            usage_ratio = allocated / total
-            print(f"   GPU {i}: {allocated:.1f}GB / {cached:.1f}GB / {total:.1f}GB (已用/缓存/总计) - {usage_ratio*100:.1f}%")
-            return usage_ratio
-    return 0.0
-
-def clear_gpu_cache():
-    """清理GPU缓存"""
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        print("   🧹 GPU缓存已清理")
-
 # 显示优化后的训练参数
-print(f"\n⚙️  BiLSTM训练参数（A100 80GB优化版本）:")
-print(f"   批次大小: {BATCHSIZE} (充分利用A100 80GB显存)")
+print(f"\n⚙️  BiLSTM训练参数（优化版本）:")
+print(f"   批次大小: {BATCHSIZE} (从2000增加到8000，充分利用A100显存)")
 print(f"   训练轮数: {EPOCH}")
 print(f"   初始学习率: {INIT_LR}")
 print(f"   最大学习率: {MAX_LR}")
-print(f"   数据并行: 启用 (2张A100 80GB)")
+print(f"   数据并行: 启用")
 print(f"   混合精度: 启用 (AMP)")
-print(f"   内存监控: 启用 (每{MEMORY_CHECK_INTERVAL}批次检查)")
-print(f"   缓存清理: 启用 (每{CLEAR_CACHE_INTERVAL}批次清理)")
-print(f"   内存阈值: {MAX_MEMORY_THRESHOLD*100:.0f}% (A100 80GB可承受更高使用率)")
 
 #----------------------------------------MC-AE训练数据准备（直接使用原始数据）------------------------
 print("="*50)
@@ -687,8 +624,8 @@ print("📥 开始数据加载和质量检查")
 print("="*60)
 
 for sample_id in train_samples:
-    vin2_path = f'F:\\大模型实战\\Batteries over Stochastic\\project\\data\\QAS\\{sample_id}\\vin_2.pkl'
-    vin3_path = f'F:\\大模型实战\\Batteries over Stochastic\\project\\data\\QAS\\{sample_id}\\vin_3.pkl'
+    vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
+    vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
     
     # 加载原始vin_2数据
     try:
@@ -821,9 +758,7 @@ class Dataset(Dataset):
         return self.x[idx], self.y[idx], self.z[idx], self.q[idx]
 
 # 中文注释：用DataLoader批量加载多通道特征数据
-train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), 
-                           batch_size=BATCHSIZE, shuffle=False, 
-                           pin_memory=False, num_workers=0)  # 禁用pin_memory和num_workers减少内存占用
+train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=BATCHSIZE, shuffle=False)
 
 # 中文注释：初始化MC-AE模型（使用float32）
 net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
@@ -847,9 +782,9 @@ print("✅ 应用稳定的权重初始化")
 
 # 启用数据并行
 if torch.cuda.device_count() > 1:
-    net = torch.nn.DataParallel(net)
-    netx = torch.nn.DataParallel(netx)
-    print(f"✅ 启用数据并行，使用 {torch.cuda.device_count()} 张GPU")
+    net = torch.nn.DataParallel(net, device_ids=[0, 1])
+    netx = torch.nn.DataParallel(netx, device_ids=[0, 1])
+    print(f"✅ 启用数据并行，使用 {torch.cuda.device_count()} 张GPU (device_ids=[0,1])")
 else:
     print("⚠️  单GPU模式")
 
@@ -860,6 +795,11 @@ loss_f = nn.MSELoss()
 # 启用混合精度训练
 scaler = torch.cuda.amp.GradScaler()
 print("✅ 启用混合精度训练 (AMP)")
+
+# 启用CUDA性能优化
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.deterministic = False
+print("✅ 启用CUDA性能优化 (cudnn.benchmark)")
 for epoch in range(EPOCH):
     total_loss = 0
     num_batches = 0
@@ -869,32 +809,11 @@ for epoch in range(EPOCH):
     for param_group in optimizer.param_groups:
         param_group['lr'] = current_lr
     
-    # 每个epoch开始时清理缓存
-    clear_gpu_cache()
-    
     for iteration, (x, y, z, q) in enumerate(train_loader_u):
         x = x.to(device)
         y = y.to(device)
         z = z.to(device)
         q = q.to(device)
-        
-        # 内存监控 - 定期检查内存使用情况
-        if iteration % MEMORY_CHECK_INTERVAL == 0:
-            memory_usage = check_gpu_memory()
-            if memory_usage > EMERGENCY_MEMORY_THRESHOLD:
-                print(f"🚨  内存使用率过高 ({memory_usage*100:.1f}%)，紧急清理缓存...")
-                clear_gpu_cache()
-                torch.cuda.synchronize()  # 强制同步
-                if memory_usage > 0.98:  # 如果仍然过高，跳过此批次
-                    print(f"🚨  内存使用率仍然过高，跳过此批次")
-                    continue
-            elif memory_usage > MAX_MEMORY_THRESHOLD:
-                print(f"⚠️  内存使用率较高 ({memory_usage*100:.1f}%)，清理缓存...")
-                clear_gpu_cache()
-        
-        # 定期清理缓存
-        if iteration % CLEAR_CACHE_INTERVAL == 0:
-            clear_gpu_cache()
         
         # 检查输入数据范围
         if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
@@ -966,6 +885,7 @@ for epoch in range(EPOCH):
                 print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
             elif grad_norm < MIN_GRAD_NORM:
                 print(f"⚠️  梯度过小: {grad_norm:.4f} < {MIN_GRAD_NORM}")
+            # 移除"梯度正常"的输出，减少日志噪音
             
             # 执行优化器步骤
             scaler.step(optimizer)
@@ -977,14 +897,18 @@ for epoch in range(EPOCH):
             # 重置scaler状态
             scaler.update()
             continue
-        
-        # 及时释放不需要的张量
-        del x, y, z, q, recon_im, recon_p, loss_u
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
     if epoch % 50 == 0:
         print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
+    elif epoch % 10 == 0:  # 每10个epoch输出一次进度
+        print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
+        # GPU利用率监控
+        if torch.cuda.is_available():
+            gpu_memory_used = torch.cuda.memory_allocated() / 1024**3
+            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
 
 # 中文注释：全量推理，获得重构误差
 train_loader2 = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=len(x_recovered), shuffle=False)
@@ -1000,9 +924,7 @@ yTrainU = y_recovered.cpu().detach().numpy()
 ERRORU = AA - yTrainU
 
 # 中文注释：第二组特征的MC-AE训练
-train_loader_soc = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
-                             batch_size=BATCHSIZE, shuffle=False,
-                             pin_memory=False, num_workers=0)  # 禁用pin_memory和num_workers减少内存占用
+train_loader_soc = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=BATCHSIZE, shuffle=False)
 optimizer = torch.optim.Adam(netx.parameters(), lr=INIT_LR)
 loss_f = nn.MSELoss()
 
@@ -1019,32 +941,11 @@ for epoch in range(EPOCH):
     for param_group in optimizer.param_groups:
         param_group['lr'] = current_lr
     
-    # 每个epoch开始时清理缓存
-    clear_gpu_cache()
-    
     for iteration, (x, y, z, q) in enumerate(train_loader_soc):
         x = x.to(device)
         y = y.to(device)
         z = z.to(device)
         q = q.to(device)
-        
-        # 内存监控 - 定期检查内存使用情况
-        if iteration % MEMORY_CHECK_INTERVAL == 0:
-            memory_usage = check_gpu_memory()
-            if memory_usage > EMERGENCY_MEMORY_THRESHOLD:
-                print(f"🚨  内存使用率过高 ({memory_usage*100:.1f}%)，紧急清理缓存...")
-                clear_gpu_cache()
-                torch.cuda.synchronize()  # 强制同步
-                if memory_usage > 0.98:  # 如果仍然过高，跳过此批次
-                    print(f"🚨  内存使用率仍然过高，跳过此批次")
-                    continue
-            elif memory_usage > MAX_MEMORY_THRESHOLD:
-                print(f"⚠️  内存使用率较高 ({memory_usage*100:.1f}%)，清理缓存...")
-                clear_gpu_cache()
-        
-        # 定期清理缓存
-        if iteration % CLEAR_CACHE_INTERVAL == 0:
-            clear_gpu_cache()
         
         # 使用混合精度训练
         with torch.cuda.amp.autocast():
@@ -1102,6 +1003,7 @@ for epoch in range(EPOCH):
                 print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
             elif grad_norm < MIN_GRAD_NORM:
                 print(f"⚠️  梯度过小: {grad_norm:.4f} < {MIN_GRAD_NORM}")
+            # 移除"梯度正常"的输出，减少日志噪音
             
             # 执行优化器步骤
             scaler2.step(optimizer)
@@ -1113,15 +1015,19 @@ for epoch in range(EPOCH):
             # 重置scaler状态
             scaler2.update()
             continue
-        
-        # 及时释放不需要的张量
-        del x, y, z, q, recon_im, loss_x
     
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
     train_losses_mcae2.append(avg_loss)
     if epoch % 50 == 0:
         print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
+    elif epoch % 10 == 0:  # 每10个epoch输出一次进度
+        print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
+        # GPU利用率监控
+        if torch.cuda.is_available():
+            gpu_memory_used = torch.cuda.memory_allocated() / 1024**3
+            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
 
 train_loaderx2 = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=len(x_recovered2), shuffle=False)
 for iteration, (x, y, z, q) in enumerate(train_loaderx2):
@@ -1153,6 +1059,42 @@ print("="*50)
 
 # 绘制训练结果
 print("📈 绘制BiLSTM训练曲线...")
+
+# Linux环境matplotlib配置
+import matplotlib
+matplotlib.use('Agg')  # 使用非交互式后端
+
+# Linux环境字体设置 - 修复中文显示问题
+import matplotlib.font_manager as fm
+import os
+
+# 尝试多种字体方案
+font_options = [
+    'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
+    'DejaVu Sans', 'Liberation Sans', 'Arial Unicode MS'
+]
+
+# 检查可用字体
+available_fonts = []
+for font in font_options:
+    try:
+        fm.findfont(font)
+        available_fonts.append(font)
+    except:
+        continue
+
+# 设置字体
+if available_fonts:
+    plt.rcParams['font.sans-serif'] = available_fonts
+    print(f"✅ 使用字体: {available_fonts[0]}")
+else:
+    # 如果都不可用，使用英文标签
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    print("⚠️  未找到中文字体，将使用英文标签")
+
+plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.size'] = 10
 
 # 创建图表
 fig, axes = plt.subplots(2, 2, figsize=(15, 10))
@@ -1252,7 +1194,7 @@ training_history = {
     'mcae2_reconstruction_error_std': np.std(np.abs(ERRORX)),
     'training_samples': len(train_samples),
     'epochs': EPOCH,
-    'learning_rate': INIT_LR, # Changed from LR to INIT_LR
+    'learning_rate': LR,
     'batch_size': BATCHSIZE
 }
 
