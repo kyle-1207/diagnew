@@ -106,7 +106,7 @@ def get_lr(epoch):
 
 # 显示优化后的训练参数
 print(f"\n⚙️  BiLSTM训练参数（优化版本）:")
-print(f"   批次大小: {BATCHSIZE} (从2000增加到8000，充分利用A100显存)")
+print(f"   批次大小: {BATCHSIZE} (优化为4000，平衡性能和稳定性)")
 print(f"   训练轮数: {EPOCH}")
 print(f"   初始学习率: {INIT_LR}")
 print(f"   最大学习率: {MAX_LR}")
@@ -803,6 +803,7 @@ print("✅ 启用CUDA性能优化 (cudnn.benchmark)")
 for epoch in range(EPOCH):
     total_loss = 0
     num_batches = 0
+    grad_too_small_count = 0  # 初始化梯度过小统计
     
     # 更新学习率
     current_lr = get_lr(epoch)
@@ -879,12 +880,12 @@ for epoch in range(EPOCH):
                 
             grad_norm = grad_norm ** 0.5
             
-            # 渐进式梯度裁剪 - 只显示异常情况
+            # 渐进式梯度裁剪 - 统计异常情况
             if grad_norm > MAX_GRAD_NORM:
                 torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
                 print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
             elif grad_norm < MIN_GRAD_NORM:
-                print(f"⚠️  梯度过小: {grad_norm:.4f} < {MIN_GRAD_NORM}")
+                grad_too_small_count += 1
             # 移除"梯度正常"的输出，减少日志噪音
             
             # 执行优化器步骤
@@ -900,15 +901,21 @@ for epoch in range(EPOCH):
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
-    if epoch % 50 == 0:
-        print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
-    elif epoch % 10 == 0:  # 每10个epoch输出一次进度
-        print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
-        # GPU利用率监控
-        if torch.cuda.is_available():
-            gpu_memory_used = torch.cuda.memory_allocated() / 1024**3
-            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-            print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
+    
+    # 梯度统计总结
+    if grad_too_small_count > 0:
+        grad_percentage = (grad_too_small_count / num_batches) * 100
+        print(f'MC-AE1 Epoch: {epoch:2d} | Average Loss: {avg_loss:.6f} | 梯度过小: {grad_too_small_count}/{num_batches} ({grad_percentage:.1f}%)')
+    else:
+        if epoch % 50 == 0:
+            print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
+        elif epoch % 10 == 0:  # 每10个epoch输出一次进度
+            print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
+            # GPU利用率监控
+            if torch.cuda.is_available():
+                gpu_memory_used = torch.cuda.memory_allocated() / 1024**3
+                gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
 
 # 中文注释：全量推理，获得重构误差
 train_loader2 = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=len(x_recovered), shuffle=False)
@@ -935,6 +942,7 @@ avg_loss_list_x = []
 for epoch in range(EPOCH):
     total_loss = 0
     num_batches = 0
+    grad_too_small_count_x = 0  # 初始化第二个模型的梯度过小统计
     
     # 更新学习率
     current_lr = get_lr(epoch)
@@ -997,12 +1005,12 @@ for epoch in range(EPOCH):
                 
             grad_norm = grad_norm ** 0.5
             
-            # 渐进式梯度裁剪 - 只显示异常情况
+            # 渐进式梯度裁剪 - 统计异常情况
             if grad_norm > MAX_GRAD_NORM:
                 torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
                 print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
             elif grad_norm < MIN_GRAD_NORM:
-                print(f"⚠️  梯度过小: {grad_norm:.4f} < {MIN_GRAD_NORM}")
+                grad_too_small_count_x += 1
             # 移除"梯度正常"的输出，减少日志噪音
             
             # 执行优化器步骤
@@ -1019,15 +1027,21 @@ for epoch in range(EPOCH):
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
     train_losses_mcae2.append(avg_loss)
-    if epoch % 50 == 0:
-        print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
-    elif epoch % 10 == 0:  # 每10个epoch输出一次进度
-        print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
-        # GPU利用率监控
-        if torch.cuda.is_available():
-            gpu_memory_used = torch.cuda.memory_allocated() / 1024**3
-            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-            print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
+    
+    # 梯度统计总结
+    if grad_too_small_count_x > 0:
+        grad_percentage_x = (grad_too_small_count_x / num_batches) * 100
+        print(f'MC-AE2 Epoch: {epoch:2d} | Average Loss: {avg_loss:.6f} | 梯度过小: {grad_too_small_count_x}/{num_batches} ({grad_percentage_x:.1f}%)')
+    else:
+        if epoch % 50 == 0:
+            print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
+        elif epoch % 10 == 0:  # 每10个epoch输出一次进度
+            print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
+            # GPU利用率监控
+            if torch.cuda.is_available():
+                gpu_memory_used = torch.cuda.memory_allocated() / 1024**3
+                gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
 
 train_loaderx2 = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=len(x_recovered2), shuffle=False)
 for iteration, (x, y, z, q) in enumerate(train_loaderx2):
