@@ -86,35 +86,46 @@ import os
 # 更全面的字体检测和设置
 def setup_chinese_fonts():
     """设置中文字体，如果不可用则使用英文"""
-    # 尝试多种中文字体
-    chinese_fonts = [
-        'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
-        'Noto Sans CJK JP', 'Noto Sans CJK TC', 'Source Han Sans CN',
-        'Droid Sans Fallback', 'WenQuanYi Zen Hei', 'AR PL UMing CN'
-    ]
-    
-    # 检查系统字体
-    system_fonts = [f.name for f in fm.fontManager.ttflist]
-    print(f"🔍 系统可用字体数量: {len(system_fonts)}")
-    
-    # 查找可用的中文字体
-    available_chinese = []
-    for font in chinese_fonts:
-        if font in system_fonts:
-            available_chinese.append(font)
-            print(f"✅ 找到中文字体: {font}")
-    
-    if available_chinese:
-        # 使用第一个可用的中文字体
-        plt.rcParams['font.sans-serif'] = available_chinese
+    try:
+        # 尝试多种中文字体
+        chinese_fonts = [
+            'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
+            'Noto Sans CJK JP', 'Noto Sans CJK TC', 'Source Han Sans CN',
+            'Droid Sans Fallback', 'WenQuanYi Zen Hei', 'AR PL UMing CN'
+        ]
+        
+        # 检查系统字体
+        try:
+            system_fonts = [f.name for f in fm.fontManager.ttflist]
+            print(f"🔍 系统可用字体数量: {len(system_fonts)}")
+        except:
+            system_fonts = []
+            print("⚠️  无法获取系统字体列表")
+        
+        # 查找可用的中文字体
+        available_chinese = []
+        for font in chinese_fonts:
+            if font in system_fonts:
+                available_chinese.append(font)
+                print(f"✅ 找到中文字体: {font}")
+        
+        if available_chinese:
+            # 使用第一个可用的中文字体
+            plt.rcParams['font.sans-serif'] = available_chinese
+            plt.rcParams['axes.unicode_minus'] = False
+            print(f"🎨 使用中文字体: {available_chinese[0]}")
+            return True
+        else:
+            # 没有中文字体，使用英文
+            plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Liberation Sans', 'Arial']
+            plt.rcParams['axes.unicode_minus'] = False
+            print("⚠️  未找到中文字体，将使用英文标签")
+            return False
+    except Exception as e:
+        print(f"⚠️  字体设置出现问题: {e}")
+        # 使用最基本的字体设置
+        plt.rcParams['font.family'] = 'sans-serif'
         plt.rcParams['axes.unicode_minus'] = False
-        print(f"🎨 使用中文字体: {available_chinese[0]}")
-        return True
-    else:
-        # 没有中文字体，使用英文
-        plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Liberation Sans', 'Arial']
-        plt.rcParams['axes.unicode_minus'] = False
-        print("⚠️  未找到中文字体，将使用英文标签")
         return False
 
 # 设置字体
@@ -384,18 +395,40 @@ def load_train_samples():
     """加载训练样本ID"""
     try:
         import pandas as pd
-        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
+        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/data/QAS/Labels.xls'
+        
+        # 检查文件是否存在
+        if not os.path.exists(labels_path):
+            print(f"⚠️  Labels.xls文件不存在: {labels_path}")
+            print("⚠️  使用默认样本范围 0-9")
+            return TRAIN_SAMPLES
+        
         df = pd.read_excel(labels_path)
+        print(f"📋 成功读取Labels.xls, 共{len(df)}行数据")
+        
+        # 检查DataFrame列名
+        print(f"📋 可用列名: {df.columns.tolist()}")
+        
+        # 尝试不同的列名
+        if 'Num' in df.columns:
+            all_samples = df['Num'].tolist()
+        elif 'num' in df.columns:
+            all_samples = df['num'].tolist()
+        elif df.columns.size > 0:
+            # 使用第一列
+            all_samples = df.iloc[:, 0].tolist()
+        else:
+            raise ValueError("无法找到样本ID列")
         
         # 提取0-9范围的样本
-        all_samples = df['Num'].tolist()
         train_samples = [i for i in all_samples if i in TRAIN_SAMPLES]
         
         print(f"📋 从Labels.xls加载训练样本:")
         print(f"   训练样本范围: 0-9")
         print(f"   实际可用样本: {len(train_samples)} 个")
+        print(f"   样本列表: {train_samples}")
         
-        return train_samples
+        return train_samples if train_samples else TRAIN_SAMPLES
     except Exception as e:
         print(f"❌ 加载Labels.xls失败: {e}")
         print("⚠️  使用默认样本范围 0-9")
@@ -403,7 +436,7 @@ def load_train_samples():
 
 def load_test_sample(sample_id):
     """加载测试样本"""
-    base_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}'
+    base_path = f'/mnt/bz25t/bzhy/zhanglikang/project/data/QAS/{sample_id}'
     
     # 检查样本目录是否存在
     if not os.path.exists(base_path):
