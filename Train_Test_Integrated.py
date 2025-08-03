@@ -502,10 +502,15 @@ def load_sample_data(sample_id, data_type='QAS'):
         else:
             data_path = f"../project/data/{data_type}/{sample_id}/"
         
-        # 加载数据文件
-        vin1_data = pd.read_pickle(f"{data_path}vin_1.pkl")
-        vin2_data = pd.read_pickle(f"{data_path}vin_2.pkl") 
-        vin3_data = pd.read_pickle(f"{data_path}vin_3.pkl")
+        # 加载数据文件 - 使用pickle.load而不是pd.read_pickle
+        import pickle
+        
+        with open(f"{data_path}vin_1.pkl", 'rb') as f:
+            vin1_data = pickle.load(f)
+        with open(f"{data_path}vin_2.pkl", 'rb') as f:
+            vin2_data = pickle.load(f)
+        with open(f"{data_path}vin_3.pkl", 'rb') as f:
+            vin3_data = pickle.load(f)
         
         return vin1_data, vin2_data, vin3_data
         
@@ -522,14 +527,20 @@ def prepare_training_data_v2(sample_ids, device):
         vin1_data, vin2_data, vin3_data = load_sample_data(sample_id)
         
         if vin1_data is not None:
-            # 确保数据是numpy数组格式
-            if hasattr(vin1_data, 'values'):  # pandas DataFrame
-                vin1_array = vin1_data.values
-                vin2_array = vin2_data.values
-                vin3_array = vin3_data.values
-            else:  # numpy array或tensor
+            # 确保数据是numpy数组格式 - 参考Train_Transformer.py的处理方式
+            if isinstance(vin1_data, torch.Tensor):
+                vin1_array = vin1_data.cpu().numpy()
+            else:
                 vin1_array = np.array(vin1_data)
+            
+            if isinstance(vin2_data, torch.Tensor):
+                vin2_array = vin2_data.cpu().numpy()
+            else:
                 vin2_array = np.array(vin2_data)
+            
+            if isinstance(vin3_data, torch.Tensor):
+                vin3_array = vin3_data.cpu().numpy()
+            else:
                 vin3_array = np.array(vin3_data)
             
             # 构建特征矩阵（这里需要根据实际数据结构调整）
