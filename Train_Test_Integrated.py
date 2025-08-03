@@ -503,9 +503,9 @@ def load_sample_data(sample_id, data_type='QAS'):
             data_path = f"../project/data/{data_type}/{sample_id}/"
         
         # 加载数据文件
-        vin1_data = pd.read_pickle(f"{data_path}vin1_data.pkl")
-        vin2_data = pd.read_pickle(f"{data_path}vin2_data.pkl") 
-        vin3_data = pd.read_pickle(f"{data_path}vin3_data.pkl")
+        vin1_data = pd.read_pickle(f"{data_path}vin_1.pkl")
+        vin2_data = pd.read_pickle(f"{data_path}vin_2.pkl") 
+        vin3_data = pd.read_pickle(f"{data_path}vin_3.pkl")
         
         return vin1_data, vin2_data, vin3_data
         
