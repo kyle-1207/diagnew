@@ -496,7 +496,11 @@ def feedback_loss(transformer_output, normal_center, false_positive_mask, alpha=
 def load_sample_data(sample_id, data_type='QAS'):
     """加载样本数据"""
     try:
-        data_path = f"data/{data_type}/{sample_id}/"
+        # 根据实际路径结构修复
+        if data_type == "QAS":
+            data_path = f"../QAS/{sample_id}/"
+        else:
+            data_path = f"../project/data/{data_type}/{sample_id}/"
         
         # 加载数据文件
         vin1_data = pd.read_pickle(f"{data_path}vin1_data.pkl")

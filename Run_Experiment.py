@@ -36,7 +36,7 @@ def quick_test():
     print("1. 测试数据加载...")
     try:
         # 尝试加载一个QAS样本
-        sample_path = "data/QAS/0"
+        sample_path = "../QAS/0"
         if os.path.exists(sample_path):
             files = os.listdir(sample_path)
             print(f"   样本0包含文件: {files}")
@@ -102,7 +102,7 @@ def load_real_data_sample():
     print("\n📊 尝试加载真实数据...")
     
     # QAS样本路径
-    qas_samples = [f"data/QAS/{i}" for i in range(10)]
+    qas_samples = [f"../QAS/{i}" for i in range(10)]
     
     loaded_data = {}
     
@@ -305,7 +305,7 @@ def main():
         print("   3. 查看生成的可视化图表")
     else:
         print("⚠️  部分功能测试失败，请检查:")
-        print("   - 数据文件是否存在 (data/QAS/0/*.pkl)")
+        print("   - 数据文件是否存在 (../QAS/0/*.pkl)")
         print("   - 依赖模块是否正确导入")
         print("   - GPU/CPU环境是否配置正确")
 
