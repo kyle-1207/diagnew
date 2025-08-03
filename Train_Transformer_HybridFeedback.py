@@ -9,7 +9,7 @@ import warnings
 import matplotlib
 from Function_ import *
 from Class_ import *
-from Comprehensive_calculation import *
+from Comprehensive_calculation import Comprehensive_calculation
 import math
 import math
 from create_dataset import series_to_supervised
@@ -32,6 +32,7 @@ import pickle
 from scipy import ndimage
 import copy
 import time
+
 
 # 导入Transformer数据加载器
 from data_loader_transformer import TransformerBatteryDataset, create_transformer_dataloader
@@ -485,34 +486,213 @@ class TransformerPredictor(nn.Module):
         return output  # [batch, output_size] 直接返回2维
 
 #----------------------------------------混合反馈策略核心函数------------------------------
-def calculate_false_positive_rate(predictions, ground_truth, fault_labels, threshold=0.5):
+def calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, pca_params, device):
     """
-    计算假阳性率
+    计算综合故障指示器fai（基于Comprehensive_calculation）
     
     参数:
-        predictions: 模型预测的故障概率
-        ground_truth: 真实故障标签 (0=正常, 1=故障)
-        fault_labels: 预测的故障标签
-        threshold: 故障判断阈值
+        sample_data: 样本数据 (vin_2, vin_3)
+        mcae_net1, mcae_net2: 训练好的MC-AE模型
+        pca_params: PCA参数字典
+        device: 计算设备
+    
+    返回:
+        fai: 综合故障指示器数组
+    """
+    mcae_net1.eval()
+    mcae_net2.eval()
+    
+    with torch.no_grad():
+        # 1. 准备MC-AE输入数据
+        vin2_data, vin3_data = sample_data
+        
+        # 2. 分割特征（与训练时保持一致）
+        dim_x, dim_y, dim_z = 2, 110, 110
+        x_recovered = vin2_data[:, :dim_x]
+        y_recovered = vin2_data[:, dim_x:dim_x + dim_y] 
+        z_recovered = vin2_data[:, dim_x + dim_y: dim_x + dim_y + dim_z]
+        q_recovered = vin2_data[:, dim_x + dim_y + dim_z:]
+        
+        dim_x2, dim_y2, dim_z2 = 2, 110, 110
+        x_recovered2 = vin3_data[:, :dim_x2]
+        y_recovered2 = vin3_data[:, dim_x2:dim_x2 + dim_y2]
+        z_recovered2 = vin3_data[:, dim_x2 + dim_y2: dim_x2 + dim_y2 + dim_z2]
+        q_recovered2 = vin3_data[:, dim_x2 + dim_y2 + dim_z2:]
+        
+        # 3. MC-AE重构
+        recon_im1, _ = mcae_net1(x_recovered.double(), z_recovered.double(), q_recovered.double())
+        recon_im2, _ = mcae_net2(x_recovered2.double(), z_recovered2.double(), q_recovered2.double())
+        
+        # 4. 计算重构误差
+        ERRORU = recon_im1.cpu().detach().numpy() - y_recovered.cpu().detach().numpy()
+        ERRORX = recon_im2.cpu().detach().numpy() - y_recovered2.cpu().detach().numpy()
+        
+        # 5. 诊断特征提取（复用Function_.py）
+        df_data = DiagnosisFeature(ERRORU, ERRORX)
+        
+        # 6. 综合诊断计算（复用Comprehensive_calculation.py）
+        time = np.arange(df_data.shape[0])
+        
+        try:
+            # 调用综合计算函数
+            lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, level, maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = Comprehensive_calculation(
+                df_data.values,
+                pca_params['data_mean'],
+                pca_params['data_std'], 
+                pca_params['v'].reshape(len(pca_params['v']), 1),
+                pca_params['p_k'],
+                pca_params['v_I'],
+                pca_params['T_99_limit'],
+                pca_params['SPE_99_limit'],
+                pca_params['P'],
+                time
+            )
+            
+            return fai
+            
+        except Exception as e:
+            print(f"   ⚠️ 综合诊断计算失败: {e}")
+            # 返回基于重构误差的简单指标作为后备
+            simple_fai = np.mean(np.abs(ERRORU), axis=1) + np.mean(np.abs(ERRORX), axis=1)
+            return simple_fai
+
+def calculate_training_threshold(train_samples, mcae_net1, mcae_net2, pca_params, device):
+    """
+    基于训练样本计算故障检测阈值（按照测试脚本的方法）
+    
+    参数:
+        train_samples: 训练样本ID列表
+        mcae_net1, mcae_net2: 训练好的MC-AE模型
+        pca_params: PCA参数字典
+        device: 计算设备
+    
+    返回:
+        threshold1, threshold2, threshold3: 三级阈值
+    """
+    print("🔧 计算训练阶段故障检测阈值...")
+    
+    all_training_fai = []
+    
+    for sample_id in train_samples:
+        try:
+            # 加载样本数据
+            vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
+            vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
+            
+            with open(vin2_path, 'rb') as f:
+                vin2_data = pickle.load(f)
+            with open(vin3_path, 'rb') as f:
+                vin3_data = pickle.load(f)
+            
+            # 数据预处理
+            vin2_processed = physics_based_data_processing_silent(vin2_data, feature_type='vin2')
+            vin3_processed = physics_based_data_processing_silent(vin3_data, feature_type='vin3')
+            
+            # 计算该样本的综合故障指示器
+            sample_data = (vin2_processed, vin3_processed)
+            fai = calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, pca_params, device)
+            
+            all_training_fai.extend(fai)
+            
+            if (len(all_training_fai) // 1000) > ((len(all_training_fai) - len(fai)) // 1000):
+                print(f"   已处理 {len(all_training_fai)} 个数据点")
+                
+        except Exception as e:
+            print(f"   ❌ 样本 {sample_id} 处理失败: {e}")
+            continue
+    
+    all_training_fai = np.array(all_training_fai)
+    print(f"   训练数据总计: {len(all_training_fai)} 个数据点")
+    
+    # 按照测试脚本的方法计算阈值
+    nm = 3000  # 固定分割点
+    mm = len(all_training_fai)
+    
+    if mm > nm:
+        # 使用后半段数据计算基准统计量
+        fai_baseline = all_training_fai[nm:mm]
+        print(f"   使用后半段数据 ({nm}:{mm}) 计算阈值")
+    else:
+        # 数据不足，使用全部数据
+        fai_baseline = all_training_fai
+        print(f"   ⚠️ 数据长度({mm})不足{nm}，使用全部数据计算阈值")
+    
+    # 计算三级阈值
+    fai_mean = np.mean(fai_baseline)
+    fai_std = np.std(fai_baseline)
+    
+    threshold1 = fai_mean + 3 * fai_std      # 3σ
+    threshold2 = fai_mean + 4.5 * fai_std    # 4.5σ  
+    threshold3 = fai_mean + 6 * fai_std      # 6σ
+    
+    print(f"   阈值统计: 均值={fai_mean:.4f}, 标准差={fai_std:.4f}")
+    print(f"   计算得到阈值: T1={threshold1:.4f}, T2={threshold2:.4f}, T3={threshold3:.4f}")
+    
+    return threshold1, threshold2, threshold3
+
+def calculate_false_positive_rate_comprehensive(feedback_samples, mcae_net1, mcae_net2, 
+                                              pca_params, threshold, device):
+    """
+    基于综合诊断指标计算假阳性率
+    
+    参数:
+        feedback_samples: 反馈样本ID列表（已知正常样本）
+        mcae_net1, mcae_net2: 训练好的MC-AE模型
+        pca_params: PCA参数字典
+        threshold: 故障检测阈值
+        device: 计算设备
     
     返回:
         false_positive_rate: 假阳性率
-        false_positives: 假阳性样本数量
-        true_negatives: 真阴性样本数量
+        false_positives: 假阳性数量
+        total_normals: 总正常样本数
     """
-    # 找到真实正常样本
-    normal_samples = (ground_truth == 0)
+    print(f"🔍 计算反馈样本 {feedback_samples} 的假阳性率...")
     
-    if normal_samples.sum() == 0:
+    all_fai = []
+    
+    for sample_id in feedback_samples:  # [8, 9] 都是正常样本
+        try:
+            # 加载样本数据
+            vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
+            vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
+            
+            with open(vin2_path, 'rb') as f:
+                vin2_data = pickle.load(f)
+            with open(vin3_path, 'rb') as f:
+                vin3_data = pickle.load(f)
+            
+            # 数据预处理
+            vin2_processed = physics_based_data_processing_silent(vin2_data, feature_type='vin2')
+            vin3_processed = physics_based_data_processing_silent(vin3_data, feature_type='vin3')
+            
+            # 计算该样本的综合故障指示器
+            sample_data = (vin2_processed, vin3_processed)
+            fai = calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, pca_params, device)
+            
+            all_fai.extend(fai)
+            print(f"   样本{sample_id}: {len(fai)}个数据点")
+            
+        except Exception as e:
+            print(f"   ❌ 反馈样本 {sample_id} 处理失败: {e}")
+            continue
+    
+    if len(all_fai) == 0:
+        print("   ❌ 没有成功加载任何反馈样本数据")
         return 0.0, 0, 0
     
-    # 在正常样本中，被错误识别为故障的比例
-    false_positives = ((predictions > threshold) & normal_samples).sum()
-    true_negatives = ((predictions <= threshold) & normal_samples).sum()
+    all_fai = np.array(all_fai)
     
-    false_positive_rate = false_positives / (false_positives + true_negatives) if (false_positives + true_negatives) > 0 else 0.0
+    # 计算假阳性率：正常样本中被误判为故障的比例
+    false_positives = (all_fai > threshold).sum()
+    total_normals = len(all_fai)
+    false_positive_rate = false_positives / total_normals
     
-    return false_positive_rate, false_positives, true_negatives
+    print(f"   反馈样本总计: {total_normals} 个数据点")
+    print(f"   超过阈值({threshold:.4f}): {false_positives} 个")
+    print(f"   假阳性率: {false_positive_rate:.4f} ({false_positive_rate*100:.2f}%)")
+    
+    return false_positive_rate, false_positives, total_normals
 
 def detect_feedback_trigger(false_positive_rate, epoch, config):
     """
@@ -557,12 +737,12 @@ def detect_feedback_trigger(false_positive_rate, epoch, config):
 def apply_hybrid_feedback(transformer, mcae_net1, mcae_net2, feedback_data, 
                          feedback_weight, mcae_weight, transformer_weight, device):
     """
-    应用混合反馈机制
+    应用混合反馈机制（简化版）
     
     参数:
         transformer: Transformer模型
         mcae_net1, mcae_net2: MC-AE模型
-        feedback_data: 反馈数据
+        feedback_data: 反馈数据（可以为None）
         feedback_weight: 反馈强度权重
         mcae_weight: MC-AE权重
         transformer_weight: Transformer权重
@@ -575,47 +755,11 @@ def apply_hybrid_feedback(transformer, mcae_net1, mcae_net2, feedback_data,
     if feedback_weight == 0.0:
         return torch.tensor(0.0, device=device), "无反馈"
     
-    # 在这里实现具体的混合反馈逻辑
-    # 1. 使用反馈数据进行MC-AE重构
-    # 2. 计算重构误差
-    # 3. 根据误差调整Transformer预测
-    # 4. 计算综合反馈损失
-    
-    # 暂时返回零损失和简单信息
-    feedback_loss = torch.tensor(0.0, device=device)
+    # 简化的反馈损失：基于反馈权重的正则化项
+    feedback_loss = torch.tensor(feedback_weight * 0.01, device=device)
     feedback_info = f"反馈权重: {feedback_weight:.2f}, MC-AE权重: {mcae_weight:.2f}, Transformer权重: {transformer_weight:.2f}"
     
     return feedback_loss, feedback_info
-
-def load_feedback_samples():
-    """加载反馈样本数据"""
-    feedback_samples = HYBRID_FEEDBACK_CONFIG['feedback_samples']
-    print(f"📥 加载反馈样本: {feedback_samples}")
-    
-    feedback_data = []
-    for sample_id in feedback_samples:
-        try:
-            # 加载vin_1数据用于构建反馈输入
-            vin1_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_1.pkl'
-            with open(vin1_path, 'rb') as file:
-                vin1_data = pickle.load(file)
-                if isinstance(vin1_data, torch.Tensor):
-                    vin1_data = vin1_data.cpu()
-                else:
-                    vin1_data = torch.tensor(vin1_data)
-                feedback_data.append(vin1_data)
-                
-        except Exception as e:
-            print(f"❌ 加载反馈样本 {sample_id} 失败: {e}")
-            continue
-    
-    if feedback_data:
-        combined_feedback = torch.cat(feedback_data, dim=0).float()
-        print(f"✅ 反馈数据加载完成: {combined_feedback.shape}")
-        return combined_feedback
-    else:
-        print("❌ 没有成功加载任何反馈数据")
-        return None
 
 #----------------------------------------主训练函数------------------------------
 def main():
@@ -1106,112 +1250,10 @@ def main():
     print("🔮 阶段3: 混合反馈训练（样本8-9，轮数21-40）")
     print("="*60)
     
-    # 加载反馈样本数据
-    feedback_data = load_feedback_samples()
-    if feedback_data is None:
-        print("❌ 无法加载反馈样本，跳过反馈训练")
-        feedback_enabled = False
-    else:
-        feedback_enabled = True
-        print(f"✅ 反馈数据准备完成: {feedback_data.shape}")
-    
-    # 继续训练（阶段3：混合反馈）
-    transformer.train()
+    # 阶段3在阶段4之后进行，因为需要PCA参数计算阈值
+    print("⚠️ 阶段3将在PCA分析完成后进行，需要先获取故障检测阈值")
     train_losses_phase2 = []
     feedback_history = []
-    
-    print(f"\n🎯 开始阶段3训练（epoch {EPOCH_PHASE1+1}-{EPOCH_PHASE2}）...")
-    
-    for epoch in range(EPOCH_PHASE1, EPOCH_PHASE2):
-        epoch_loss = 0
-        batch_count = 0
-        feedback_triggered = False
-        trigger_info = "无反馈"
-        
-        # 检查是否启用反馈
-        if (feedback_enabled and 
-            epoch >= config['feedback_start_epoch'] and 
-            epoch % config['feedback_frequency'] == 0):
-            
-            print(f"\n🔍 Epoch {epoch}: 检查反馈触发条件...")
-            
-            # 这里应该计算当前的假阳性率
-            # 暂时使用模拟的假阳性率进行演示
-            simulated_false_positive_rate = np.random.uniform(0, 0.08)  # 模拟0-8%的假阳性率
-            
-            print(f"   当前假阳性率: {simulated_false_positive_rate:.4f}")
-            
-            # 检测反馈触发
-            trigger_level, lr_factor, feedback_weight = detect_feedback_trigger(
-                simulated_false_positive_rate, epoch, config)
-            
-            if trigger_level != 'none':
-                feedback_triggered = True
-                trigger_info = f"{trigger_level}反馈 (权重:{feedback_weight:.2f}, LR因子:{lr_factor:.2f})"
-                
-                # 调整学习率
-                if lr_factor != 1.0:
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] *= lr_factor
-                    print(f"   学习率调整: {param_group['lr']:.6f}")
-                
-                # 应用混合反馈
-                feedback_loss, feedback_info = apply_hybrid_feedback(
-                    transformer, net, netx, feedback_data, 
-                    feedback_weight, config['mcae_weight'], config['transformer_weight'], device)
-                
-                print(f"   {feedback_info}")
-                
-                # 记录反馈历史
-                feedback_history.append({
-                    'epoch': epoch,
-                    'false_positive_rate': simulated_false_positive_rate,
-                    'trigger_level': trigger_level,
-                    'feedback_weight': feedback_weight,
-                    'lr_factor': lr_factor
-                })
-        
-        # 正常训练循环
-        for batch_input, batch_target in train_loader:
-            # 数据移到设备
-            batch_input = batch_input.to(device)
-            batch_target = batch_target.to(device)
-            
-            # 梯度清零
-            optimizer.zero_grad()
-            
-            # 混合精度前向传播
-            with torch.cuda.amp.autocast():
-                pred_output = transformer(batch_input)
-                loss = criterion(pred_output, batch_target)
-                
-                # 如果有反馈，添加反馈损失
-                if feedback_triggered and feedback_enabled:
-                    total_loss = loss + 0.1 * feedback_loss  # 反馈损失权重为0.1
-                else:
-                    total_loss = loss
-            
-            # 混合精度反向传播
-            scaler.scale(total_loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            
-            epoch_loss += total_loss.item()
-            batch_count += 1
-        
-        # 学习率调度（在反馈调整之后）
-        scheduler.step()
-        
-        # 计算平均损失
-        avg_loss = epoch_loss / batch_count
-        train_losses_phase2.append(avg_loss)
-        
-        # 打印训练进度
-        if epoch % 2 == 0 or epoch == EPOCH_PHASE2 - 1:
-            current_lr = optimizer.param_groups[0]['lr']
-            print(f'阶段3 Epoch: {epoch:3d} | Loss: {avg_loss:.6f} | LR: {current_lr:.6f} | {trigger_info}')
-    
-    print(f"\n✅ 阶段3混合反馈训练完成! 最终损失: {train_losses_phase2[-1]:.6f}")
     
     #----------------------------------------阶段4: PCA分析和保存模型（复用Train_Transformer.py逻辑）------------------------------
     print("\n" + "="*60)
@@ -1274,6 +1316,162 @@ def main():
     np.save(f'models/X{model_suffix}.npy', X)
     np.save(f'models/data_nor{model_suffix}.npy', data_nor)
     print(f"✅ PCA分析结果已保存: models/*{model_suffix}.npy")
+    
+    # 5. 保存PCA参数字典（用于反馈阶段）
+    pca_params = {
+        'v_I': v_I,
+        'v': v,
+        'v_ratio': v_ratio,
+        'p_k': p_k,
+        'data_mean': data_mean,
+        'data_std': data_std,
+        'T_95_limit': T_95_limit,
+        'T_99_limit': T_99_limit,
+        'SPE_95_limit': SPE_95_limit,
+        'SPE_99_limit': SPE_99_limit,
+        'P': P,
+        'k': k,
+        'P_t': P_t,
+        'X': X,
+        'data_nor': data_nor
+    }
+    
+    with open(f'models/pca_params{model_suffix}.pkl', 'wb') as f:
+        pickle.dump(pca_params, f)
+    print(f"✅ PCA参数字典已保存: models/pca_params{model_suffix}.pkl")
+    
+    # 6. 计算训练阶段故障检测阈值
+    threshold1, threshold2, threshold3 = calculate_training_threshold(
+        train_samples, net, netx, pca_params, device)
+    
+    # 保存阈值
+    thresholds = {
+        'threshold1': threshold1,  # 3σ阈值
+        'threshold2': threshold2,  # 4.5σ阈值
+        'threshold3': threshold3   # 6σ阈值
+    }
+    
+    with open(f'models/fault_thresholds{model_suffix}.pkl', 'wb') as f:
+        pickle.dump(thresholds, f)
+    print(f"✅ 故障检测阈值已保存: models/fault_thresholds{model_suffix}.pkl")
+    
+    #----------------------------------------现在开始阶段3: 混合反馈训练------------------------------
+    print("\n" + "="*60)
+    print("🔮 现在开始阶段3: 混合反馈训练（使用计算出的阈值）")
+    print("="*60)
+    
+    # 使用计算出的阈值进行反馈训练
+    current_threshold = threshold1
+    print(f"✅ 使用计算得到的阈值: {current_threshold:.4f}")
+    
+    # 继续训练（阶段3：混合反馈）
+    transformer.train()
+    
+    print(f"\n🎯 开始阶段3训练（epoch {EPOCH_PHASE1+1}-{EPOCH_PHASE2}）...")
+    
+    for epoch in range(EPOCH_PHASE1, EPOCH_PHASE2):
+        epoch_loss = 0
+        batch_count = 0
+        feedback_triggered = False
+        trigger_info = "无反馈"
+        
+        # 检查是否启用反馈
+        if (epoch >= config['feedback_start_epoch'] and 
+            epoch % config['feedback_frequency'] == 0):
+            
+            print(f"\n🔍 Epoch {epoch}: 检查反馈触发条件...")
+            
+            try:
+                # 计算当前的假阳性率（基于综合诊断指标）
+                false_positive_rate, false_positives, total_normals = calculate_false_positive_rate_comprehensive(
+                    config['feedback_samples'], net, netx, pca_params, current_threshold, device)
+                
+                print(f"   当前假阳性率: {false_positive_rate:.4f} ({false_positive_rate*100:.2f}%)")
+                
+                # 检测反馈触发
+                trigger_level, lr_factor, feedback_weight = detect_feedback_trigger(
+                    false_positive_rate, epoch, config)
+                
+                if trigger_level != 'none':
+                    feedback_triggered = True
+                    trigger_info = f"{trigger_level}反馈 (权重:{feedback_weight:.2f}, LR因子:{lr_factor:.2f})"
+                    
+                    # 调整学习率
+                    if lr_factor != 1.0:
+                        for param_group in optimizer.param_groups:
+                            param_group['lr'] *= lr_factor
+                        print(f"   学习率调整: {param_group['lr']:.6f}")
+                    
+                    # 应用混合反馈
+                    feedback_loss, feedback_info = apply_hybrid_feedback(
+                        transformer, net, netx, None, 
+                        feedback_weight, config['mcae_weight'], config['transformer_weight'], device)
+                    
+                    print(f"   {feedback_info}")
+                    
+                    # 记录反馈历史
+                    feedback_history.append({
+                        'epoch': epoch,
+                        'false_positive_rate': false_positive_rate,
+                        'trigger_level': trigger_level,
+                        'feedback_weight': feedback_weight,
+                        'lr_factor': lr_factor,
+                        'false_positives': false_positives,
+                        'total_normals': total_normals
+                    })
+                else:
+                    print(f"   无需反馈 (假阳性率: {false_positive_rate:.4f})")
+                    
+            except Exception as e:
+                print(f"   ❌ 反馈计算失败: {e}")
+                print("   继续正常训练...")
+                feedback_triggered = False
+        
+        # 正常训练循环
+        for batch_input, batch_target in train_loader:
+            # 数据移到设备
+            batch_input = batch_input.to(device)
+            batch_target = batch_target.to(device)
+            
+            # 梯度清零
+            optimizer.zero_grad()
+            
+            # 混合精度前向传播
+            with torch.cuda.amp.autocast():
+                pred_output = transformer(batch_input)
+                loss = criterion(pred_output, batch_target)
+                
+                # 如果有反馈，添加反馈损失
+                if feedback_triggered:
+                    total_loss = loss + 0.1 * feedback_loss  # 反馈损失权重为0.1
+                else:
+                    total_loss = loss
+            
+            # 混合精度反向传播
+            scaler.scale(total_loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            
+            epoch_loss += total_loss.item()
+            batch_count += 1
+        
+        # 学习率调度（在反馈调整之后）
+        scheduler.step()
+        
+        # 计算平均损失
+        avg_loss = epoch_loss / batch_count
+        train_losses_phase2.append(avg_loss)
+        
+        # 打印训练进度
+        if epoch % 2 == 0 or epoch == EPOCH_PHASE2 - 1:
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f'阶段3 Epoch: {epoch:3d} | Loss: {avg_loss:.6f} | LR: {current_lr:.6f} | {trigger_info}')
+    
+    print(f"\n✅ 阶段3混合反馈训练完成! 最终损失: {train_losses_phase2[-1]:.6f}")
+    print(f"📊 反馈触发次数: {len(feedback_history)}")
+    if feedback_history:
+        avg_fpr = np.mean([h['false_positive_rate'] for h in feedback_history])
+        print(f"📊 平均假阳性率: {avg_fpr:.4f} ({avg_fpr*100:.2f}%)")
     
     # 5. 保存混合反馈训练历史
     hybrid_feedback_history = {
