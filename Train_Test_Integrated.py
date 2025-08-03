@@ -522,18 +522,28 @@ def prepare_training_data_v2(sample_ids, device):
         vin1_data, vin2_data, vin3_data = load_sample_data(sample_id)
         
         if vin1_data is not None:
+            # 确保数据是numpy数组格式
+            if hasattr(vin1_data, 'values'):  # pandas DataFrame
+                vin1_array = vin1_data.values
+                vin2_array = vin2_data.values
+                vin3_array = vin3_data.values
+            else:  # numpy array或tensor
+                vin1_array = np.array(vin1_data)
+                vin2_array = np.array(vin2_data)
+                vin3_array = np.array(vin3_data)
+            
             # 构建特征矩阵（这里需要根据实际数据结构调整）
             features = np.column_stack([
-                vin1_data.iloc[:, 0],  # 假设第一列是有用特征
-                vin2_data.iloc[:, 0],
-                vin3_data.iloc[:, 0],
+                vin1_array[:, 0],  # 假设第一列是有用特征
+                vin2_array[:, 0],
+                vin3_array[:, 0],
                 # 添加更多特征...
             ])
             
             # 目标值（电压和SOC）
             targets = np.column_stack([
-                vin1_data.iloc[:, 1],  # 假设第二列是目标
-                vin1_data.iloc[:, 2],  # 假设第三列是SOC
+                vin1_array[:, 1] if vin1_array.shape[1] > 1 else vin1_array[:, 0],  # 第二列或第一列
+                vin1_array[:, 2] if vin1_array.shape[1] > 2 else vin1_array[:, 0],  # 第三列或第一列
             ])
             
             all_features.append(features)
