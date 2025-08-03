@@ -87,11 +87,11 @@ def load_train_samples():
 train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
-# 定义训练参数（优化版本）
+# 定义训练参数（内存安全版本）
 EPOCH = 300
 INIT_LR = 3e-5  # 提高初始学习率，解决梯度过小问题
 MAX_LR = 8e-5   # 提高最大学习率，加快收敛
-BATCHSIZE = 4000  # 优化为4000，平衡性能和稳定性
+BATCHSIZE = 2000  # 降低批次大小，确保内存安全
 WARMUP_EPOCHS = 10  # 学习率预热轮数
 
 # 梯度裁剪参数优化
@@ -105,8 +105,8 @@ def get_lr(epoch):
     return MAX_LR * (0.9 ** (epoch // 50))  # 每50个epoch衰减到90%
 
 # 显示优化后的训练参数
-print(f"\n⚙️  BiLSTM训练参数（梯度优化版本）:")
-print(f"   批次大小: {BATCHSIZE} (优化为4000，平衡性能和稳定性)")
+print(f"\n⚙️  BiLSTM训练参数（内存安全版本）:")
+print(f"   批次大小: {BATCHSIZE} (降低到2000，平衡内存安全和训练效率)")
 print(f"   训练轮数: {EPOCH}")
 print(f"   初始学习率: {INIT_LR} (提高学习率，解决梯度过小)")
 print(f"   最大学习率: {MAX_LR} (提高最大学习率，加快收敛)")
