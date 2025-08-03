@@ -492,16 +492,19 @@ def process_single_sample(sample_id, models):
         time
     )
     
-    # 计算阈值
-    nm = min(3000, len(fai) // 2)  # 防止数据长度不足
-    mm = len(fai)
+    # 计算阈值 - 与源代码保持一致
+    nm = 3000  # 固定值，与源代码一致
+    mm = len(fai)  # 数据总长度
     
+    # 确保数据长度足够
     if mm > nm:
+        # 使用后半段数据计算阈值
         threshold1 = np.mean(fai[nm:mm]) + 3*np.std(fai[nm:mm])
         threshold2 = np.mean(fai[nm:mm]) + 4.5*np.std(fai[nm:mm])
         threshold3 = np.mean(fai[nm:mm]) + 6*np.std(fai[nm:mm])
     else:
         # 数据太短，使用全部数据
+        print(f"   ⚠️ 样本{sample_id}数据长度({mm})不足3000，使用全部数据计算阈值")
         threshold1 = np.mean(fai) + 3*np.std(fai)
         threshold2 = np.mean(fai) + 4.5*np.std(fai)
         threshold3 = np.mean(fai) + 6*np.std(fai)
