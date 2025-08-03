@@ -39,10 +39,84 @@ from datetime import datetime
 from sklearn.metrics import roc_curve, auc, confusion_matrix
 import glob
 
+# 添加模型加载辅助函数
+def remove_module_prefix(state_dict):
+    """移除state_dict中的module.前缀"""
+    new_state_dict = {}
+    for key, value in state_dict.items():
+        if key.startswith('module.'):
+            new_key = key[7:]  # 移除'module.'前缀
+        else:
+            new_key = key
+        new_state_dict[new_key] = value
+    return new_state_dict
+
+def safe_load_model(model, model_path, model_name):
+    """安全加载模型，处理DataParallel前缀问题"""
+    try:
+        print(f"   正在加载{model_name}模型: {model_path}")
+        
+        # 检查文件是否存在
+        if not os.path.exists(model_path):
+            print(f"   ❌ 模型文件不存在: {model_path}")
+            return False
+        
+        state_dict = torch.load(model_path, map_location=device)
+        
+        # 检查是否需要移除module前缀
+        has_module_prefix = any(key.startswith('module.') for key in state_dict.keys())
+        if has_module_prefix:
+            print(f"   检测到DataParallel前缀，正在移除...")
+            state_dict = remove_module_prefix(state_dict)
+        
+        # 检查模型结构匹配
+        model_state_dict = model.state_dict()
+        missing_keys = []
+        unexpected_keys = []
+        
+        for key in model_state_dict.keys():
+            if key not in state_dict:
+                missing_keys.append(key)
+        
+        for key in state_dict.keys():
+            if key not in model_state_dict:
+                unexpected_keys.append(key)
+        
+        if missing_keys:
+            print(f"   ⚠️  缺失键: {missing_keys[:5]}..." if len(missing_keys) > 5 else f"   ⚠️  缺失键: {missing_keys}")
+        
+        if unexpected_keys:
+            print(f"   ⚠️  多余键: {unexpected_keys[:5]}..." if len(unexpected_keys) > 5 else f"   ⚠️  多余键: {unexpected_keys}")
+        
+        # 尝试加载
+        model.load_state_dict(state_dict, strict=False)
+        print(f"   ✅ {model_name}模型加载成功")
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ {model_name}模型加载失败: {e}")
+        print(f"   错误类型: {type(e).__name__}")
+        return False
+
 # 设置设备
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-print(torch.cuda.device_count())
+
+# GPU配置检查
+print("🖥️ GPU配置检查:")
+print(f"   CUDA可用: {torch.cuda.is_available()}")
+print(f"   GPU数量: {torch.cuda.device_count()}")
+print(f"   当前设备: {device}")
+
+if torch.cuda.is_available():
+    print("   GPU详细信息:")
+    for i in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(i)
+        print(f"     GPU {i}: {props.name}")
+        print(f"       显存: {props.total_memory/1024**3:.1f}GB")
+        print(f"       计算能力: {props.major}.{props.minor}")
+else:
+    print("   ⚠️ 使用CPU模式")
 
 # 忽略警告
 warnings.filterwarnings('ignore')
@@ -145,16 +219,28 @@ def check_model_files():
         if key != "pca_files":
             if not os.path.exists(path):
                 missing_files.append(f"TRANSFORMER: {path}")
+                print(f"   ❌ 缺失: {path}")
+            else:
+                file_size = os.path.getsize(path) / (1024 * 1024)  # MB
+                print(f"   ✅ 存在: {path} ({file_size:.1f}MB)")
         else:
             # 检查PCA相关文件
             for pca_file in path:
                 if not os.path.exists(pca_file):
                     missing_files.append(f"TRANSFORMER: {pca_file}")
+                    print(f"   ❌ 缺失: {pca_file}")
+                else:
+                    file_size = os.path.getsize(pca_file) / (1024 * 1024)  # MB
+                    print(f"   ✅ 存在: {pca_file} ({file_size:.1f}MB)")
     
     if missing_files:
-        print("❌ 缺失模型文件:")
+        print(f"\n❌ 缺失 {len(missing_files)} 个模型文件:")
         for file in missing_files:
             print(f"   {file}")
+        print("\n💡 解决方案:")
+        print("   1. 确保已运行Transformer训练脚本")
+        print("   2. 检查模型文件路径是否正确")
+        print("   3. 检查文件权限")
         raise FileNotFoundError("请先运行Transformer训练脚本生成所需模型文件")
     
     print("✅ Transformer模型文件检查通过")
@@ -278,10 +364,17 @@ def load_models():
     """加载Transformer模型"""
     models = {}
     
+    print("🔧 开始加载Transformer模型...")
+    
     # 加载Transformer模型
     from Train_Transformer import TransformerPredictor
     models['transformer'] = TransformerPredictor().to(device)
-    models['transformer'].load_state_dict(torch.load(MODEL_PATHS["TRANSFORMER"]["transformer_model"]))
+    
+    # 使用安全加载函数
+    if not safe_load_model(models['transformer'], 
+                          MODEL_PATHS["TRANSFORMER"]["transformer_model"], 
+                          "Transformer"):
+        raise RuntimeError("Transformer模型加载失败")
     
     # 加载MC-AE模型
     models['net'] = CombinedAE(input_size=2, encode2_input_size=3, output_size=110,
@@ -289,8 +382,16 @@ def load_models():
     models['netx'] = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, 
                                activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
     
-    models['net'].load_state_dict(torch.load(MODEL_PATHS["TRANSFORMER"]["net_model"]))
-    models['netx'].load_state_dict(torch.load(MODEL_PATHS["TRANSFORMER"]["netx_model"]))
+    # 使用安全加载函数
+    if not safe_load_model(models['net'], 
+                          MODEL_PATHS["TRANSFORMER"]["net_model"], 
+                          "MC-AE1"):
+        raise RuntimeError("MC-AE1模型加载失败")
+    
+    if not safe_load_model(models['netx'], 
+                          MODEL_PATHS["TRANSFORMER"]["netx_model"], 
+                          "MC-AE2"):
+        raise RuntimeError("MC-AE2模型加载失败")
     
     # 加载PCA参数
     models['pca_params'] = {}
