@@ -395,7 +395,7 @@ def load_train_samples():
     """加载训练样本ID"""
     try:
         import pandas as pd
-        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/data/QAS/Labels.xls'
+        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
         
         # 检查文件是否存在
         if not os.path.exists(labels_path):
@@ -436,7 +436,7 @@ def load_train_samples():
 
 def load_test_sample(sample_id):
     """加载测试样本"""
-    base_path = f'/mnt/bz25t/bzhy/zhanglikang/project/data/QAS/{sample_id}'
+    base_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}'
     
     # 检查样本目录是否存在
     if not os.path.exists(base_path):
