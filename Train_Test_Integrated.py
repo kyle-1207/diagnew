@@ -690,10 +690,12 @@ def train_transformer_with_hybrid_feedback(config, train_dataset, save_dir):
         pickle.dump(history, f)
     
     return model, history
-        
-        # 混合反馈策略
-        if epoch >= feedback_config['min_epochs_before_feedback']:
-            # 计算反馈指标
+
+#=============================反馈函数（简化版）=============================
+
+def execute_feedback_step(model, feedback_config, feedback_metrics, device, feedback_intensity=0.2):
+    """执行反馈步骤（简化版）"""
+    # 计算反馈指标
             feedback_metrics = calculate_feedback_metrics(
                 model, 
                 feedback_config['feedback_samples'], 
