@@ -543,6 +543,23 @@ def prepare_training_data_v2(sample_ids, device):
             else:
                 vin3_array = np.array(vin3_data)
             
+            # 调试信息：检查数据形状
+            print(f"样本 {sample_id} 数据形状:")
+            print(f"  vin1_array: {vin1_array.shape}, type: {type(vin1_array)}")
+            print(f"  vin2_array: {vin2_array.shape}, type: {type(vin2_array)}")
+            print(f"  vin3_array: {vin3_array.shape}, type: {type(vin3_array)}")
+            
+            # 检查是否可以进行索引
+            if vin1_array.ndim < 2:
+                print(f"  ⚠️ vin1_array维度不足：{vin1_array.ndim}，需要至少2维")
+                continue
+            if vin2_array.ndim < 2:
+                print(f"  ⚠️ vin2_array维度不足：{vin2_array.ndim}，需要至少2维")
+                continue
+            if vin3_array.ndim < 2:
+                print(f"  ⚠️ vin3_array维度不足：{vin3_array.ndim}，需要至少2维")
+                continue
+            
             # 构建特征矩阵（这里需要根据实际数据结构调整）
             features = np.column_stack([
                 vin1_array[:, 0],  # 假设第一列是有用特征
