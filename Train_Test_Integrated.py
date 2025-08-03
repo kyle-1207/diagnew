@@ -560,18 +560,28 @@ def prepare_training_data_v2(sample_ids, device):
                 print(f"  ⚠️ vin3_array维度不足：{vin3_array.ndim}，需要至少2维")
                 continue
             
-            # 构建特征矩阵（这里需要根据实际数据结构调整）
+            # 处理vin1_array的3维结构
+            if vin1_array.ndim == 3:
+                # 从 (N, 1, 7) 压缩为 (N, 7)
+                vin1_flattened = vin1_array.squeeze(1)  # 去掉中间维度
+            else:
+                vin1_flattened = vin1_array
+            
+            print(f"  处理后 vin1_flattened: {vin1_flattened.shape}")
+            
+            # 构建特征矩阵（根据实际数据结构调整）
+            # vin1前5维 + 当前电压 + 当前SOC = 7维输入
             features = np.column_stack([
-                vin1_array[:, 0],  # 假设第一列是有用特征
-                vin2_array[:, 0],
-                vin3_array[:, 0],
-                # 添加更多特征...
+                vin1_flattened[:, 0:5],  # vin1前5维
+                vin2_array[:, 0],        # 当前电压预测
+                vin3_array[:, 0],        # 当前SOC预测
             ])
             
-            # 目标值（电压和SOC）
+            # 目标值（下一时刻的电压和SOC）
+            # 简化目标：使用vin2[:,1]和vin3[:,1]作为目标（Pack Modeling结果）
             targets = np.column_stack([
-                vin1_array[:, 1] if vin1_array.shape[1] > 1 else vin1_array[:, 0],  # 第二列或第一列
-                vin1_array[:, 2] if vin1_array.shape[1] > 2 else vin1_array[:, 0],  # 第三列或第一列
+                vin2_array[:, 1],  # 下一时刻电压
+                vin3_array[:, 1],  # 下一时刻SOC
             ])
             
             all_features.append(features)
