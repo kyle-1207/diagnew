@@ -126,59 +126,70 @@ print(f"使用设备: {device}")
 #=============================Transformer模型定义=============================
 
 class TransformerPredictor(nn.Module):
-    """Transformer预测器"""
-    def __init__(self, input_size, d_model, nhead, num_layers, d_ff, dropout=0.1, output_size=2):
-        super().__init__()
+    """时序预测Transformer模型 - 与Train_Transformer.py一致"""
+    def __init__(self, input_size=7, d_model=128, nhead=8, num_layers=3, d_ff=512, dropout=0.1, output_size=2):
+        super(TransformerPredictor, self).__init__()
         self.input_size = input_size
         self.d_model = d_model
-        self.output_size = output_size
         
         # 输入投影层
         self.input_projection = nn.Linear(input_size, d_model)
         
         # 位置编码
-        self.pos_encoder = PositionalEncoding(d_model, dropout)
+        self.pos_encoding = nn.Parameter(torch.randn(1000, d_model, dtype=torch.float32))
         
         # Transformer编码器
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
+            d_model=d_model, 
             nhead=nhead,
-            dim_feedforward=d_ff,
+            dim_feedforward=d_ff,  # 使用传入的d_ff而不是d_model*4
             dropout=dropout,
             batch_first=True
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        # 输出层
-        self.output_projection = nn.Linear(d_model, output_size)
-        self.dropout = nn.Dropout(dropout)
+        # 输出层 - 直接输出物理值，不使用Sigmoid
+        self.output_layer = nn.Sequential(
+            nn.Linear(d_model, d_model//2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model//2, output_size)
+        )
         
+        # 初始化权重
+        self._init_weights()
+    
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+    
     def forward(self, x):
-        # x shape: [batch_size, seq_len, input_size]
-        x = self.input_projection(x)  # [batch_size, seq_len, d_model]
-        x = self.pos_encoder(x)
-        x = self.transformer(x)  # [batch_size, seq_len, d_model]
-        x = self.dropout(x)
-        x = self.output_projection(x)  # [batch_size, seq_len, output_size]
-        return x
+        # x: [batch, input_size] - 2维输入
+        if len(x.shape) == 2:
+            # 添加序列维度：[batch, input_size] -> [batch, 1, input_size]
+            x = x.unsqueeze(1)
+        
+        batch_size, seq_len, _ = x.shape
+        
+        # 输入投影
+        x = self.input_projection(x)  # [batch, seq_len, d_model]
+        
+        # 添加位置编码
+        pos_enc = self.pos_encoding[:seq_len, :].unsqueeze(0).expand(batch_size, -1, -1)
+        x = x + pos_enc
+        
+        # Transformer编码
+        transformer_out = self.transformer(x)  # [batch, seq_len, d_model]
+        
+        # 输出层（使用最后一个时间步）
+        output = self.output_layer(transformer_out[:, -1, :])  # [batch, output_size]
+        
+        return output  # [batch, output_size] 直接返回2维
 
-class PositionalEncoding(nn.Module):
-    """位置编码"""
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-        
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-        self.register_buffer('pe', pe)
-        
-    def forward(self, x):
-        x = x + self.pe[:x.size(1), :].transpose(0, 1)
-        return self.dropout(x)
+# 位置编码已集成到TransformerPredictor中
 
 #=============================反向传播机制=============================
 
