@@ -61,22 +61,22 @@ plt.rcParams['font.size'] = 10
 # 实验配置
 EXPERIMENT_CONFIGS = {
     'original': {
-        'name': '原始参数规模' if use_chinese else 'Original Parameters',
-        'd_model': 128,
-        'n_heads': 8,
-        'n_layers': 6,
-        'd_ff': 512,
+        'name': '轻量参数规模(内存优化)' if use_chinese else 'Lightweight Parameters (Memory Optimized)',
+        'd_model': 64,       # 减小到64
+        'n_heads': 4,        # 减小到4
+        'n_layers': 2,       # 减小到2
+        'd_ff': 128,         # 减小到128
         'dropout': 0.1,
-        'save_suffix': '_original'
+        'save_suffix': '_lightweight'
     },
     'enhanced': {
-        'name': '增强参数规模(+50%)' if use_chinese else 'Enhanced Parameters (+50%)',
-        'd_model': 192,      # 128 * 1.5
-        'n_heads': 12,       # 8 * 1.5  
-        'n_layers': 6,       # 保持不变
-        'd_ff': 768,         # 512 * 1.5
+        'name': '标准参数规模' if use_chinese else 'Standard Parameters',
+        'd_model': 128,      # 原始的128
+        'n_heads': 8,        # 原始的8
+        'n_layers': 4,       # 减小到4
+        'd_ff': 256,         # 减小到256
         'dropout': 0.2,      # 增加dropout防止过拟合
-        'save_suffix': '_enhanced'
+        'save_suffix': '_standard'
     }
 }
 
@@ -92,10 +92,10 @@ TEST_SAMPLES = {
 FEEDBACK_CONFIG = {
     'train_samples': TRAIN_SAMPLES,
     'feedback_samples': FEEDBACK_SAMPLES,
-    'min_epochs_before_feedback': 20,    # 至少训练20个epoch
-    'base_feedback_interval': 15,        # 基础反馈间隔
+    'min_epochs_before_feedback': 10,    # 减少到10个epoch
+    'base_feedback_interval': 10,        # 减少反馈间隔
     'adaptive_threshold': 0.03,          # 自适应触发阈值（假阳性率）- 调整为3%
-    'max_feedback_interval': 25,         # 最大反馈间隔
+    'max_feedback_interval': 15,         # 减少最大反馈间隔
     'feedback_weight': 0.2,              # 反馈权重
     'mcae_feedback_weight': 0.8,         # MC-AE反馈权重
     'transformer_feedback_weight': 0.2,  # Transformer反馈权重
@@ -587,12 +587,24 @@ def prepare_training_data_v2(sample_ids, device):
             all_features.append(features)
             all_targets.append(targets)
     
-    # 合并所有数据
+    # 合并所有数据 - 添加内存优化
+    print(f"📊 合并 {len(all_features)} 个样本的数据...")
     X = np.vstack(all_features)
     y = np.vstack(all_targets)
     
-    # 转换为时序数据
-    seq_len = 50  # 序列长度
+    print(f"📊 原始数据形状: X={X.shape}, y={y.shape}")
+    
+    # 内存优化：如果数据量过大，进行采样
+    max_samples = 100000  # 最大样本数限制
+    if len(X) > max_samples:
+        print(f"⚠️  数据量过大({len(X)}行)，随机采样{max_samples}行以节省内存")
+        indices = np.random.choice(len(X), max_samples, replace=False)
+        X = X[indices]
+        y = y[indices]
+        print(f"📊 采样后数据形状: X={X.shape}, y={y.shape}")
+    
+    # 转换为时序数据 - 减少序列长度以节省内存
+    seq_len = 10  # 序列长度从50减少到10
     X_seq, y_seq = create_sequences(X, y, seq_len)
     
     # 转换为tensor
