@@ -61,22 +61,22 @@ plt.rcParams['font.size'] = 10
 # 实验配置
 EXPERIMENT_CONFIGS = {
     'original': {
-        'name': '轻量参数规模(内存优化)' if use_chinese else 'Lightweight Parameters (Memory Optimized)',
-        'd_model': 64,       # 减小到64
-        'n_heads': 4,        # 减小到4
-        'n_layers': 2,       # 减小到2
-        'd_ff': 128,         # 减小到128
+        'name': '原始参数规模' if use_chinese else 'Original Parameters',
+        'd_model': 128,      # 恢复到原始的128
+        'n_heads': 8,        # 恢复到原始的8
+        'n_layers': 3,       # 恢复到原始的3
+        'd_ff': 512,         # 恢复到原始的512 (d_model*4)
         'dropout': 0.1,
-        'save_suffix': '_lightweight'
+        'save_suffix': '_original'
     },
     'enhanced': {
-        'name': '标准参数规模' if use_chinese else 'Standard Parameters',
-        'd_model': 128,      # 原始的128
-        'n_heads': 8,        # 原始的8
-        'n_layers': 4,       # 减小到4
-        'd_ff': 256,         # 减小到256
+        'name': '增强参数规模(+50%)' if use_chinese else 'Enhanced Parameters (+50%)',
+        'd_model': 192,      # 128 * 1.5
+        'n_heads': 12,       # 8 * 1.5  
+        'n_layers': 3,       # 保持不变
+        'd_ff': 768,         # 512 * 1.5
         'dropout': 0.2,      # 增加dropout防止过拟合
-        'save_suffix': '_standard'
+        'save_suffix': '_enhanced'
     }
 }
 
@@ -113,8 +113,14 @@ WINDOW_CONFIG = {
     "marking_window": 50        # 标记窗口：前后各50个采样点
 }
 
-# 设备配置
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# 设备配置 - 优先使用GPU，如果内存不足则回退到CPU
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+    print(f"🔧 尝试使用GPU: {torch.cuda.get_device_name(0)}")
+    print(f"🔧 GPU内存: {torch.cuda.get_device_properties(0).total_memory/1024**3:.1f}GB")
+else:
+    device = torch.device('cpu')
+    print(f"🔧 使用CPU训练")
 print(f"使用设备: {device}")
 
 #=============================Transformer模型定义=============================
@@ -519,99 +525,33 @@ def load_sample_data(sample_id, data_type='QAS'):
         return None, None, None
 
 def prepare_training_data_v2(sample_ids, device):
-    """准备训练数据"""
-    all_features = []
-    all_targets = []
+    """准备训练数据 - 使用TransformerBatteryDataset进行批次处理"""
+    print(f"📥 使用TransformerBatteryDataset加载训练数据，样本范围: {sample_ids}")
     
-    for sample_id in sample_ids:
-        vin1_data, vin2_data, vin3_data = load_sample_data(sample_id)
+    try:
+        # 导入数据加载器
+        from data_loader_transformer import TransformerBatteryDataset
         
-        if vin1_data is not None:
-            # 确保数据是numpy数组格式 - 参考Train_Transformer.py的处理方式
-            if isinstance(vin1_data, torch.Tensor):
-                vin1_array = vin1_data.cpu().numpy()
-            else:
-                vin1_array = np.array(vin1_data)
-            
-            if isinstance(vin2_data, torch.Tensor):
-                vin2_array = vin2_data.cpu().numpy()
-            else:
-                vin2_array = np.array(vin2_data)
-            
-            if isinstance(vin3_data, torch.Tensor):
-                vin3_array = vin3_data.cpu().numpy()
-            else:
-                vin3_array = np.array(vin3_data)
-            
-            # 调试信息：检查数据形状
-            print(f"样本 {sample_id} 数据形状:")
-            print(f"  vin1_array: {vin1_array.shape}, type: {type(vin1_array)}")
-            print(f"  vin2_array: {vin2_array.shape}, type: {type(vin2_array)}")
-            print(f"  vin3_array: {vin3_array.shape}, type: {type(vin3_array)}")
-            
-            # 检查是否可以进行索引
-            if vin1_array.ndim < 2:
-                print(f"  ⚠️ vin1_array维度不足：{vin1_array.ndim}，需要至少2维")
-                continue
-            if vin2_array.ndim < 2:
-                print(f"  ⚠️ vin2_array维度不足：{vin2_array.ndim}，需要至少2维")
-                continue
-            if vin3_array.ndim < 2:
-                print(f"  ⚠️ vin3_array维度不足：{vin3_array.ndim}，需要至少2维")
-                continue
-            
-            # 处理vin1_array的3维结构
-            if vin1_array.ndim == 3:
-                # 从 (N, 1, 7) 压缩为 (N, 7)
-                vin1_flattened = vin1_array.squeeze(1)  # 去掉中间维度
-            else:
-                vin1_flattened = vin1_array
-            
-            print(f"  处理后 vin1_flattened: {vin1_flattened.shape}")
-            
-            # 构建特征矩阵（根据实际数据结构调整）
-            # vin1前5维 + 当前电压 + 当前SOC = 7维输入
-            features = np.column_stack([
-                vin1_flattened[:, 0:5],  # vin1前5维
-                vin2_array[:, 0],        # 当前电压预测
-                vin3_array[:, 0],        # 当前SOC预测
-            ])
-            
-            # 目标值（下一时刻的电压和SOC）
-            # 简化目标：使用vin2[:,1]和vin3[:,1]作为目标（Pack Modeling结果）
-            targets = np.column_stack([
-                vin2_array[:, 1],  # 下一时刻电压
-                vin3_array[:, 1],  # 下一时刻SOC
-            ])
-            
-            all_features.append(features)
-            all_targets.append(targets)
-    
-    # 合并所有数据 - 添加内存优化
-    print(f"📊 合并 {len(all_features)} 个样本的数据...")
-    X = np.vstack(all_features)
-    y = np.vstack(all_targets)
-    
-    print(f"📊 原始数据形状: X={X.shape}, y={y.shape}")
-    
-    # 内存优化：如果数据量过大，进行采样
-    max_samples = 100000  # 最大样本数限制
-    if len(X) > max_samples:
-        print(f"⚠️  数据量过大({len(X)}行)，随机采样{max_samples}行以节省内存")
-        indices = np.random.choice(len(X), max_samples, replace=False)
-        X = X[indices]
-        y = y[indices]
-        print(f"📊 采样后数据形状: X={X.shape}, y={y.shape}")
-    
-    # 转换为时序数据 - 减少序列长度以节省内存
-    seq_len = 10  # 序列长度从50减少到10
-    X_seq, y_seq = create_sequences(X, y, seq_len)
-    
-    # 转换为tensor
-    X_tensor = torch.FloatTensor(X_seq).to(device)
-    y_tensor = torch.FloatTensor(y_seq).to(device)
-    
-    return X_tensor, y_tensor
+        # 创建数据集
+        dataset = TransformerBatteryDataset(data_path='../QAS', sample_ids=sample_ids)
+        
+        if len(dataset) == 0:
+            print("❌ 没有加载到任何训练数据")
+            return None
+        
+        print(f"✅ 成功加载 {len(dataset)} 个训练数据对")
+        
+        # 显示数据格式
+        sample_input, sample_target = dataset[0]
+        print(f"📊 数据格式:")
+        print(f"   输入维度: {sample_input.shape} (vin_1前5维 + 电压 + SOC)")
+        print(f"   目标维度: {sample_target.shape} (下一时刻电压 + SOC)")
+        
+        return dataset
+        
+    except Exception as e:
+        print(f"❌ 数据加载失败: {e}")
+        return None
 
 def create_sequences(X, y, seq_len):
     """创建时序序列"""
@@ -626,12 +566,19 @@ def create_sequences(X, y, seq_len):
 
 #=============================训练函数=============================
 
-def train_transformer_with_hybrid_feedback(config, train_data, save_dir):
-    """训练Transformer模型（带混合反馈策略）"""
+def train_transformer_with_hybrid_feedback(config, train_dataset, save_dir):
+    """训练Transformer模型（带混合反馈策略）- 使用批次训练"""
     
     print(f"🚀 开始训练 {config['name']} 模型（混合反馈策略）...")
     print(f"📊 训练样本: {FEEDBACK_CONFIG['train_samples']}")
     print(f"🔄 反馈样本: {FEEDBACK_CONFIG['feedback_samples']}")
+    
+    # 创建DataLoader
+    BATCH_SIZE = 4000  # 批次大小4000
+    from torch.utils.data import DataLoader
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, 
+                             num_workers=4, pin_memory=True)
+    print(f"📦 数据加载器创建完成，批次大小: {BATCH_SIZE}")
     
     # 创建模型
     model = TransformerPredictor(
@@ -644,45 +591,105 @@ def train_transformer_with_hybrid_feedback(config, train_data, save_dir):
         output_size=2
     ).to(device)
     
+    # 启用数据并行
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+        print(f"✅ 启用数据并行，使用 {torch.cuda.device_count()} 张GPU")
+    else:
+        print("⚠️  单GPU模式")
+    
+    print(f"🧠 Transformer模型初始化完成")
+    print(f"📈 模型参数量: {sum(p.numel() for p in model.parameters()):,}")
+    
     # 优化器和损失函数
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.MSELoss()
     
-    X_train, y_train = train_data
-    epochs = 200
+    # 设置混合精度训练
+    from torch.cuda.amp import GradScaler, autocast
+    scaler = GradScaler()
+    print("✅ 启用混合精度训练 (AMP)")
+    
+    epochs = 40  # 训练轮数
     
     # 训练记录
     train_losses = []
-    feedback_losses = []
-    feedback_metrics_history = []
-    feedback_trigger_history = []
     
-    # 反馈状态跟踪
-    last_feedback_epoch = -1
-    feedback_count = 0
+    print(f"🔧 训练参数:")
+    print(f"   - 训练轮数: {epochs}")
+    print(f"   - 批次大小: {BATCH_SIZE}")
+    print(f"   - 学习率: 0.001")
+    print(f"   - 混合精度训练: 启用")
     
-    # 混合反馈配置
-    feedback_config = FEEDBACK_CONFIG
+    # 开始训练
+    print("\n" + "="*60)
+    print("🎯 开始Transformer训练")
+    print("="*60)
     
-    print(f"🔧 反馈配置:")
-    print(f"   - 最小训练epoch: {feedback_config['min_epochs_before_feedback']}")
-    print(f"   - 基础反馈间隔: {feedback_config['base_feedback_interval']}")
-    print(f"   - 自适应阈值: {feedback_config['adaptive_threshold']}")
-    print(f"   - 最大反馈间隔: {feedback_config['max_feedback_interval']}")
+    model.train()
     
     for epoch in range(epochs):
         epoch_loss = 0
-        epoch_feedback_loss = 0
-        feedback_triggered = False
-        trigger_reason = ""
+        batch_count = 0
         
-        # 前向传播
-        optimizer.zero_grad()
-        outputs = model(X_train)
+        for batch_input, batch_target in train_loader:
+            # 数据移到设备
+            batch_input = batch_input.to(device)
+            batch_target = batch_target.to(device)
+            
+            # 梯度清零
+            optimizer.zero_grad()
+            
+            # 混合精度前向传播
+            with autocast():
+                pred_output = model(batch_input)
+                loss = criterion(pred_output, batch_target)
+            
+            # 混合精度反向传播
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            
+            epoch_loss += loss.item()
+            batch_count += 1
         
-        # 主要损失
-        main_loss = criterion(outputs, y_train)
-        total_loss = main_loss
+        # 计算平均损失
+        avg_loss = epoch_loss / batch_count
+        train_losses.append(avg_loss)
+        
+        # 打印训练进度
+        if epoch % 5 == 0 or epoch == epochs - 1:
+            print(f'Epoch: {epoch:3d} | Loss: {avg_loss:.6f}')
+    
+    print("\n✅ Transformer训练完成!")
+    
+    # 最终损失
+    final_loss = train_losses[-1]
+    print(f"🎯 最终训练损失: {final_loss:.6f}")
+    
+    # 损失改善
+    if len(train_losses) > 1:
+        initial_loss = train_losses[0]
+        improvement = (initial_loss - final_loss) / initial_loss * 100
+        print(f"📈 损失改善: {improvement:.2f}% (从 {initial_loss:.6f} 到 {final_loss:.6f})")
+    
+    # 保存模型
+    model_path = f"{save_dir}/transformer_model.pth"
+    torch.save(model.state_dict(), model_path)
+    print(f"✅ 模型已保存: {model_path}")
+    
+    # 构建历史记录
+    history = {
+        'train_losses': train_losses,
+        'final_loss': final_loss,
+        'config': config
+    }
+    
+    # 保存训练历史
+    with open(f"{save_dir}/training_history.pkl", 'wb') as f:
+        pickle.dump(history, f)
+    
+    return model, history
         
         # 混合反馈策略
         if epoch >= feedback_config['min_epochs_before_feedback']:
@@ -1188,14 +1195,14 @@ def main():
             else:
                 # 准备训练数据
                 print("📊 准备训练数据...")
-                train_data = prepare_training_data_v2(TRAIN_SAMPLES, device)
+                train_dataset = prepare_training_data_v2(TRAIN_SAMPLES, device)
                 
-                if train_data[0] is None:
+                if train_dataset is None:
                     print(f"❌ 训练数据准备失败，跳过 {config['name']}")
                     continue
                 
-                # 训练模型（使用混合反馈策略）
-                model, history = train_transformer_with_hybrid_feedback(config, train_data, save_dir)
+                # 训练模型（使用批次训练）
+                model, history = train_transformer_with_hybrid_feedback(config, train_dataset, save_dir)
             
             # 测试模型
             test_results, roc_results = test_model_comprehensive(model, config, save_dir)
