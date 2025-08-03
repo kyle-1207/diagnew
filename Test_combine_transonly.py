@@ -51,6 +51,15 @@ def remove_module_prefix(state_dict):
         new_state_dict[new_key] = value
     return new_state_dict
 
+def safe_get_nested(dictionary, keys, default=None):
+    """安全获取嵌套字典的值"""
+    try:
+        for key in keys:
+            dictionary = dictionary[key]
+        return dictionary
+    except (KeyError, TypeError, IndexError):
+        return default
+
 def safe_load_model(model, model_path, model_name):
     """安全加载模型，处理DataParallel前缀问题"""
     try:
@@ -567,10 +576,13 @@ def main_test_process():
                 test_results["TRANSFORMER"].append(sample_result)
                 
                 # 输出简要结果
-                metrics = sample_result['performance_metrics']
-                print(f"   样本{sample_id}: fai均值={metrics['fai_mean']:.6f}, "
-                      f"异常率={metrics['anomaly_ratio']:.2%}, "
-                      f"三窗口检测={sample_result['detection_info']['window_stats']['fault_ratio']:.2%}")
+                metrics = sample_result.get('performance_metrics', {})
+                detection_info = sample_result.get('detection_info', {})
+                window_stats = detection_info.get('window_stats', {})
+                
+                print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
+                      f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
+                      f"三窗口检测={window_stats.get('fault_ratio', 0.0):.2%}")
                 
             except Exception as e:
                 print(f"❌ 样本 {sample_id} 处理失败: {e}")
@@ -601,10 +613,11 @@ def calculate_performance_metrics(test_results):
     all_fault_predictions = []
     
     for result in model_results:
-        true_label = result['label']
-        fai_values = result['fai']
-        fault_labels = result['fault_labels']
-        threshold1 = result['thresholds']['threshold1']
+        true_label = result.get('label', 0)
+        fai_values = result.get('fai', [])
+        fault_labels = result.get('fault_labels', [])
+        thresholds = result.get('thresholds', {})
+        threshold1 = thresholds.get('threshold1', 0.0)
         
         # 对于每个时间点
         for i, (fai_val, fault_pred) in enumerate(zip(fai_values, fault_labels)):
@@ -821,16 +834,24 @@ def create_fault_detection_timeline(test_results, save_path):
     print("   📊 生成Transformer故障检测时序图...")
     
     # 选择一个故障样本进行可视化
-    fault_sample_id = TEST_SAMPLES['fault'][0]  # 使用第一个故障样本
+    fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'  # 使用第一个故障样本
     
     fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
     
     # 找到对应样本的结果
-    sample_result = next(r for r in test_results["TRANSFORMER"] if r['sample_id'] == fault_sample_id)
+    sample_result = next((r for r in test_results["TRANSFORMER"] if r.get('sample_id') == fault_sample_id), None)
     
-    fai_values = sample_result['fai']
-    fault_labels = sample_result['fault_labels']
-    thresholds = sample_result['thresholds']
+    if sample_result is None:
+        print(f"   ⚠️ 未找到样本 {fault_sample_id} 的结果，使用第一个可用结果")
+        sample_result = test_results["TRANSFORMER"][0] if test_results["TRANSFORMER"] else None
+    
+    if sample_result is None:
+        print("   ❌ 没有可用的测试结果")
+        return
+    
+    fai_values = sample_result.get('fai', [])
+    fault_labels = sample_result.get('fault_labels', [])
+    thresholds = sample_result.get('thresholds', {})
     time_axis = np.arange(len(fai_values))
     
     # 子图1: 综合诊断指标时序
@@ -974,7 +995,7 @@ def create_three_window_visualization(test_results, save_path):
     print("   🔍 生成Transformer三窗口过程可视化...")
     
     # 选择一个故障样本进行详细分析
-    fault_sample_id = TEST_SAMPLES['fault'][0]
+    fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'
     
     fig = plt.figure(figsize=(16, 10))
     
@@ -985,10 +1006,20 @@ def create_three_window_visualization(test_results, save_path):
     ax_main = fig.add_subplot(gs[0, :])
     
     # 选择Transformer结果进行可视化
-    transformer_result = next(r for r in test_results['TRANSFORMER'] if r['sample_id'] == fault_sample_id)
-    fai_values = transformer_result['fai']
-    detection_info = transformer_result['detection_info']
-    threshold1 = transformer_result['thresholds']['threshold1']
+    transformer_result = next((r for r in test_results['TRANSFORMER'] if r.get('sample_id') == fault_sample_id), None)
+    
+    if transformer_result is None:
+        print(f"   ⚠️ 未找到样本 {fault_sample_id} 的结果，使用第一个可用结果")
+        transformer_result = test_results['TRANSFORMER'][0] if test_results['TRANSFORMER'] else None
+    
+    if transformer_result is None:
+        print("   ❌ 没有可用的测试结果")
+        return
+    
+    fai_values = transformer_result.get('fai', [])
+    detection_info = transformer_result.get('detection_info', {})
+    thresholds = transformer_result.get('thresholds', {})
+    threshold1 = thresholds.get('threshold1', 0.0)
     
     time_axis = np.arange(len(fai_values))
     
@@ -1089,8 +1120,16 @@ def create_three_window_visualization(test_results, save_path):
     # === 子图4：Transformer性能 ===
     ax4 = fig.add_subplot(gs[1, 3])
     
-    sample_result = next(r for r in test_results['TRANSFORMER'] if r['sample_id'] == fault_sample_id)
-    fault_ratio = sample_result['detection_info']['window_stats']['fault_ratio']
+    sample_result = next((r for r in test_results['TRANSFORMER'] if r.get('sample_id') == fault_sample_id), None)
+    if sample_result is None:
+        sample_result = test_results['TRANSFORMER'][0] if test_results['TRANSFORMER'] else None
+    
+    if sample_result is None:
+        fault_ratio = 0.0
+    else:
+        detection_info = sample_result.get('detection_info', {})
+        window_stats = detection_info.get('window_stats', {})
+        fault_ratio = window_stats.get('fault_ratio', 0.0)
     
     bars4 = ax4.bar(['Transformer'], [fault_ratio], color='blue', alpha=0.7)
     ax4.set_title('Transformer\n(故障检测比率)')
@@ -1182,16 +1221,21 @@ def save_test_results(test_results, performance_metrics):
         # 样本详情表
         sample_details = []
         for result in test_results["TRANSFORMER"]:
+            # 安全获取detection_info和window_stats
+            detection_info = result.get('detection_info', {})
+            window_stats = detection_info.get('window_stats', {})
+            performance_metrics = result.get('performance_metrics', {})
+            
             sample_details.append({
-                'Sample_ID': result['sample_id'],
-                'True_Label': 'Fault' if result['label'] == 1 else 'Normal',
-                'FAI_Mean': result['performance_metrics']['fai_mean'],
-                'FAI_Std': result['performance_metrics']['fai_std'],
-                'FAI_Max': result['performance_metrics']['fai_max'],
-                'Anomaly_Ratio': result['performance_metrics']['anomaly_ratio'],
-                'Fault_Detection_Ratio': result['detection_info']['window_stats']['fault_ratio'],
-                'Candidates_Found': result['detection_info']['window_stats']['total_candidates'],
-                'Verified_Points': result['detection_info']['window_stats']['verified_candidates']
+                'Sample_ID': result.get('sample_id', 'Unknown'),
+                'True_Label': 'Fault' if result.get('label', 0) == 1 else 'Normal',
+                'FAI_Mean': performance_metrics.get('fai_mean', 0.0),
+                'FAI_Std': performance_metrics.get('fai_std', 0.0),
+                'FAI_Max': performance_metrics.get('fai_max', 0.0),
+                'Anomaly_Ratio': performance_metrics.get('anomaly_ratio', 0.0),
+                'Fault_Detection_Ratio': window_stats.get('fault_ratio', 0.0),
+                'Candidates_Found': window_stats.get('total_candidates', 0),
+                'Verified_Points': window_stats.get('verified_candidates', 0)
             })
         
         sample_df = pd.DataFrame(sample_details)
