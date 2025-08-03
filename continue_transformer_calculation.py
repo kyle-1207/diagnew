@@ -56,9 +56,39 @@ def continue_transformer_calculation():
             print(f"❌ {file} 不存在")
     
     if not has_intermediate:
-        print("\n⚠️  没有找到中间结果文件，需要重新计算重构误差")
-        print("请先运行Train_Transformer.py到MC-AE训练完成阶段")
-        return
+        print("\n⚠️  没有找到中间结果文件")
+        print("尝试从已保存的模型重新计算中间结果...")
+        
+        # 检查是否有其他可用的数据文件
+        alternative_files = [
+            'vin2_modified.npy',
+            'vin3_modified.npy',
+            'combined_vin2.npy',
+            'combined_vin3.npy'
+        ]
+        
+        has_alternative = False
+        for file in alternative_files:
+            if os.path.exists(f'models/{file}'):
+                print(f"✅ 找到替代文件: {file}")
+                has_alternative = True
+        
+        if not has_alternative:
+            print("❌ 没有找到任何可用的数据文件")
+            print("请先运行Train_Transformer.py到MC-AE训练完成阶段")
+            return
+        
+        # 尝试从替代文件重新计算
+        print("🔄 尝试从替代文件重新计算中间结果...")
+        try:
+            # 这里需要根据实际可用的文件来调整
+            # 暂时返回，让用户手动处理
+            print("⚠️  需要手动提供ERRORU和ERRORX数据")
+            print("建议运行Train_Transformer.py到MC-AE训练完成")
+            return
+        except Exception as e:
+            print(f"❌ 重新计算失败: {e}")
+            return
     
     # 加载中间结果
     print("\n📥 加载中间结果...")

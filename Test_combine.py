@@ -48,8 +48,54 @@ print(torch.cuda.device_count())
 warnings.filterwarnings('ignore')
 
 # 设置中文字体显示
-plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS', 'Noto Sans CJK SC']
-plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+import matplotlib.font_manager as fm
+import platform
+
+def setup_chinese_fonts():
+    """配置中文字体显示"""
+    system = platform.system()
+    
+    # 根据操作系统选择字体
+    if system == "Windows":
+        chinese_fonts = ['SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi']
+    elif system == "Linux":
+        chinese_fonts = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'Source Han Sans CN', 'DejaVu Sans']
+    elif system == "Darwin":  # macOS
+        chinese_fonts = ['PingFang SC', 'Hiragino Sans GB', 'STHeiti', 'Arial Unicode MS']
+    else:
+        chinese_fonts = ['DejaVu Sans', 'Arial Unicode MS']
+    
+    # 查找可用的中文字体
+    available_font = None
+    for font in chinese_fonts:
+        try:
+            # 检查字体是否存在
+            font_path = fm.findfont(font)
+            if font_path != fm.rcParams['font.sans-serif'][0]:
+                available_font = font
+                break
+        except:
+            continue
+    
+    if available_font:
+        plt.rcParams['font.sans-serif'] = [available_font] + plt.rcParams['font.sans-serif']
+        print(f"✅ 使用中文字体: {available_font}")
+    else:
+        print("⚠️ 未找到合适的中文字体，尝试使用默认配置")
+        # 使用更通用的字体配置
+        plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial Unicode MS', 'SimHei']
+    
+    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+
+# 执行字体配置
+setup_chinese_fonts()
+
+# 清理字体缓存并强制刷新
+try:
+    fm._rebuild()
+    print("✅ 字体缓存已清理并重建")
+except:
+    print("⚠️ 字体缓存清理失败，继续使用当前配置")
 
 #----------------------------------------测试配置------------------------------
 print("="*60)
@@ -641,7 +687,10 @@ def create_roc_comparison(test_results, performance_metrics, save_path):
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=PLOT_CONFIG["figsize_large"])
     
     # === 子图1: 连续阈值ROC曲线 ===
-    ax1.set_title('(a) ROC曲线对比\n(连续阈值扫描)')
+    try:
+        ax1.set_title('(a) ROC曲线对比\n(连续阈值扫描)')
+    except:
+        ax1.set_title('(a) ROC Curve Comparison\n(Continuous Threshold Scan)')
     
     colors = {'BILSTM': 'green', 'TRANSFORMER': 'blue'}
     
