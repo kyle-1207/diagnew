@@ -113,11 +113,10 @@ print(f"   最大学习率: {MAX_LR} (降低最大学习率，避免梯度爆炸
 print(f"   最大梯度阈值: {MAX_GRAD_NORM} (降低阈值，防止梯度爆炸)")
 print(f"   最小梯度阈值: {MIN_GRAD_NORM} (降低阈值，减少梯度过小警告)")
 print(f"   数据并行: 启用")
-print(f"   混合精度: 启用 (AMP)")
-print(f"   数据裁剪: 启用 (限制输入范围[-50,50])")
-print(f"   损失裁剪: 启用 (限制损失值[0,1e6])")
-print(f"   MC-AE2修复: 统一使用custom_activation激活函数")
-print(f"   梯度监控: 启用 (详细监控MC-AE2梯度问题)")
+print(f"   混合精度: 禁用 (参考源代码)")
+print(f"   数据类型: float32 (参考源代码)")
+print(f"   激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid")
+print(f"   梯度处理: 简化版本 (参考源代码)")
 print(f"   训练样本: 0-9 (共{len(train_samples)}个样本)")
 
 #----------------------------------------MC-AE训练数据准备（直接使用原始数据）------------------------
@@ -770,7 +769,7 @@ train_loader_u = DataLoader(MultiInputDataset(x_recovered, y_recovered, z_recove
 # 中文注释：初始化MC-AE模型（使用float32）
 net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
 
-netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
+netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).to(torch.float32)
 
 # 使用更稳定的权重初始化
 def stable_weight_init(model):
@@ -799,9 +798,9 @@ optimizer = torch.optim.Adam(net.parameters(), lr=INIT_LR)
 l1_lambda = 0.01
 loss_f = nn.MSELoss()
 
-# 启用混合精度训练
-scaler = torch.cuda.amp.GradScaler()
-print("✅ 启用混合精度训练 (AMP)")
+# 禁用混合精度训练（参考源代码）
+# scaler = torch.cuda.amp.GradScaler()
+# print("✅ 启用混合精度训练 (AMP)")
 
 # 启用CUDA性能优化
 torch.backends.cudnn.benchmark = True
@@ -836,26 +835,15 @@ for epoch in range(EPOCH):
             print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
             continue
         
-        # 数据标准化处理（防止数值过大）
-        x_norm = torch.clamp(x, -50, 50)  # 限制输入范围
-        y_norm = torch.clamp(y, -50, 50)  # 限制目标范围
-        
-        # 使用混合精度训练
-        with torch.cuda.amp.autocast():
-            recon_im, recon_p = net(x_norm, z, q)
-            loss_u = loss_f(y_norm, recon_im)
+        # 使用原始数据，按照源代码的方式处理
+        net = net.float()  # 确保模型使用float32
+        recon_im, recon_p = net(x, z, q)
+        loss_u = loss_f(y, recon_im)
             
-                    # 检查损失值是否为NaN（更严格的检查）
-        if torch.isnan(loss_u) or torch.isinf(loss_u) or loss_u.item() > 1e6:
-            print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值")
-            print(f"损失值: {loss_u.item()}")
-            print(f"输入范围: [{x_norm.min():.4f}, {x_norm.max():.4f}]")
-            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
-            print("跳过此批次，不进行反向传播")
+                    # 简化损失检查（参考源代码）
+        if torch.isnan(loss_u) or torch.isinf(loss_u):
+            print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
             continue
-        
-        # 损失值裁剪（防止异常大的损失值）
-        loss_u = torch.clamp(loss_u, 0, 1e6)
         
         # 检查输入数据范围是否合理
         if x.abs().max() > 1000 or y.abs().max() > 1000:
@@ -867,55 +855,15 @@ for epoch in range(EPOCH):
         total_loss += loss_u.item()
         num_batches += 1
         optimizer.zero_grad()
+        loss_u.backward()
         
-        # 使用混合精度训练
-        scaler.scale(loss_u).backward()
-        
-        # 检查梯度是否为NaN或无穷大
-        grad_norm = 0
-        has_grad_issue = False
-        
-        # 安全地处理梯度
-        try:
-            # 在检查梯度前unscale
-            scaler.unscale_(optimizer)
-            
-            for name, param in net.named_parameters():
-                if param.grad is not None:
-                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                        print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
-                        has_grad_issue = True
-                        break
-                    grad_norm += param.grad.data.norm(2).item() ** 2
-            
-            if has_grad_issue:
-                # 重置scaler状态
-                scaler.update()
-                continue
-                
-            grad_norm = grad_norm ** 0.5
-            
-            # 收集梯度范数用于监控
-            grad_norms.append(grad_norm)
-            
-            # 渐进式梯度裁剪 - 统计异常情况
-            if grad_norm > MAX_GRAD_NORM:
-                torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
-                print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
-            elif grad_norm < MIN_GRAD_NORM:
-                grad_too_small_count += 1
-            # 移除"梯度正常"的输出，减少日志噪音
-            
-            # 执行优化器步骤
-            scaler.step(optimizer)
-            scaler.update()
-            
-        except Exception as e:
-            print(f"优化器步骤失败: {e}")
-            print("跳过此批次并重置scaler状态")
-            # 重置scaler状态
-            scaler.update()
+        # 简化的梯度处理（参考源代码）
+        grad_norm = torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
+        if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+            print(f"警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
             continue
+            
+        optimizer.step()
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
@@ -943,8 +891,8 @@ for iteration, (x, y, z, q) in enumerate(train_loader2):
     y = y.to(device)
     z = z.to(device)
     q = q.to(device)
-    with torch.cuda.amp.autocast():
-        recon_imtest, recon = net(x, z, q)
+    net = net.float()
+    recon_imtest, recon = net(x, z, q)
 AA = recon_imtest.cpu().detach().numpy()
 yTrainU = y_recovered.cpu().detach().numpy()
 ERRORU = AA - yTrainU
@@ -954,8 +902,8 @@ train_loader_soc = DataLoader(MultiInputDataset(x_recovered2, y_recovered2, z_re
 optimizer = torch.optim.Adam(netx.parameters(), lr=INIT_LR)
 loss_f = nn.MSELoss()
 
-# 为第二个模型创建新的scaler
-scaler2 = torch.cuda.amp.GradScaler()
+# 禁用混合精度训练（参考源代码）
+# scaler2 = torch.cuda.amp.GradScaler()
 
 avg_loss_list_x = []
 for epoch in range(EPOCH):
@@ -987,26 +935,15 @@ for epoch in range(EPOCH):
             print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
             continue
         
-        # 数据标准化处理（防止数值过大）
-        x_norm = torch.clamp(x, -50, 50)  # 限制输入范围
-        y_norm = torch.clamp(y, -50, 50)  # 限制目标范围
-        
-        # 使用混合精度训练
-        with torch.cuda.amp.autocast():
-            recon_im, z = netx(x_norm, z, q)
-            loss_x = loss_f(y_norm, recon_im)
+        # 使用原始数据，按照源代码的方式处理
+        netx = netx.float()  # 确保模型使用float32
+        recon_im, z = netx(x, z, q)
+        loss_x = loss_f(y, recon_im)
             
-                    # 检查损失值是否为NaN（更严格的检查）
-        if torch.isnan(loss_x) or torch.isinf(loss_x) or loss_x.item() > 1e6:
-            print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值")
-            print(f"损失值: {loss_x.item()}")
-            print(f"输入范围: [{x_norm.min():.4f}, {x_norm.max():.4f}]")
-            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
-            print("跳过此批次，不进行反向传播")
+                    # 简化损失检查（参考源代码）
+        if torch.isnan(loss_x) or torch.isinf(loss_x):
+            print(f"MC-AE2警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
             continue
-        
-        # 损失值裁剪（防止异常大的损失值）
-        loss_x = torch.clamp(loss_x, 0, 1e6)
         
         # 检查输入数据范围是否合理
         if x.abs().max() > 1000 or y.abs().max() > 1000:
@@ -1018,59 +955,15 @@ for epoch in range(EPOCH):
         total_loss += loss_x.item()
         num_batches += 1
         optimizer.zero_grad()
-        scaler2.scale(loss_x).backward()
+        loss_x.backward()
         
-        # 检查梯度是否为NaN或无穷大
-        grad_norm = 0
-        has_grad_issue = False
-        
-        # 安全地处理梯度
-        try:
-            # 在检查梯度前unscale
-            scaler2.unscale_(optimizer)
-            
-            # 详细的梯度监控（针对MC-AE2）
-            for name, param in netx.named_parameters():
-                if param.grad is not None:
-                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                        print(f"MC-AE2警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
-                        print(f"   参数形状: {param.shape}")
-                        print(f"   参数范围: [{param.min():.4f}, {param.max():.4f}]")
-                        print(f"   梯度范围: [{param.grad.min():.4f}, {param.grad.max():.4f}]")
-                        has_grad_issue = True
-                        break
-                    grad_norm += param.grad.data.norm(2).item() ** 2
-                else:
-                    print(f"MC-AE2警告：参数 {name} 的梯度为None")
-            
-            if has_grad_issue:
-                # 重置scaler状态
-                scaler2.update()
-                continue
-                
-            grad_norm = grad_norm ** 0.5
-            
-            # 收集梯度范数用于监控
-            grad_norms_x.append(grad_norm)
-            
-            # 渐进式梯度裁剪 - 统计异常情况
-            if grad_norm > MAX_GRAD_NORM:
-                torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
-                print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
-            elif grad_norm < MIN_GRAD_NORM:
-                grad_too_small_count_x += 1
-            # 移除"梯度正常"的输出，减少日志噪音
-            
-            # 执行优化器步骤
-            scaler2.step(optimizer)
-            scaler2.update()
-            
-        except Exception as e:
-            print(f"优化器步骤失败: {e}")
-            print("跳过此批次并重置scaler状态")
-            # 重置scaler状态
-            scaler2.update()
+        # 简化的梯度处理（参考源代码）
+        grad_norm = torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
+        if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+            print(f"MC-AE2警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
             continue
+            
+        optimizer.step()
     
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
@@ -1098,8 +991,8 @@ for iteration, (x, y, z, q) in enumerate(train_loaderx2):
     y = y.to(device)
     z = z.to(device)
     q = q.to(device)
-    with torch.cuda.amp.autocast():
-        recon_imtestx, z = netx(x, z, q)
+    netx = netx.float()
+    recon_imtestx, z = netx(x, z, q)
 
 BB = recon_imtestx.cpu().detach().numpy()
 yTrainX = y_recovered2.cpu().detach().numpy()
