@@ -199,8 +199,8 @@ def load_test_samples():
         all_samples = df['Num'].tolist()
         all_labels = df['Label'].tolist()
         
-        # 指定测试样本：正常样本10,11 和故障样本335,336
-        test_normal_samples = ['10', '11']  # 正常样本
+        # 指定测试样本：正常样本11,12,13,14 和故障样本335,336
+        test_normal_samples = ['11', '12', '13', '14']  # 正常样本
         test_fault_samples = ['335', '336']  # 故障样本
         
         print(f"📋 从Labels.xls加载测试样本:")
@@ -215,7 +215,7 @@ def load_test_samples():
         print(f"❌ 加载Labels.xls失败: {e}")
         print("⚠️  使用默认测试样本")
         return {
-            'normal': ['10', '11'],
+            'normal': ['11', '12', '13', '14'],
             'fault': ['335', '336']
         }
 
