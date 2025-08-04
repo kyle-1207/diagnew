@@ -1,4 +1,5 @@
 # 中文注释：导入常用库和自定义模块
+#注意路径
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numpy as np
