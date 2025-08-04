@@ -557,13 +557,40 @@ def calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, p
                 time
             )
             
-            return fai
+            # 按照源代码方式重新计算阈值（与Test_.py保持一致）
+            nm = 3000  # 固定值，与源代码一致
+            mm = len(fai)  # 数据总长度
+            
+            # 确保数据长度足够
+            if mm > nm:
+                # 使用后半段数据计算阈值
+                threshold1 = np.mean(fai[nm:mm]) + 3*np.std(fai[nm:mm])
+                threshold2 = np.mean(fai[nm:mm]) + 4.5*np.std(fai[nm:mm])
+                threshold3 = np.mean(fai[nm:mm]) + 6*np.std(fai[nm:mm])
+            else:
+                # 数据太短，使用全部数据
+                threshold1 = np.mean(fai) + 3*np.std(fai)
+                threshold2 = np.mean(fai) + 4.5*np.std(fai)
+                threshold3 = np.mean(fai) + 6*np.std(fai)
+            
+            return fai, threshold1, threshold2, threshold3
             
         except Exception as e:
             print(f"   ⚠️ 综合诊断计算失败: {e}")
             # 返回基于重构误差的简单指标作为后备
             simple_fai = np.mean(np.abs(ERRORU), axis=1) + np.mean(np.abs(ERRORX), axis=1)
-            return simple_fai
+            # 使用简单统计方法计算后备阈值（仿照源代码方式）
+            nm = 3000
+            mm = len(simple_fai)
+            if mm > nm:
+                default_threshold1 = np.mean(simple_fai[nm:mm]) + 3*np.std(simple_fai[nm:mm])
+                default_threshold2 = np.mean(simple_fai[nm:mm]) + 4.5*np.std(simple_fai[nm:mm])
+                default_threshold3 = np.mean(simple_fai[nm:mm]) + 6*np.std(simple_fai[nm:mm])
+            else:
+                default_threshold1 = np.mean(simple_fai) + 3*np.std(simple_fai)
+                default_threshold2 = np.mean(simple_fai) + 4.5*np.std(simple_fai)
+                default_threshold3 = np.mean(simple_fai) + 6*np.std(simple_fai)
+            return simple_fai, default_threshold1, default_threshold2, default_threshold3
 
 def calculate_training_threshold(train_samples, mcae_net1, mcae_net2, pca_params, device):
     """
@@ -599,7 +626,7 @@ def calculate_training_threshold(train_samples, mcae_net1, mcae_net2, pca_params
             
             # 计算该样本的综合故障指示器
             sample_data = (vin2_processed, vin3_processed)
-            fai = calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, pca_params, device)
+            fai, _, _, _ = calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, pca_params, device)
             
             all_training_fai.extend(fai)
             
@@ -703,7 +730,7 @@ def calculate_false_positive_rate_comprehensive(feedback_samples, mcae_net1, mca
             
             # 计算该样本的综合故障指示器
             sample_data = (vin2_processed, vin3_processed)
-            fai = calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, pca_params, device)
+            fai, _, _, _ = calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, pca_params, device)
             
             all_fai.extend(fai)
             print(f"   样本{sample_id}: {len(fai)}个数据点")
