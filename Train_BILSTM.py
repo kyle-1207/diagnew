@@ -88,29 +88,27 @@ def load_train_samples():
 train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
-# 定义训练参数（小样本快速训练版本，优化数值稳定性）
+# 定义训练参数（参考源代码，回归合理设置）
 EPOCH = 100  # 减少训练轮数，适应小样本
-INIT_LR = 1e-5  # 降低初始学习率，提高数值稳定性
-MAX_LR = 5e-5   # 降低最大学习率，避免梯度爆炸
-BATCHSIZE = 500  # 进一步降低批次大小，提高稳定性
-WARMUP_EPOCHS = 10  # 增加学习率预热轮数，提高稳定性
+INIT_LR = 5e-4  # 回归源代码的学习率设置
+MAX_LR = 5e-4   # 保持与源代码一致
+BATCHSIZE = 500  # 适应小样本训练
+WARMUP_EPOCHS = 5  # 减少预热轮数
 
 # 梯度裁剪参数优化（更保守的设置）
 MAX_GRAD_NORM = 1.0  # 降低最大梯度阈值，防止梯度爆炸
 MIN_GRAD_NORM = 0.001  # 降低最小梯度阈值，减少梯度过小警告
 
-# 学习率预热函数
+# 学习率调度函数（参考源代码，使用固定学习率）
 def get_lr(epoch):
-    if epoch < WARMUP_EPOCHS:
-        return INIT_LR + (MAX_LR - INIT_LR) * epoch / WARMUP_EPOCHS
-    return MAX_LR * (0.9 ** (epoch // 50))  # 每50个epoch衰减到90%
+    return INIT_LR  # 使用固定学习率，参考源代码
 
 # 显示优化后的训练参数
 print(f"\n⚙️  BiLSTM训练参数（小样本快速训练版本，优化数值稳定性）:")
 print(f"   批次大小: {BATCHSIZE} (适应小样本训练，提高稳定性)")
 print(f"   训练轮数: {EPOCH} (减少轮数，快速收敛)")
-print(f"   初始学习率: {INIT_LR} (降低学习率，提高数值稳定性)")
-print(f"   最大学习率: {MAX_LR} (降低最大学习率，避免梯度爆炸)")
+print(f"   学习率: {INIT_LR} (参考源代码设置)")
+print(f"   学习率调度: 固定学习率 (参考源代码)")
 print(f"   最大梯度阈值: {MAX_GRAD_NORM} (降低阈值，防止梯度爆炸)")
 print(f"   最小梯度阈值: {MIN_GRAD_NORM} (降低阈值，减少梯度过小警告)")
 print(f"   数据并行: 启用")
@@ -863,6 +861,9 @@ for epoch in range(EPOCH):
         if torch.isnan(grad_norm) or torch.isinf(grad_norm):
             print(f"警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
             continue
+        
+        # 收集梯度范数用于监控
+        grad_norms.append(grad_norm.item())
             
         optimizer.step()
     
@@ -963,6 +964,9 @@ for epoch in range(EPOCH):
         if torch.isnan(grad_norm) or torch.isinf(grad_norm):
             print(f"MC-AE2警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
             continue
+        
+        # 收集梯度范数用于监控
+        grad_norms_x.append(grad_norm.item())
             
         optimizer.step()
     
