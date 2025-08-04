@@ -1196,7 +1196,7 @@ def save_test_results(test_results, performance_metrics):
     
     # 创建结果目录
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_dir = f"transformer_test_results_{timestamp}"
+    result_dir = f"/mnt/bz25t/bzhy/datasave/Transformer/transformer_test_results_{timestamp}"
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(f"{result_dir}/visualizations", exist_ok=True)
     os.makedirs(f"{result_dir}/detailed_results", exist_ok=True)
