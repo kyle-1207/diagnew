@@ -199,8 +199,8 @@ def load_test_samples():
         all_samples = df['Num'].tolist()
         all_labels = df['Label'].tolist()
         
-        # 指定测试样本：正常样本11,12,13,14 和故障样本335,336
-        test_normal_samples = ['11', '12', '13', '14']  # 正常样本
+        # 指定测试样本：正常样本10,11 和故障样本335,336
+        test_normal_samples = ['10', '11']  # 正常样本
         test_fault_samples = ['335', '336']  # 故障样本
         
         print(f"📋 从Labels.xls加载测试样本:")
@@ -215,7 +215,7 @@ def load_test_samples():
         print(f"❌ 加载Labels.xls失败: {e}")
         print("⚠️  使用默认测试样本")
         return {
-            'normal': ['11', '12', '13', '14'],
+            'normal': ['10', '11'],
             'fault': ['335', '336']
         }
 
@@ -244,7 +244,7 @@ MODEL_PATHS = {
 WINDOW_CONFIG = {
     "detection_window": 25,      # 检测窗口：25个采样点 (12.5分钟)
     "verification_window": 15,   # 验证窗口：15个采样点 (7.5分钟)
-    "marking_window": 20,        # 标记窗口：20个采样点 (10分钟)
+    "marking_window": 10,        # 标记窗口：10个采样点 (5分钟)
     "verification_threshold": 0.6 # 验证窗口内FAI异常比例阈值 (60%)
 }
 
@@ -654,7 +654,7 @@ def main_test_process():
     }
     
     # BiLSTM单模型测试
-    total_operations = len(ALL_TEST_SAMPLES)  # 4个样本
+    total_operations = len(ALL_TEST_SAMPLES)  # 4个样本 (2正常+2故障)
     
     print(f"\n🚀 开始BiLSTM模型测试...")
     print(f"总共需要处理: {total_operations} 个样本")
@@ -726,16 +726,16 @@ def calculate_performance_metrics(test_results):
             all_true_labels.append(true_label)
             all_fai_values.append(fai_val)
             
-            # 根据我们之前讨论的ROC逻辑：
+            # 修正后的ROC逻辑：
             if true_label == 0:  # 正常样本
-                # 正常样本中：fai > threshold 就是FP，fai <= threshold 就是TN
+                # 正常样本中：综合诊断值 > 阈值1 就是FP，否则就是TN
                 prediction = 1 if fai_val > threshold1 else 0
             else:  # 故障样本
-                # 故障样本中：需要fai > threshold 且 三窗口确认为故障 才是TP
+                # 故障样本中：需要综合诊断值 > 阈值1 且 三窗口确认为故障 才是TP
                 if fai_val > threshold1 and fault_pred == 1:
                     prediction = 1  # TP
                 else:
-                    prediction = 0  # FN
+                    prediction = 0  # FN (包括：fai_val <= threshold1 或 fault_pred == 0)
             
             all_fault_predictions.append(prediction)
     
@@ -808,16 +808,19 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     
     model_results = test_results["BILSTM"]
     
-    # 收集所有fai值和真实标签
+    # 收集所有fai值和真实标签，用于连续阈值ROC
     all_fai = []
     all_labels = []
+    all_fault_labels = []
     
     for result in model_results:
         all_fai.extend(result['fai'])
         all_labels.extend([result['label']] * len(result['fai']))
+        all_fault_labels.extend(result['fault_labels'])
     
     all_fai = np.array(all_fai)
     all_labels = np.array(all_labels)
+    all_fault_labels = np.array(all_fault_labels)
     
     # 生成连续阈值范围
     thresholds = np.linspace(np.min(all_fai), np.max(all_fai), 100)
@@ -828,15 +831,15 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     for threshold in thresholds:
         tp = fp = tn = fn = 0
         
-        for i, (fai_val, true_label) in enumerate(zip(all_fai, all_labels)):
+        for i, (fai_val, true_label, fault_pred) in enumerate(zip(all_fai, all_labels, all_fault_labels)):
             if true_label == 0:  # 正常样本
                 if fai_val > threshold:
                     fp += 1
                 else:
                     tn += 1
             else:  # 故障样本
-                # 简化：这里用fai阈值代替三窗口确认
-                if fai_val > threshold:
+                # 故障样本：需要fai > threshold 且 三窗口确认为故障 才是TP
+                if fai_val > threshold and fault_pred == 1:
                     tp += 1
                 else:
                     fn += 1
@@ -1191,7 +1194,7 @@ def create_three_window_visualization(test_results, save_path):
         WINDOW_CONFIG['verification_window'],
         WINDOW_CONFIG['marking_window']
     ]
-    window_labels = ['检测窗口\n(100)', '验证窗口\n(50)', '标记窗口\n(50)']
+    window_labels = ['检测窗口\n(25)', '验证窗口\n(15)', '标记窗口\n(10)']
     colors2 = ['lightblue', 'lightgreen', 'lightcoral']
     
     wedges, texts, autotexts = ax2.pie(window_params, labels=window_labels, colors=colors2,
@@ -1245,9 +1248,9 @@ def create_three_window_visualization(test_results, save_path):
     process_text = """
     BiLSTM三窗口检测过程:
     
-    1. 检测窗口 (100点): 扫描候选故障点，条件：φ(FAI) > 阈值
-    2. 验证窗口 (50点): 验证候选点，检查连续性 (≥30% 超阈值)
-    3. 标记窗口 (±50点): 标记确认的故障区域
+    1. 检测窗口 (25点): 扫描候选故障点，条件：φ(FAI) > 阈值
+    2. 验证窗口 (15点): 验证候选点，检查连续性 (≥60% 超阈值)
+    3. 标记窗口 (±10点): 标记确认的故障区域
     
     优势: 在保持高敏感性的同时减少误报
     """
