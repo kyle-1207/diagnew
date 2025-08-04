@@ -50,23 +50,23 @@ HYBRID_FEEDBACK_CONFIG = {
     'use_feedback': True,                   # 启用反馈机制
     'feedback_start_epoch': 100,            # 第100轮开始启用反馈（增加训练轮数）
     
-    # 反馈触发阈值（多级触发）
+    # 反馈触发阈值（更严格的多级触发）
     'false_positive_thresholds': {
-        'warning': 0.01,        # 1%预警（记录但不反馈）
-        'standard': 0.03,       # 3%标准反馈
-        'enhanced': 0.05,       # 5%强化反馈  
-        'emergency': 0.10       # 10%紧急反馈
+        'warning': 0.005,       # 0.5%预警（记录但不反馈）
+        'standard': 0.01,       # 1%标准反馈（更严格）
+        'enhanced': 0.02,       # 2%强化反馈（更严格）
+        'emergency': 0.03       # 3%紧急反馈（更严格）
     },
     
     # 混合权重配置
     'mcae_weight': 0.8,                     # MC-AE权重（主要依赖）
     'transformer_weight': 0.2,             # Transformer权重（辅助校正）
     
-    # 自适应学习率配置
+    # 自适应学习率配置（更严格的调整）
     'adaptive_lr_factors': {
-        'standard': 0.8,        # 标准反馈：LR * 0.8
-        'enhanced': 0.6,        # 强化反馈：LR * 0.6
-        'emergency': 0.4        # 紧急反馈：LR * 0.4
+        'standard': 0.7,        # 标准反馈：LR * 0.7（更严格）
+        'enhanced': 0.5,        # 强化反馈：LR * 0.5（更严格）
+        'emergency': 0.3        # 紧急反馈：LR * 0.3（更严格）
     }
 }
 
@@ -422,7 +422,7 @@ plt.rcParams['font.size'] = 10
 #----------------------------------------复用Train_Transformer.py的TransformerPredictor模型------------------------------
 class TransformerPredictor(nn.Module):
     """时序预测Transformer模型 - 直接预测真实物理值"""
-    def __init__(self, input_size=7, d_model=256, nhead=16, num_layers=6, output_size=2):
+    def __init__(self, input_size=7, d_model=128, nhead=8, num_layers=3, output_size=2):
         super(TransformerPredictor, self).__init__()
         self.input_size = input_size
         self.d_model = d_model
@@ -796,15 +796,86 @@ def detect_feedback_trigger(false_positive_rate, epoch, config):
     
     return trigger_level, lr_factor, feedback_weight
 
+def prepare_feedback_data(feedback_samples, device, batch_size=1000):
+    """
+    准备反馈数据
+    
+    参数:
+        feedback_samples: 反馈样本ID列表 [8, 9]
+        device: 计算设备
+        batch_size: 批次大小
+    
+    返回:
+        feedback_data: (vin1_batch, targets_batch) 用于反馈计算
+    """
+    try:
+        print(f"🔧 准备反馈数据（样本 {feedback_samples}）...")
+        
+        all_vin1_data = []
+        all_targets = []
+        
+        for sample_id in feedback_samples:
+            # 加载vin_1数据
+            vin1_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_1.pkl'
+            with open(vin1_path, 'rb') as f:
+                vin1_data = pickle.load(f)
+                if isinstance(vin1_data, torch.Tensor):
+                    vin1_data = vin1_data.cpu()
+                else:
+                    vin1_data = torch.tensor(vin1_data)
+                all_vin1_data.append(vin1_data)
+            
+            # 加载目标数据
+            targets_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/targets.pkl'
+            with open(targets_path, 'rb') as f:
+                targets = pickle.load(f)
+                terminal_voltages = np.array(targets['terminal_voltages'])
+                pack_socs = np.array(targets['pack_socs'])
+                
+                # 组合目标数据：下一时刻的电压和SOC
+                targets_combined = np.column_stack([terminal_voltages[1:], pack_socs[1:]])
+                targets_tensor = torch.tensor(targets_combined, dtype=torch.float32)
+                all_targets.append(targets_tensor)
+        
+        # 合并所有数据
+        combined_vin1 = torch.cat(all_vin1_data, dim=0)
+        combined_targets = torch.cat(all_targets, dim=0)
+        
+        # 构建输入数据：vin_1前5维 + 当前时刻真实电压 + 当前时刻真实SOC
+        feedback_inputs = torch.zeros(len(combined_vin1), 7, dtype=torch.float32)
+        feedback_inputs[:, 0:5] = combined_vin1[:, 0, 0:5]  # vin_1前5维
+        
+        # 添加当前时刻的真实值（从targets中获取前一时刻的值）
+        feedback_inputs[1:, 5] = combined_targets[:-1, 0]  # 当前时刻电压
+        feedback_inputs[1:, 6] = combined_targets[:-1, 1]  # 当前时刻SOC
+        
+        # 对应的目标是下一时刻的值
+        feedback_targets = combined_targets[1:]
+        feedback_inputs = feedback_inputs[1:]
+        
+        # 随机采样一个批次
+        total_samples = len(feedback_inputs)
+        if total_samples > batch_size:
+            indices = torch.randperm(total_samples)[:batch_size]
+            feedback_inputs = feedback_inputs[indices]
+            feedback_targets = feedback_targets[indices]
+        
+        print(f"   ✅ 反馈数据准备完成: 输入{feedback_inputs.shape}, 目标{feedback_targets.shape}")
+        return (feedback_inputs, feedback_targets)
+        
+    except Exception as e:
+        print(f"   ❌ 反馈数据准备失败: {e}")
+        return None
+
 def apply_hybrid_feedback(transformer, mcae_net1, mcae_net2, feedback_data, 
                          feedback_weight, mcae_weight, transformer_weight, device):
     """
-    应用混合反馈机制（简化版）
+    应用混合反馈机制（基于实际预测误差）
     
     参数:
         transformer: Transformer模型
         mcae_net1, mcae_net2: MC-AE模型
-        feedback_data: 反馈数据（可以为None）
+        feedback_data: 反馈数据 (vin1_batch, targets_batch)
         feedback_weight: 反馈强度权重
         mcae_weight: MC-AE权重
         transformer_weight: Transformer权重
@@ -814,14 +885,41 @@ def apply_hybrid_feedback(transformer, mcae_net1, mcae_net2, feedback_data,
         feedback_loss: 反馈损失
         feedback_info: 反馈信息
     """
-    if feedback_weight == 0.0:
+    if feedback_weight == 0.0 or feedback_data is None:
         return torch.tensor(0.0, device=device), "无反馈"
     
-    # 简化的反馈损失：基于反馈权重的正则化项
-    feedback_loss = torch.tensor(feedback_weight * 0.01, device=device)
-    feedback_info = f"反馈权重: {feedback_weight:.2f}, MC-AE权重: {mcae_weight:.2f}, Transformer权重: {transformer_weight:.2f}"
-    
-    return feedback_loss, feedback_info
+    try:
+        vin1_batch, targets_batch = feedback_data
+        vin1_batch = vin1_batch.to(device)
+        targets_batch = targets_batch.to(device)
+        
+        # 计算Transformer在反馈样本上的预测误差
+        transformer.eval()
+        with torch.no_grad():
+            pred_output = transformer(vin1_batch)
+            
+        # 计算预测误差（MSE）
+        prediction_error = torch.nn.functional.mse_loss(pred_output, targets_batch)
+        
+        # 基于实际预测误差计算反馈损失
+        # 误差越大，反馈损失越大，训练调整越强烈
+        feedback_loss = prediction_error * feedback_weight
+        
+        # 添加正则化项，防止过度调整
+        l2_reg = sum(p.pow(2.0).sum() for p in transformer.parameters())
+        regularization_loss = 1e-6 * l2_reg
+        
+        total_feedback_loss = feedback_loss + regularization_loss
+        
+        feedback_info = f"预测误差: {prediction_error:.6f}, 反馈权重: {feedback_weight:.2f}, 反馈损失: {feedback_loss:.6f}"
+        
+        return total_feedback_loss, feedback_info
+        
+    except Exception as e:
+        print(f"   ⚠️ 反馈计算失败: {e}")
+        # 降级为简化反馈
+        fallback_loss = torch.tensor(feedback_weight * 0.001, device=device)
+        return fallback_loss, f"降级反馈: {feedback_weight:.2f}"
 
 #----------------------------------------主训练函数------------------------------
 def main():
@@ -852,10 +950,11 @@ def main():
     print(f"   反馈样本: {config['feedback_samples']} (QAS 8-9)")
     print(f"   测试正常样本: {config['test_normal_samples']} (QAS 10-11)")
     print(f"   测试故障样本: {config['test_fault_samples']} (QAS 335-336)")
-    print(f"🔧 反馈机制:")
+    print(f"🔧 反馈机制（基于实际预测误差）:")
     print(f"   反馈频率: 每{config['feedback_frequency']}个epoch")
     print(f"   反馈启动轮数: 第{config['feedback_start_epoch']}轮")
-    print(f"   假阳性阈值: {config['false_positive_thresholds']}")
+    print(f"   假阳性阈值（更严格）: {config['false_positive_thresholds']}")
+    print(f"   自适应学习率因子: {config['adaptive_lr_factors']}")
     print(f"   MC-AE权重: {config['mcae_weight']}, Transformer权重: {config['transformer_weight']}")
     
     #----------------------------------------阶段1: 基础Transformer训练------------------------------
@@ -924,12 +1023,12 @@ def main():
         print("请确保已运行 precompute_targets.py 生成预计算数据")
         return
     
-    # 初始化Transformer模型
+    # 初始化Transformer模型（精简配置，匹配保守训练参数）
     transformer = TransformerPredictor(
         input_size=7,      # vin_1前5维 + 电压 + SOC
-        d_model=256,       # 模型维度（中等规模）
-        nhead=16,          # 注意力头数（中等规模）
-        num_layers=6,      # Transformer层数（中等规模）
+        d_model=128,       # 模型维度（精简规模）
+        nhead=8,           # 注意力头数（精简规模）
+        num_layers=3,      # Transformer层数（精简规模）
         output_size=2      # 输出：电压 + SOC
     ).to(device).float()
     
@@ -957,13 +1056,15 @@ def main():
     # 设置混合精度训练
     scaler = setup_mixed_precision()
     
-    print(f"⚙️  阶段1训练参数:")
-    print(f"   学习率: {LR}")
+    print(f"⚙️  训练参数配置（精简模型 + 保守训练 + 改进反馈）:")
+    print(f"   模型规模: d_model=128, nhead=8, layers=3（精简配置）")
+    print(f"   学习率: {LR}（保守学习率，匹配精简模型）")
     print(f"   阶段1训练轮数: {EPOCH_PHASE1}")
     print(f"   总训练轮数: {EPOCH_PHASE2}")
     print(f"   批次大小: {BATCH_SIZE}")
     print(f"   学习率衰减频率: {lr_decay_freq}")
     print(f"   混合精度训练: 启用")
+    print(f"   反馈机制: 基于实际预测误差 + 更严格阈值")
     
     # 开始阶段1训练
     print("\n🎯 开始阶段1训练...")
@@ -1755,9 +1856,12 @@ def main():
                             param_group['lr'] *= lr_factor
                         print(f"   学习率调整: {param_group['lr']:.6f}")
                     
+                    # 准备反馈数据（基于实际预测误差）
+                    feedback_data = prepare_feedback_data(config['feedback_samples'], device, batch_size=500)
+                    
                     # 应用混合反馈
                     feedback_loss, feedback_info = apply_hybrid_feedback(
-                        transformer, net, netx, None, 
+                        transformer, net, netx, feedback_data, 
                         feedback_weight, config['mcae_weight'], config['transformer_weight'], device)
                     
                     print(f"   {feedback_info}")
