@@ -231,11 +231,22 @@ MODEL_PATHS = {
     }
 }
 
-# 三窗口固定参数
+# 基于FAI的三窗口检测配置
+# 设计原理：
+# 1. 检测窗口(50采样点=25分钟)：
+#    - 基于FAI统计特性识别异常
+#    - 时间跨度足够捕捉故障发展
+# 2. 验证窗口(30采样点=15分钟)：
+#    - 确认FAI异常的持续性
+#    - 排除随机波动的影响
+# 3. 标记窗口(40采样点=20分钟)：
+#    - 考虑故障的前后影响范围
+#    - 保证故障区域的完整性
 WINDOW_CONFIG = {
-    "detection_window": 100,     # 检测窗口：100个采样点
-    "verification_window": 50,   # 验证窗口：50个采样点  
-    "marking_window": 50        # 标记窗口：前后各50个采样点
+    "detection_window": 50,      # 检测窗口：50个采样点 (25分钟)
+    "verification_window": 30,   # 验证窗口：30个采样点 (15分钟)
+    "marking_window": 40,        # 标记窗口：40个采样点 (20分钟)
+    "verification_threshold": 0.4 # 验证窗口内FAI异常比例阈值 (40%)
 }
 
 # 高分辨率可视化配置
@@ -297,30 +308,44 @@ check_model_files()
 #----------------------------------------三窗口故障检测机制------------------------------
 def three_window_fault_detection(fai_values, threshold1, sample_id):
     """
-    三窗口故障检测机制：检测→验证→标记
+    基于FAI的三窗口故障检测机制
+    
+    原理：
+    1. 检测窗口：基于FAI统计特性识别异常点
+    2. 验证窗口：确认FAI异常的持续性，排除随机波动
+    3. 标记窗口：考虑故障的前后影响范围
     
     Args:
-        fai_values: 综合诊断指标序列
-        threshold1: 一级预警阈值
-        sample_id: 样本ID（用于调试）
+        fai_values: FAI序列（综合故障指标）
+        threshold1: FAI阈值
+        sample_id: 样本ID（用于记录）
     
     Returns:
         fault_labels: 故障标签序列 (0=正常, 1=故障)
         detection_info: 检测过程详细信息
     """
-    detection_window = WINDOW_CONFIG["detection_window"]
-    verification_window = WINDOW_CONFIG["verification_window"] 
-    marking_window = WINDOW_CONFIG["marking_window"]
+    # 获取窗口配置
+    detection_window = WINDOW_CONFIG["detection_window"]      # 50点 = 25分钟
+    verification_window = WINDOW_CONFIG["verification_window"] # 30点 = 15分钟
+    marking_window = WINDOW_CONFIG["marking_window"]          # 40点 = 20分钟
+    verification_threshold = WINDOW_CONFIG["verification_threshold"]  # 20%
     
+    # 初始化输出
     fault_labels = np.zeros(len(fai_values), dtype=int)
     detection_info = {
-        'candidate_points': [],
-        'verified_points': [],
-        'marked_regions': [],
-        'window_stats': {}
+        'candidate_points': [],    # 候选故障点
+        'verified_points': [],     # 已验证的故障点
+        'marked_regions': [],      # 标记的故障区域
+        'window_stats': {},        # 窗口统计信息
+        'fai_stats': {            # FAI统计信息
+            'mean': np.mean(fai_values),
+            'std': np.std(fai_values),
+            'max': np.max(fai_values),
+            'min': np.min(fai_values)
+        }
     }
     
-    # 阶段1：检测窗口 - 寻找候选故障点
+    # 阶段1：检测窗口 - 基于FAI统计特性识别异常点
     candidate_points = []
     for i in range(len(fai_values)):
         if fai_values[i] > threshold1:
@@ -332,35 +357,54 @@ def three_window_fault_detection(fai_values, threshold1, sample_id):
         # 没有候选点，直接返回
         return fault_labels, detection_info
     
-    # 阶段2：验证窗口 - 检查持续性
+    # 阶段2：验证窗口 - 确认FAI异常的持续性
     verified_points = []
     for candidate in candidate_points:
-        # 定义验证窗口范围
+        # 定义验证窗口范围（前后各半个窗口）
         start_verify = max(0, candidate - verification_window//2)
         end_verify = min(len(fai_values), candidate + verification_window//2)
         verify_data = fai_values[start_verify:end_verify]
         
-        # 持续性判断：验证窗口内超阈值点比例
+        # 计算FAI异常比例
         continuous_ratio = np.sum(verify_data > threshold1) / len(verify_data)
         
-        # 30%以上超阈值认为持续异常
-        if continuous_ratio >= 0.3:
+        # 计算FAI在验证窗口的统计特性
+        window_stats = {
+            'mean': np.mean(verify_data),
+            'std': np.std(verify_data),
+            'max': np.max(verify_data),
+            'min': np.min(verify_data),
+            'duration': end_verify - start_verify
+        }
+        
+        # 基于verification_threshold验证持续性
+        if continuous_ratio >= verification_threshold:
             verified_points.append({
                 'point': candidate,
                 'continuous_ratio': continuous_ratio,
-                'verify_range': (start_verify, end_verify)
+                'verify_range': (start_verify, end_verify),
+                'window_stats': window_stats
             })
     
     detection_info['verified_points'] = verified_points
     
-    # 阶段3：标记窗口 - 标记故障区域
+    # 阶段3：标记窗口 - 考虑故障的影响范围
     marked_regions = []
     for verified in verified_points:
         candidate = verified['point']
         
-        # 定义标记窗口范围
+        # 定义对称的标记窗口范围
         start_mark = max(0, candidate - marking_window)
         end_mark = min(len(fai_values), candidate + marking_window)
+        
+        # 提取标记区域的FAI特征
+        mark_data = fai_values[start_mark:end_mark]
+        region_stats = {
+            'mean_fai': np.mean(mark_data),
+            'max_fai': np.max(mark_data),
+            'std_fai': np.std(mark_data),
+            'duration': end_mark - start_mark
+        }
         
         # 标记故障区域
         fault_labels[start_mark:end_mark] = 1
@@ -368,17 +412,20 @@ def three_window_fault_detection(fai_values, threshold1, sample_id):
         marked_regions.append({
             'center': candidate,
             'range': (start_mark, end_mark),
-            'length': end_mark - start_mark
+            'length': end_mark - start_mark,
+            'region_stats': region_stats
         })
     
     detection_info['marked_regions'] = marked_regions
     
-    # 统计信息
+    # 完整的统计信息
     detection_info['window_stats'] = {
         'total_candidates': len(candidate_points),
         'verified_candidates': len(verified_points),
         'total_fault_points': np.sum(fault_labels),
-        'fault_ratio': np.sum(fault_labels) / len(fault_labels)
+        'fault_ratio': np.sum(fault_labels) / len(fault_labels),
+        'mean_continuous_ratio': np.mean([v['continuous_ratio'] for v in verified_points]) if verified_points else 0,
+        'mean_region_length': np.mean([m['length'] for m in marked_regions]) if marked_regions else 0
     }
     
     return fault_labels, detection_info
@@ -732,7 +779,7 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=PLOT_CONFIG["figsize_large"])
     
     # === 子图1: 连续阈值ROC曲线 ===
-    ax1.set_title('(a) Transformer ROC曲线\n(连续阈值扫描)')
+    ax1.set_title('(a) Transformer ROC Curve\n(Continuous Threshold Scan)')
     
     model_results = test_results["TRANSFORMER"]
     
@@ -783,14 +830,14 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     ax1.plot(fpr_list, tpr_list, color='blue', linewidth=2,
             label=f'Transformer (AUC={auc_score:.3f})')
     
-    ax1.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='随机分类器')
-    ax1.set_xlabel('假正例率')
-    ax1.set_ylabel('真正例率')
+    ax1.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='Random Classifier')
+    ax1.set_xlabel('False Positive Rate')
+    ax1.set_ylabel('True Positive Rate')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
     # === 子图2: 固定阈值工作点 ===
-    ax2.set_title('(b) 论文工作点\n(三级报警阈值)')
+    ax2.set_title('(b) Working Point\n(Three-Level Alarm Threshold)')
     
     metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
     ax2.scatter(metrics['fpr'], metrics['tpr'], 
@@ -799,16 +846,16 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
                marker='o', edgecolors='black', linewidth=2)
     
     ax2.plot([0, 1], [0, 1], 'k--', alpha=0.5)
-    ax2.set_xlabel('假正例率')
-    ax2.set_ylabel('真正例率')
+    ax2.set_xlabel('False Positive Rate')
+    ax2.set_ylabel('True Positive Rate')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     
     # === 子图3: 性能指标展示 ===
-    ax3.set_title('(c) Transformer分类指标')
+    ax3.set_title('(c) Transformer Classification Metrics')
     
-    metrics_names = ['准确率', '精确率', '召回率', 'F1分数', '特异性']
-    metric_mapping = {'准确率': 'accuracy', '精确率': 'precision', '召回率': 'recall', 'F1分数': 'f1_score', '特异性': 'specificity'}
+    metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'Specificity']
+    metric_mapping = {'Accuracy': 'accuracy', 'Precision': 'precision', 'Recall': 'recall', 'F1-Score': 'f1_score', 'Specificity': 'specificity'}
     transformer_values = [performance_metrics["TRANSFORMER"]['classification_metrics'][metric_mapping[m]] 
                          for m in metrics_names]
     
@@ -816,8 +863,8 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     width = 0.6
     
     bars = ax3.bar(x, transformer_values, width, color='blue', alpha=0.7)
-    ax3.set_xlabel('指标')
-    ax3.set_ylabel('分数')
+    ax3.set_xlabel('Metrics')
+    ax3.set_ylabel('Score')
     ax3.set_xticks(x)
     ax3.set_xticklabels(metrics_names, rotation=45)
     ax3.grid(True, alpha=0.3)
@@ -828,9 +875,9 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
                 f'{value:.3f}', ha='center', va='bottom')
     
     # === 子图4: 样本级性能展示 ===
-    ax4.set_title('(d) Transformer样本级性能')
+    ax4.set_title('(d) Transformer Sample-Level Performance')
     
-    sample_metrics = ['平均φ(正常)', '平均φ(故障)', '异常率(正常)', '异常率(故障)']
+    sample_metrics = ['Avg φ(Normal)', 'Avg φ(Fault)', 'Anomaly Rate(Normal)', 'Anomaly Rate(Fault)']
     transformer_sample_values = [
         performance_metrics["TRANSFORMER"]['sample_metrics']['avg_fai_normal'],
         performance_metrics["TRANSFORMER"]['sample_metrics']['avg_fai_fault'],
@@ -841,8 +888,8 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     x = np.arange(len(sample_metrics))
     bars = ax4.bar(x, transformer_sample_values, width, color='blue', alpha=0.7)
     
-    ax4.set_xlabel('样本指标')
-    ax4.set_ylabel('数值')
+    ax4.set_xlabel('Sample Metrics')
+    ax4.set_ylabel('Value')
     ax4.set_xticks(x)
     ax4.set_xticklabels(sample_metrics, rotation=45, ha='right')
     ax4.grid(True, alpha=0.3)
