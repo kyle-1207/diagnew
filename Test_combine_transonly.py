@@ -232,22 +232,36 @@ MODEL_PATHS = {
 }
 
 # 基于FAI的三窗口检测配置
-# 设计原理：
-# 1. 检测窗口(50采样点=25分钟)：
-#    - 基于FAI统计特性识别异常
-#    - 时间跨度足够捕捉故障发展
-# 2. 验证窗口(30采样点=15分钟)：
-#    - 确认FAI异常的持续性
-#    - 排除随机波动的影响
-# 3. 标记窗口(40采样点=20分钟)：
-#    - 考虑故障的前后影响范围
-#    - 保证故障区域的完整性
-WINDOW_CONFIG = {
-    "detection_window": 20,      # 检测窗口：20个采样点 (10分钟)
-    "verification_window": 10,   # 验证窗口：10个采样点 (5分钟)
-    "marking_window": 8,         # 标记窗口：8个采样点 (4分钟)
-    "verification_threshold": 0.13 # 验证窗口内FAI异常比例阈值 (30%)
+# 多组窗口配置方案
+WINDOW_CONFIGS = {
+    "config_1": {  # 小窗口配置(当前)
+        "detection_window": 20,    
+        "verification_window": 10,  
+        "marking_window": 8,      
+        "verification_threshold": 0.13
+    },
+    "config_2": {  # 中等窗口配置
+        "detection_window": 50,    
+        "verification_window": 25,  
+        "marking_window": 20,     
+        "verification_threshold": 0.25
+    },
+    "config_3": {  # 大窗口配置
+        "detection_window": 100,   
+        "verification_window": 50,  
+        "marking_window": 40,     
+        "verification_threshold": 0.3
+    },
+    "config_4": {  # 超大窗口配置
+        "detection_window": 200,   
+        "verification_window": 100, 
+        "marking_window": 80,     
+        "verification_threshold": 0.35
+    }
 }
+
+# 当前使用的配置
+WINDOW_CONFIG = WINDOW_CONFIGS["config_1"]
 
 # 高分辨率可视化配置
 PLOT_CONFIG = {
@@ -306,7 +320,7 @@ def check_model_files():
 check_model_files()
 
 #----------------------------------------三窗口故障检测机制------------------------------
-def three_window_fault_detection(fai_values, threshold1, sample_id):
+def three_window_fault_detection(fai_values, threshold1, sample_id, config=None):
     """
     基于FAI的三窗口故障检测机制
     
@@ -319,16 +333,20 @@ def three_window_fault_detection(fai_values, threshold1, sample_id):
         fai_values: FAI序列（综合故障指标）
         threshold1: FAI阈值
         sample_id: 样本ID（用于记录）
+        config: 窗口配置,如果为None则使用默认配置
     
     Returns:
         fault_labels: 故障标签序列 (0=正常, 1=故障)
         detection_info: 检测过程详细信息
     """
     # 获取窗口配置
-    detection_window = WINDOW_CONFIG["detection_window"]      # 50点 = 25分钟
-    verification_window = WINDOW_CONFIG["verification_window"] # 30点 = 15分钟
-    marking_window = WINDOW_CONFIG["marking_window"]          # 40点 = 20分钟
-    verification_threshold = WINDOW_CONFIG["verification_threshold"]  # 20%
+    if config is None:
+        config = WINDOW_CONFIG
+        
+    detection_window = config["detection_window"]
+    verification_window = config["verification_window"]
+    marking_window = config["marking_window"]
+    verification_threshold = config["verification_threshold"]
     
     # 初始化输出
     fault_labels = np.zeros(len(fai_values), dtype=int)
@@ -499,8 +517,15 @@ def load_models():
     return models
 
 #----------------------------------------单样本处理函数------------------------------
-def process_single_sample(sample_id, models):
-    """处理单个测试样本"""
+def process_single_sample(sample_id, models, config=None):
+    """
+    处理单个测试样本
+    
+    Args:
+        sample_id: 样本ID
+        models: 加载的模型
+        config: 窗口配置,如果为None则使用默认配置
+    """
     
     # 加载样本数据
     vin1_data, vin2_data, vin3_data = load_test_sample(sample_id)
@@ -585,7 +610,7 @@ def process_single_sample(sample_id, models):
         threshold3 = np.mean(fai) + 6*np.std(fai)
     
     # 三窗口故障检测
-    fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id)
+    fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id, config)
     
     # 构建结果
     sample_result = {
@@ -624,52 +649,75 @@ def main_test_process():
         "TRANSFORMER": [],
         "metadata": {
             "test_samples": TEST_SAMPLES,
-            "window_config": WINDOW_CONFIG,
+            "window_configs": WINDOW_CONFIGS,
             "timestamp": datetime.now().isoformat()
         }
     }
     
-    # Transformer单模型测试
-    total_operations = len(ALL_TEST_SAMPLES)  # 4个样本 (2正常+2故障)
-    
     print(f"\n🚀 开始Transformer模型测试...")
-    print(f"总共需要处理: {total_operations} 个样本")
+    print(f"总共需要处理: {len(ALL_TEST_SAMPLES)} 个样本 × {len(WINDOW_CONFIGS)} 种配置")
     
-    with tqdm(total=total_operations, desc="Transformer测试进度", 
-              bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]') as pbar:
+    # 加载模型
+    print(f"\n{'='*20} 加载模型 {'='*20}")
+    models = load_models()
+    print(f"✅ Transformer 模型加载完成")
+    
+    # 对每个配置进行测试
+    for config_name, config in WINDOW_CONFIGS.items():
+        print(f"\n{'='*20} 测试配置: {config_name} {'='*20}")
+        print(f"   检测窗口: {config['detection_window']}")
+        print(f"   验证窗口: {config['verification_window']}")
+        print(f"   标记窗口: {config['marking_window']}")
+        print(f"   验证阈值: {config['verification_threshold']}")
         
-        print(f"\n{'='*20} 测试 Transformer 模型 {'='*20}")
+        config_results = []
         
-        # 加载模型
-        pbar.set_description(f"加载Transformer模型")
-        models = load_models()
-        print(f"✅ Transformer 模型加载完成")
-        
-
-        
-        for sample_id in ALL_TEST_SAMPLES:
-            pbar.set_description(f"Transformer-样本{sample_id}")
+        with tqdm(total=len(ALL_TEST_SAMPLES), desc=f"{config_name}测试进度",
+                  bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]') as pbar:
             
-            try:
-                # 处理单个样本
-                sample_result = process_single_sample(sample_id, models)
-                test_results["TRANSFORMER"].append(sample_result)
+            for sample_id in ALL_TEST_SAMPLES:
+                pbar.set_description(f"{config_name}-样本{sample_id}")
                 
-                # 输出简要结果
-                metrics = sample_result.get('performance_metrics', {})
-                detection_info = sample_result.get('detection_info', {})
-                window_stats = detection_info.get('window_stats', {})
+                try:
+                    # 使用当前配置处理样本
+                    sample_result = process_single_sample(sample_id, models, config)
+                    config_results.append(sample_result)
+                    
+                    # 输出简要结果
+                    metrics = sample_result.get('performance_metrics', {})
+                    detection_info = sample_result.get('detection_info', {})
+                    window_stats = detection_info.get('window_stats', {})
+                    
+                    print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
+                          f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
+                          f"三窗口检测={window_stats.get('fault_ratio', 0.0):.2%}")
+                    
+                except Exception as e:
+                    print(f"❌ 样本 {sample_id} 处理失败: {e}")
+                    continue
                 
-                print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
-                      f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
-                      f"三窗口检测={window_stats.get('fault_ratio', 0.0):.2%}")
-                
-            except Exception as e:
-                print(f"❌ 样本 {sample_id} 处理失败: {e}")
-                continue
-            
-            pbar.update(1)
-            time.sleep(0.1)  # 避免进度条更新过快
+                pbar.update(1)
+                time.sleep(0.1)  # 避免进度条更新过快
+        
+        # 计算当前配置的性能指标
+        config_metrics = calculate_performance_metrics({"TRANSFORMER": config_results})
+        
+        # 保存配置结果
+        test_results[f"TRANSFORMER_{config_name}"] = {
+            "config": config,
+            "results": config_results,
+            "metrics": config_metrics["TRANSFORMER"]
+        }
+        
+        # 输出当前配置的性能总结
+        metrics = config_metrics["TRANSFORMER"]['classification_metrics']
+        print(f"\n📊 {config_name} 性能指标:")
+        print(f"   准确率: {metrics['accuracy']:.3f}")
+        print(f"   精确率: {metrics['precision']:.3f}")
+        print(f"   召回率: {metrics['recall']:.3f}")
+        print(f"   F1分数: {metrics['f1_score']:.3f}")
+        print(f"   TPR: {metrics['tpr']:.3f}")
+        print(f"   FPR: {metrics['fpr']:.3f}")
     
     print(f"\n✅ Transformer测试完成!")
     print(f"   Transformer: 成功处理 {len(test_results['TRANSFORMER'])} 个样本")
@@ -1360,15 +1408,23 @@ print("="*80)
 print(f"\n📊 测试结果总结:")
 print(f"   • 测试样本: {len(ALL_TEST_SAMPLES)} 个 (正常: {len(TEST_SAMPLES['normal'])}, 故障: {len(TEST_SAMPLES['fault'])})")
 print(f"   • 模型类型: Transformer")
-print(f"   • 三窗口检测: 检测({WINDOW_CONFIG['detection_window']}) → 验证({WINDOW_CONFIG['verification_window']}) → 标记({WINDOW_CONFIG['marking_window']})")
+print(f"   • 配置数量: {len(WINDOW_CONFIGS)} 种")
 
-print(f"\n🔬 Transformer性能:")
-metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
-print(f"   准确率: {metrics['accuracy']:.3f}")
-print(f"   精确率: {metrics['precision']:.3f}")
-print(f"   召回率: {metrics['recall']:.3f}")
-print(f"   F1分数: {metrics['f1_score']:.3f}")
-print(f"   TPR: {metrics['tpr']:.3f}, FPR: {metrics['fpr']:.3f}")
+print("\n🔬 各配置性能对比:")
+for config_name, config in WINDOW_CONFIGS.items():
+    print(f"\n   {config_name}:")
+    print(f"   • 窗口配置: 检测({config['detection_window']}) → 验证({config['verification_window']}) → 标记({config['marking_window']})")
+    
+    if f"TRANSFORMER_{config_name}" in test_results:
+        metrics = test_results[f"TRANSFORMER_{config_name}"]["metrics"]["classification_metrics"]
+        print(f"   • 性能指标:")
+        print(f"     准确率: {metrics['accuracy']:.3f}")
+        print(f"     精确率: {metrics['precision']:.3f}")
+        print(f"     召回率: {metrics['recall']:.3f}")
+        print(f"     F1分数: {metrics['f1_score']:.3f}")
+        print(f"     TPR: {metrics['tpr']:.3f}, FPR: {metrics['fpr']:.3f}")
+    else:
+        print("   ⚠️ 无性能数据")
 
 print(f"\n📁 结果文件:")
 print(f"   • 结果目录: {result_dir}")
