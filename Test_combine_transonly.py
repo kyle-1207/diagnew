@@ -724,9 +724,6 @@ def main_test_process():
     
     return test_results
 
-# 执行主测试流程
-test_results = main_test_process()
-
 #----------------------------------------性能分析函数------------------------------
 def calculate_performance_metrics(test_results):
     """计算Transformer性能指标"""
@@ -821,6 +818,9 @@ def calculate_performance_metrics(test_results):
     }
     
     return performance_metrics
+
+# 执行主测试流程
+test_results = main_test_process()
 
 #----------------------------------------ROC曲线对比------------------------------
 def create_roc_analysis(test_results, performance_metrics, save_path):
