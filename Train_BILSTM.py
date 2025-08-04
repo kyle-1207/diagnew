@@ -1106,9 +1106,12 @@ yTrainX = y_recovered2.cpu().detach().numpy()
 ERRORX = BB - yTrainX
 
 # 创建结果目录
-result_dir = './models'
+result_dir = '/mnt/bz25t/bzhy/datasave/BILSTM'
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
+    print(f"✅ 创建结果目录: {result_dir}")
+else:
+    print(f"✅ 使用现有结果目录: {result_dir}")
 
 # 中文注释：诊断特征提取与PCA分析
 df_data = DiagnosisFeature(ERRORU,ERRORX)
@@ -1213,9 +1216,7 @@ plt.close()
 
 print(f"✅ BiLSTM训练结果图已保存: {result_dir}/bilstm_training_results.png")
 
-# 确保结果目录存在
-if not os.path.exists(result_dir):
-    os.makedirs(result_dir)
+# 确保结果目录存在（已在前面创建）
 
 # 2. 保存诊断特征DataFrame（避免Excel文件过大）
 try:
@@ -1309,4 +1310,11 @@ print("📊 小样本训练优势：")
 print("   - 训练时间大幅缩短，适合快速验证")
 print("   - 内存占用更少，适合资源受限环境")
 print("   - 便于调试和参数调优")
-print("   - 可快速验证模型架构的有效性") 
+print("   - 可快速验证模型架构的有效性")
+print("")
+print(f"📁 结果保存路径: {result_dir}")
+print("   - 训练结果图: bilstm_training_results.png")
+print("   - 诊断特征: diagnosis_feature_bilstm_baseline.csv")
+print("   - 模型参数: net_model_bilstm_baseline.pth, netx_model_bilstm_baseline.pth")
+print("   - PCA分析结果: *_bilstm_baseline.npy")
+print("   - 训练历史: bilstm_training_history.pkl") 
