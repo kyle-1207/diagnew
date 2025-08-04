@@ -41,9 +41,7 @@ from data_loader_transformer import TransformerBatteryDataset, create_transforme
 HYBRID_FEEDBACK_CONFIG = {
     # 数据分组配置（严格按照README规范）
     'train_samples': list(range(8)),        # QAS 0-7 (8个正常样本)
-    'feedback_samples': [8, 9],             # QAS 8-9 (2个正常反馈样本)  
-    'test_normal_samples': [10, 11],        # QAS 10,11 (2个正常测试样本)
-    'test_fault_samples': [335, 336],       # QAS 335,336 (2个故障测试样本)
+    'feedback_samples': [8, 9],             # QAS 8-9 (2个正常反馈样本)
     
     # 反馈机制配置
     'feedback_frequency': 15,               # 每15个epoch检查一次
@@ -333,19 +331,19 @@ def physics_based_data_processing_silent(data, feature_type='general'):
     
     return data_tensor
 
-# 复用Train_Transformer.py的GPU配置
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # 使用GPU0和GPU1
+# GPU配置优化：小样本训练使用单GPU避免跨卡通信开销
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 只使用GPU0
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # 打印GPU信息
 if torch.cuda.is_available():
-    print(f"\n🖥️ 双GPU并行配置:")
+    print(f"\n🖥️ 单GPU优化配置:")
     print(f"   可用GPU数量: {torch.cuda.device_count()}")
     for i in range(torch.cuda.device_count()):
         props = torch.cuda.get_device_properties(i)
         print(f"   GPU {i} ({props.name}): {props.total_memory/1024**3:.1f}GB")
-    print(f"   主GPU设备: cuda:0")
-    print(f"   数据并行模式: 启用")
+    print(f"   主GPU设备: cuda:0 (物理GPU0)")
+    print(f"   优化模式: 小样本训练，避免跨卡通信开销")
 else:
     print("⚠️  未检测到GPU，使用CPU训练")
 
@@ -415,9 +413,9 @@ plt.rcParams['font.size'] = 10
 # - 实时监控假阳性率，触发多级反馈机制
 # - 自适应调整训练策略和学习率
 #
-# 阶段4: 性能测试 (样本10,11+335,336)
-# - 使用正常和故障测试样本评估整体性能
-# - ROC分析，与BiLSTM基准对比
+# 阶段4: PCA分析和模型保存
+# - 使用Transformer增强数据训练MC-AE
+# - 进行PCA分析，保存模型和参数
 
 #----------------------------------------复用Train_Transformer.py的TransformerPredictor模型------------------------------
 class TransformerPredictor(nn.Module):
@@ -948,8 +946,6 @@ def main():
     print(f"📊 数据分组:")
     print(f"   训练样本: {config['train_samples']} (QAS 0-7)")
     print(f"   反馈样本: {config['feedback_samples']} (QAS 8-9)")
-    print(f"   测试正常样本: {config['test_normal_samples']} (QAS 10-11)")
-    print(f"   测试故障样本: {config['test_fault_samples']} (QAS 335-336)")
     print(f"🔧 反馈机制（基于实际预测误差）:")
     print(f"   反馈频率: 每{config['feedback_frequency']}个epoch")
     print(f"   反馈启动轮数: 第{config['feedback_start_epoch']}轮")
@@ -1032,12 +1028,8 @@ def main():
         output_size=2      # 输出：电压 + SOC
     ).to(device).float()
     
-    # 启用数据并行
-    if torch.cuda.device_count() > 1:
-        transformer = torch.nn.DataParallel(transformer)
-        print(f"✅ 启用数据并行，使用 {torch.cuda.device_count()} 张GPU")
-    else:
-        print("⚠️  单GPU模式")
+    # 单GPU优化模式（小样本训练，避免跨卡通信开销）
+    print("🔧 单GPU优化模式：避免数据并行开销，专注于小样本训练")
     
     print(f"🧠 Transformer模型初始化完成")
     print(f"📈 模型参数量: {sum(p.numel() for p in transformer.parameters()):,}")
@@ -2167,7 +2159,7 @@ def main():
     print(f"   PCA主成分数量: {k}")
     print("")
     print("🔄 下一步可以:")
-    print("   1. 使用测试样本(10,11+335,336)进行性能评估")
+    print("   1. 运行Test_combine_transonly.py进行性能评估")
     print("   2. 与BiLSTM基准进行详细对比分析")
     print("   3. 分析混合反馈策略的改进效果")
     print("   4. 调整反馈参数进行进一步优化")

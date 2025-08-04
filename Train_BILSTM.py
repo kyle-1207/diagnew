@@ -34,7 +34,7 @@ import pickle
 # GPU设备配置
 import os
 # 使用指定的GPU设备
-os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'  # 使用GPU2和GPU3
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'  # 只使用GPU2
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')  # 这里的cuda:0实际上是物理GPU2
 
 # 打印GPU信息
@@ -45,7 +45,7 @@ if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(i)
         print(f"\n   GPU {i} ({props.name}):")
         print(f"      总显存: {props.total_memory/1024**3:.1f}GB")
-    print(f"\n   当前使用: GPU2和GPU3 (通过CUDA_VISIBLE_DEVICES映射为cuda:0和cuda:1)")
+    print(f"\n   当前使用: 仅GPU2 (小样本训练优化，避免跨卡通信开销)")
     print(f"   主GPU设备: cuda:0 (物理GPU2)")
 else:
     print("⚠️  未检测到GPU，使用CPU训练")
@@ -112,7 +112,7 @@ print(f"   预热轮数: {WARMUP_EPOCHS}")
 print(f"   最大梯度阈值: {MAX_GRAD_NORM}")
 print(f"   最小梯度阈值: {MIN_GRAD_NORM}")
 print(f"   学习率调度: 固定学习率 (与源代码一致)")
-print(f"   数据并行: 启用")
+print(f"   数据并行: 禁用（单GPU优化）")
 print(f"   混合精度: 禁用 (与源代码一致)")
 print(f"   数据类型: float32 (与源代码一致)")
 print(f"   激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid (与源代码一致)")
@@ -786,13 +786,8 @@ stable_weight_init(net)
 stable_weight_init(netx)
 print("✅ 应用稳定的权重初始化")
 
-# 启用数据并行
-if torch.cuda.device_count() > 1:
-    net = torch.nn.DataParallel(net, device_ids=[0, 1])
-    netx = torch.nn.DataParallel(netx, device_ids=[0, 1])
-    print(f"✅ 启用数据并行，使用 {torch.cuda.device_count()} 张GPU (device_ids=[0,1])")
-else:
-    print("⚠️  单GPU模式")
+# 单GPU优化模式（小样本训练，避免跨卡通信开销）
+print("🔧 单GPU优化模式：避免数据并行开销，专注于小样本训练")
 
 optimizer = torch.optim.Adam(net.parameters(), lr=INIT_LR)
 l1_lambda = 0.01
