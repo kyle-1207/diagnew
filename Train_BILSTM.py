@@ -748,7 +748,7 @@ train_losses_mcae1 = []
 train_losses_mcae2 = []
 
 # 中文注释：自定义多输入数据集类（本地定义，非Class_.py中的Dataset）
-class Dataset(Dataset):
+class MultiInputDataset(Dataset):
     def __init__(self, x, y, z, q):
         self.x = x.to(torch.float32)
         self.y = y.to(torch.float32)
@@ -760,7 +760,7 @@ class Dataset(Dataset):
         return self.x[idx], self.y[idx], self.z[idx], self.q[idx]
 
 # 中文注释：用DataLoader批量加载多通道特征数据
-train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=BATCHSIZE, shuffle=False)
+train_loader_u = DataLoader(MultiInputDataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=BATCHSIZE, shuffle=False)
 
 # 中文注释：初始化MC-AE模型（使用float32）
 net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
@@ -925,7 +925,7 @@ for epoch in range(EPOCH):
                 print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
 
 # 中文注释：全量推理，获得重构误差
-train_loader2 = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=len(x_recovered), shuffle=False)
+train_loader2 = DataLoader(MultiInputDataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=len(x_recovered), shuffle=False)
 for iteration, (x, y, z, q) in enumerate(train_loader2):
     x = x.to(device)
     y = y.to(device)
@@ -938,7 +938,7 @@ yTrainU = y_recovered.cpu().detach().numpy()
 ERRORU = AA - yTrainU
 
 # 中文注释：第二组特征的MC-AE训练
-train_loader_soc = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=BATCHSIZE, shuffle=False)
+train_loader_soc = DataLoader(MultiInputDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=BATCHSIZE, shuffle=False)
 optimizer = torch.optim.Adam(netx.parameters(), lr=INIT_LR)
 loss_f = nn.MSELoss()
 
@@ -1055,7 +1055,7 @@ for epoch in range(EPOCH):
                 gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
                 print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
 
-train_loaderx2 = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=len(x_recovered2), shuffle=False)
+train_loaderx2 = DataLoader(MultiInputDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=len(x_recovered2), shuffle=False)
 for iteration, (x, y, z, q) in enumerate(train_loaderx2):
     x = x.to(device)
     y = y.to(device)
@@ -1220,7 +1220,7 @@ training_history = {
     'mcae2_reconstruction_error_std': np.std(np.abs(ERRORX)),
     'training_samples': len(train_samples),
     'epochs': EPOCH,
-    'learning_rate': LR,
+    'learning_rate': INIT_LR,
     'batch_size': BATCHSIZE
 }
 

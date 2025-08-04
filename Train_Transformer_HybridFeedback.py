@@ -506,6 +506,15 @@ def calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, p
         # 1. 准备MC-AE输入数据
         vin2_data, vin3_data = sample_data
         
+        # 确保数据是tensor并移动到正确设备
+        if not isinstance(vin2_data, torch.Tensor):
+            vin2_data = torch.tensor(vin2_data, dtype=torch.float32)
+        if not isinstance(vin3_data, torch.Tensor):
+            vin3_data = torch.tensor(vin3_data, dtype=torch.float32)
+        
+        vin2_data = vin2_data.to(device)
+        vin3_data = vin3_data.to(device)
+        
         # 2. 分割特征（与训练时保持一致）
         dim_x, dim_y, dim_z = 2, 110, 110
         x_recovered = vin2_data[:, :dim_x]
@@ -519,11 +528,11 @@ def calculate_comprehensive_fault_indicator(sample_data, mcae_net1, mcae_net2, p
         z_recovered2 = vin3_data[:, dim_x2 + dim_y2: dim_x2 + dim_y2 + dim_z2]
         q_recovered2 = vin3_data[:, dim_x2 + dim_y2 + dim_z2:]
         
-        # 3. MC-AE重构
+        # 3. MC-AE重构（确保所有数据在同一设备上）
         recon_im1, _ = mcae_net1(x_recovered.double(), z_recovered.double(), q_recovered.double())
         recon_im2, _ = mcae_net2(x_recovered2.double(), z_recovered2.double(), q_recovered2.double())
         
-        # 4. 计算重构误差
+        # 4. 计算重构误差（在CPU上进行numpy操作）
         ERRORU = recon_im1.cpu().detach().numpy() - y_recovered.cpu().detach().numpy()
         ERRORX = recon_im2.cpu().detach().numpy() - y_recovered2.cpu().detach().numpy()
         
@@ -604,6 +613,25 @@ def calculate_training_threshold(train_samples, mcae_net1, mcae_net2, pca_params
     all_training_fai = np.array(all_training_fai)
     print(f"   训练数据总计: {len(all_training_fai)} 个数据点")
     
+    # 检查数据是否为空
+    if len(all_training_fai) == 0:
+        print("   ❌ 没有成功处理任何训练数据，使用默认阈值")
+        # 使用默认阈值
+        default_threshold = 1.0
+        return default_threshold, default_threshold * 1.5, default_threshold * 2.0
+    
+    # 检查数据是否包含NaN或Inf
+    if np.any(np.isnan(all_training_fai)) or np.any(np.isinf(all_training_fai)):
+        print("   ⚠️ 检测到NaN或Inf值，清理数据...")
+        all_training_fai = all_training_fai[~np.isnan(all_training_fai)]
+        all_training_fai = all_training_fai[~np.isinf(all_training_fai)]
+        print(f"   清理后数据点: {len(all_training_fai)}")
+        
+        if len(all_training_fai) == 0:
+            print("   ❌ 清理后没有有效数据，使用默认阈值")
+            default_threshold = 1.0
+            return default_threshold, default_threshold * 1.5, default_threshold * 2.0
+    
     # 按照测试脚本的方法计算阈值
     nm = 3000  # 固定分割点
     mm = len(all_training_fai)
@@ -620,6 +648,13 @@ def calculate_training_threshold(train_samples, mcae_net1, mcae_net2, pca_params
     # 计算三级阈值
     fai_mean = np.mean(fai_baseline)
     fai_std = np.std(fai_baseline)
+    
+    # 检查统计量是否有效
+    if np.isnan(fai_mean) or np.isnan(fai_std) or fai_std == 0:
+        print("   ⚠️ 统计量无效，使用数据范围计算阈值")
+        fai_range = np.max(fai_baseline) - np.min(fai_baseline)
+        fai_mean = np.median(fai_baseline)
+        fai_std = fai_range / 6.0  # 使用范围估计标准差
     
     threshold1 = fai_mean + 3 * fai_std      # 3σ
     threshold2 = fai_mean + 4.5 * fai_std    # 4.5σ  
@@ -812,11 +847,31 @@ def main():
         print(f"🔧 GPU数量: {torch.cuda.device_count()}")
         print(f"🔧 当前GPU: {torch.cuda.get_device_name(0)}")
     
+    # 验证训练样本数据是否存在
+    print("\n🔍 验证训练样本数据...")
+    valid_samples = []
+    for sample_id in train_samples:
+        vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
+        vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
+        
+        if os.path.exists(vin2_path) and os.path.exists(vin3_path):
+            valid_samples.append(sample_id)
+            print(f"   ✅ 样本 {sample_id}: 数据文件存在")
+        else:
+            print(f"   ❌ 样本 {sample_id}: 数据文件缺失")
+    
+    if len(valid_samples) == 0:
+        print("❌ 没有找到有效的训练样本数据")
+        print("请检查数据路径: /mnt/bz25t/bzhy/zhanglikang/project/QAS/")
+        return
+    
+    print(f"✅ 找到 {len(valid_samples)} 个有效训练样本: {valid_samples}")
+    
     # 使用复用的数据加载器
     print("\n📥 加载预计算数据...")
     try:
         # 创建数据集
-        dataset = TransformerBatteryDataset(data_path='/mnt/bz25t/bzhy/zhanglikang/project/QAS', sample_ids=train_samples)
+        dataset = TransformerBatteryDataset(data_path='/mnt/bz25t/bzhy/zhanglikang/project/QAS', sample_ids=valid_samples)
         
         if len(dataset) == 0:
             print("❌ 没有加载到任何训练数据")
@@ -1286,11 +1341,11 @@ def main():
     
     # 1. 保存Transformer模型
     transformer_save_paths = [
-        f'models/transformer_model{model_suffix}.pth',
+        f'/mnt/bz25t/bzhy/datasave/transformer_model{model_suffix}.pth',  # 用户指定路径
         f'/tmp/transformer_model{model_suffix}.pth',
         f'./transformer_model{model_suffix}.pth',
-        f'/mnt/bz25t/bzhy/zhanglikang/project/transformer_model{model_suffix}.pth',  # 用户确认有空间的路径
-        f'/mnt/bz25t/bzhy/transformer_model{model_suffix}.pth'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/transformer_model{model_suffix}.pth',
+        f'models/transformer_model{model_suffix}.pth'
     ]
     
     transformer_saved = False
@@ -1321,11 +1376,11 @@ def main():
     
     # 2. 保存MC-AE模型
     mcae_save_paths = [
-        f'models/net_model{model_suffix}.pth',
+        f'/mnt/bz25t/bzhy/datasave/net_model{model_suffix}.pth',  # 用户指定路径
         f'/tmp/net_model{model_suffix}.pth',
         f'./net_model{model_suffix}.pth',
-        f'/mnt/bz25t/bzhy/zhanglikang/project/net_model{model_suffix}.pth',  # 用户确认有空间的路径
-        f'/mnt/bz25t/bzhy/datasave/net_model{model_suffix}.pth'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/net_model{model_suffix}.pth',
+        f'models/net_model{model_suffix}.pth'
     ]
     
     mcae1_saved = False
@@ -1351,11 +1406,11 @@ def main():
             continue
     
     mcae2_save_paths = [
-        f'models/netx_model{model_suffix}.pth',
+        f'/mnt/bz25t/bzhy/datasave/netx_model{model_suffix}.pth',  # 用户指定路径
         f'/tmp/netx_model{model_suffix}.pth',
         f'./netx_model{model_suffix}.pth',
-        f'/mnt/bz25t/bzhy/zhanglikang/project/netx_model{model_suffix}.pth',  # 用户确认有空间的路径
-        f'/mnt/bz25t/bzhy/datasave/netx_model{model_suffix}.pth'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/netx_model{model_suffix}.pth',
+        f'models/netx_model{model_suffix}.pth'
     ]
     
     mcae2_saved = False
@@ -1386,11 +1441,11 @@ def main():
     
     # 3. 保存重构误差数据
     error_save_paths = [
-        f'models/ERRORU{model_suffix}.npy',
+        f'/mnt/bz25t/bzhy/datasave/ERRORU{model_suffix}.npy',  # 用户指定路径
         f'/tmp/ERRORU{model_suffix}.npy',
         f'./ERRORU{model_suffix}.npy',
-        f'/mnt/bz25t/bzhy/zhanglikang/project/ERRORU{model_suffix}.npy',  # 用户确认有空间的路径
-        f'/mnt/bz25t/bzhy/datasave/ERRORU{model_suffix}.npy'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/ERRORU{model_suffix}.npy',
+        f'models/ERRORU{model_suffix}.npy'
     ]
     
     erroru_saved = False
@@ -1416,11 +1471,11 @@ def main():
             continue
     
     errorx_save_paths = [
-        f'models/ERRORX{model_suffix}.npy',
+        f'/mnt/bz25t/bzhy/datasave/ERRORX{model_suffix}.npy',  # 用户指定路径
         f'/tmp/ERRORX{model_suffix}.npy',
         f'./ERRORX{model_suffix}.npy',
-        f'/mnt/bz25t/bzhy/zhanglikang/project/ERRORX{model_suffix}.npy',  # 用户确认有空间的路径
-        f'/mnt/bz25t/bzhy/datasave/ERRORX{model_suffix}.npy'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/ERRORX{model_suffix}.npy',
+        f'models/ERRORX{model_suffix}.npy'
     ]
     
     errorx_saved = False
@@ -1459,11 +1514,11 @@ def main():
     ]
     
     pca_save_paths = [
-        f'models/',
+        f'/mnt/bz25t/bzhy/datasave/',  # 用户指定路径
         f'/tmp/',
         f'./',
-        f'/mnt/bz25t/bzhy/zhanglikang/project/',  # 用户确认有空间的路径
-        f'/mnt/bz25t/bzhy/datasave/'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/',
+        f'models/'
     ]
     
     pca_saved_count = 0
@@ -1516,11 +1571,11 @@ def main():
     
     # 尝试多个保存路径，处理磁盘空间不足问题
     save_paths = [
-        f'models/pca_params{model_suffix}.pkl',
+                f'/mnt/bz25t/bzhy/datasave/pca_params{model_suffix}.pkl',  # 用户指定路径
         f'/tmp/pca_params{model_suffix}.pkl',
         f'./pca_params{model_suffix}.pkl',
-                            f'/mnt/bz25t/bzhy/zhanglikang/project/pca_params{model_suffix}.pkl',  # 用户确认有空间的路径
-                    f'/mnt/bz25t/bzhy/datasave/pca_params{model_suffix}.pkl'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/pca_params{model_suffix}.pkl',
+        f'models/pca_params{model_suffix}.pkl'
     ]
     
     saved = False
@@ -1555,8 +1610,18 @@ def main():
         global_saved_pca_params = pca_params
     
     # 6. 计算训练阶段故障检测阈值
+    if len(valid_samples) == 0:
+        print("❌ 没有有效的训练样本，无法计算故障检测阈值")
+        return
+    
+    # 确保MC-AE模型在正确的设备上
+    net = net.to(device)
+    netx = netx.to(device)
+    
+    print(f"🔍 设备检查: net在{next(net.parameters()).device}, netx在{next(netx.parameters()).device}, 目标设备{device}")
+    
     threshold1, threshold2, threshold3 = calculate_training_threshold(
-        train_samples, net, netx, pca_params, device)
+        valid_samples, net, netx, pca_params, device)
     
     # 保存阈值
     thresholds = {
@@ -1567,11 +1632,11 @@ def main():
     
     # 尝试多个保存路径，处理磁盘空间不足问题
     threshold_save_paths = [
-        f'models/fault_thresholds{model_suffix}.pkl',
+                f'/mnt/bz25t/bzhy/datasave/fault_thresholds{model_suffix}.pkl',  # 用户指定路径
         f'/tmp/fault_thresholds{model_suffix}.pkl',
         f'./fault_thresholds{model_suffix}.pkl',
-                            f'/mnt/bz25t/bzhy/zhanglikang/project/fault_thresholds{model_suffix}.pkl',  # 用户确认有空间的路径
-                    f'/mnt/bz25t/bzhy/datasave/fault_thresholds{model_suffix}.pkl'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/fault_thresholds{model_suffix}.pkl',
+        f'models/fault_thresholds{model_suffix}.pkl'
     ]
     
     threshold_saved = False
@@ -1632,6 +1697,10 @@ def main():
             print(f"\n🔍 Epoch {epoch}: 检查反馈触发条件...")
             
             try:
+                # 确保MC-AE模型在正确的设备上
+                net = net.to(device)
+                netx = netx.to(device)
+                
                 # 计算当前的假阳性率（基于综合诊断指标）
                 false_positive_rate, false_positives, total_normals = calculate_false_positive_rate_comprehensive(
                     config['feedback_samples'], net, netx, pca_params, current_threshold, device)
@@ -1745,11 +1814,11 @@ def main():
     
     # 尝试多个保存路径，处理磁盘空间不足问题
     history_save_paths = [
-        f'models/hybrid_feedback_training_history.pkl',
+                f'/mnt/bz25t/bzhy/datasave/hybrid_feedback_training_history.pkl',  # 用户指定路径
         f'/tmp/hybrid_feedback_training_history.pkl',
         f'./hybrid_feedback_training_history.pkl',
-                            f'/mnt/bz25t/bzhy/zhanglikang/project/hybrid_feedback_training_history.pkl',  # 用户确认有空间的路径
-                    f'/mnt/bz25t/bzhy/datasave/hybrid_feedback_training_history.pkl'  # 备用路径
+        f'/mnt/bz25t/bzhy/zhanglikang/project/hybrid_feedback_training_history.pkl',
+        f'models/hybrid_feedback_training_history.pkl'
     ]
     
     history_saved = False
