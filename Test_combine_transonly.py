@@ -720,7 +720,16 @@ def main_test_process():
         print(f"   FPR: {metrics['fpr']:.3f}")
     
     print(f"\n✅ Transformer测试完成!")
-    print(f"   Transformer: 成功处理 {len(test_results['TRANSFORMER'])} 个样本")
+    
+    # 统计所有配置的处理结果
+    total_processed = 0
+    for config_name in WINDOW_CONFIGS.keys():
+        if f"TRANSFORMER_{config_name}" in test_results:
+            config_count = len(test_results[f"TRANSFORMER_{config_name}"]["results"])
+            total_processed += config_count
+            print(f"   {config_name}: 成功处理 {config_count} 个样本")
+    
+    print(f"   总计: 成功处理 {total_processed} 个样本")
     
     return test_results
 
@@ -832,7 +841,15 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     # === 子图1: 连续阈值ROC曲线 ===
     ax1.set_title('(a) Transformer ROC Curve\n(Continuous Threshold Scan)')
     
-    model_results = test_results["TRANSFORMER"]
+    # 使用第一个可用的配置结果
+    available_configs = [key for key in test_results.keys() if key.startswith("TRANSFORMER_")]
+    if not available_configs:
+        print("   ⚠️ 警告: 没有可用的Transformer结果")
+        return
+    
+    # 使用第一个配置的结果
+    first_config = available_configs[0]
+    model_results = test_results[first_config]["results"]
     
     # 收集所有fai值和真实标签，用于连续阈值ROC
     all_fai = []
@@ -847,6 +864,18 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     all_fai = np.array(all_fai)
     all_labels = np.array(all_labels)
     all_fault_labels = np.array(all_fault_labels)
+    
+    # 检查数据是否为空
+    if len(all_fai) == 0:
+        print("   ⚠️ 警告: 没有可用的FAI数据，跳过ROC曲线生成")
+        # 创建一个空的ROC图
+        ax1.text(0.5, 0.5, '无数据', ha='center', va='center', 
+                transform=ax1.transAxes, fontsize=12)
+        ax1.set_title('(a) Transformer ROC Curve\n(无数据)')
+        ax1.set_xlabel('False Positive Rate')
+        ax1.set_ylabel('True Positive Rate')
+        ax1.grid(True, alpha=0.3)
+        return
     
     # 生成连续阈值范围
     thresholds = np.linspace(np.min(all_fai), np.max(all_fai), 100)
@@ -893,7 +922,14 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     # === 子图2: 固定阈值工作点 ===
     ax2.set_title('(b) Working Point\n(Three-Level Alarm Threshold)')
     
-    metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
+    # 使用第一个配置的性能指标
+    available_configs = [key for key in performance_metrics.keys() if key.startswith("TRANSFORMER_")]
+    if not available_configs:
+        print("   ⚠️ 警告: 没有可用的性能指标")
+        return
+    
+    first_config = available_configs[0]
+    metrics = performance_metrics[first_config]['classification_metrics']
     ax2.scatter(metrics['fpr'], metrics['tpr'], 
                s=200, color='blue', 
                label=f'Transformer\n(TPR={metrics["tpr"]:.3f}, FPR={metrics["fpr"]:.3f})',
@@ -910,7 +946,7 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     
     metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'Specificity']
     metric_mapping = {'Accuracy': 'accuracy', 'Precision': 'precision', 'Recall': 'recall', 'F1-Score': 'f1_score', 'Specificity': 'specificity'}
-    transformer_values = [performance_metrics["TRANSFORMER"]['classification_metrics'][metric_mapping[m]] 
+    transformer_values = [performance_metrics[first_config]['classification_metrics'][metric_mapping[m]] 
                          for m in metrics_names]
     
     x = np.arange(len(metrics_names))
@@ -933,10 +969,10 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     
     sample_metrics = ['Avg φ(Normal)', 'Avg φ(Fault)', 'Anomaly Rate(Normal)', 'Anomaly Rate(Fault)']
     transformer_sample_values = [
-        performance_metrics["TRANSFORMER"]['sample_metrics']['avg_fai_normal'],
-        performance_metrics["TRANSFORMER"]['sample_metrics']['avg_fai_fault'],
-        performance_metrics["TRANSFORMER"]['sample_metrics']['avg_anomaly_ratio_normal'],
-        performance_metrics["TRANSFORMER"]['sample_metrics']['avg_anomaly_ratio_fault']
+        performance_metrics[first_config]['sample_metrics']['avg_fai_normal'],
+        performance_metrics[first_config]['sample_metrics']['avg_fai_fault'],
+        performance_metrics[first_config]['sample_metrics']['avg_anomaly_ratio_normal'],
+        performance_metrics[first_config]['sample_metrics']['avg_anomaly_ratio_fault']
     ]
     
     x = np.arange(len(sample_metrics))
@@ -970,11 +1006,17 @@ def create_fault_detection_timeline(test_results, save_path):
     fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
     
     # 找到对应样本的结果
-    sample_result = next((r for r in test_results["TRANSFORMER"] if r.get('sample_id') == fault_sample_id), None)
+    available_configs = [key for key in test_results.keys() if key.startswith("TRANSFORMER_")]
+    if not available_configs:
+        print("   ⚠️ 警告: 没有可用的Transformer结果")
+        return
+    
+    first_config = available_configs[0]
+    sample_result = next((r for r in test_results[first_config]["results"] if r.get('sample_id') == fault_sample_id), None)
     
     if sample_result is None:
         print(f"   ⚠️ 未找到样本 {fault_sample_id} 的结果，使用第一个可用结果")
-        sample_result = test_results["TRANSFORMER"][0] if test_results["TRANSFORMER"] else None
+        sample_result = test_results[first_config]["results"][0] if test_results[first_config]["results"] else None
     
     if sample_result is None:
         print("   ❌ 没有可用的测试结果")
@@ -1069,11 +1111,19 @@ def create_performance_radar(performance_metrics, save_path):
         '检测稳定性': 'accuracy'  # 检测稳定性 (用准确率代表)
     }
     
+    # 使用第一个配置的性能指标
+    available_configs = [key for key in performance_metrics.keys() if key.startswith("TRANSFORMER_")]
+    if not available_configs:
+        print("   ⚠️ 警告: 没有可用的性能指标")
+        return
+    
+    first_config = available_configs[0]
+    
     # 数据预处理：FPR需要转换为控制能力 (1-FPR)
     transformer_values = []
     
     for metric_name, metric_key in radar_metrics.items():
-        transformer_val = performance_metrics['TRANSFORMER']['classification_metrics'][metric_key]
+        transformer_val = performance_metrics[first_config]['classification_metrics'][metric_key]
         
         # 特殊处理：误报控制 = 1 - FPR
         if metric_name == '误报控制':
@@ -1137,11 +1187,17 @@ def create_three_window_visualization(test_results, save_path):
     ax_main = fig.add_subplot(gs[0, :])
     
     # 选择Transformer结果进行可视化
-    transformer_result = next((r for r in test_results['TRANSFORMER'] if r.get('sample_id') == fault_sample_id), None)
+    available_configs = [key for key in test_results.keys() if key.startswith("TRANSFORMER_")]
+    if not available_configs:
+        print("   ⚠️ 警告: 没有可用的Transformer结果")
+        return
+    
+    first_config = available_configs[0]
+    transformer_result = next((r for r in test_results[first_config]["results"] if r.get('sample_id') == fault_sample_id), None)
     
     if transformer_result is None:
         print(f"   ⚠️ 未找到样本 {fault_sample_id} 的结果，使用第一个可用结果")
-        transformer_result = test_results['TRANSFORMER'][0] if test_results['TRANSFORMER'] else None
+        transformer_result = test_results[first_config]["results"][0] if test_results[first_config]["results"] else None
     
     if transformer_result is None:
         print("   ❌ 没有可用的测试结果")
@@ -1324,10 +1380,16 @@ def save_test_results(test_results, performance_metrics):
     summary_file = f"{result_dir}/detailed_results/transformer_summary.xlsx"
     
     with pd.ExcelWriter(summary_file) as writer:
-        # Transformer性能表
-        metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
-        confusion = performance_metrics["TRANSFORMER"]['confusion_matrix']
-        sample_metrics = performance_metrics["TRANSFORMER"]['sample_metrics']
+        # 使用第一个配置的性能指标
+        available_configs = [key for key in performance_metrics.keys() if key.startswith("TRANSFORMER_")]
+        if not available_configs:
+            print("   ⚠️ 警告: 没有可用的性能指标")
+            return result_dir
+        
+        first_config = available_configs[0]
+        metrics = performance_metrics[first_config]['classification_metrics']
+        confusion = performance_metrics[first_config]['confusion_matrix']
+        sample_metrics = performance_metrics[first_config]['sample_metrics']
         
         performance_data = [{
             'Model': 'TRANSFORMER',
@@ -1351,7 +1413,7 @@ def save_test_results(test_results, performance_metrics):
         
         # 样本详情表
         sample_details = []
-        for result in test_results["TRANSFORMER"]:
+        for result in test_results[first_config]["results"]:
             # 安全获取detection_info和window_stats
             detection_info = result.get('detection_info', {})
             window_stats = detection_info.get('window_stats', {})
@@ -1426,6 +1488,19 @@ for config_name, config in WINDOW_CONFIGS.items():
     else:
         print("   ⚠️ 无性能数据")
 
+# 计算综合性能评估
+transformer_score = 0
+config_count = 0
+for config_name in WINDOW_CONFIGS.keys():
+    if f"TRANSFORMER_{config_name}" in test_results:
+        metrics = test_results[f"TRANSFORMER_{config_name}"]["metrics"]["classification_metrics"]
+        config_score = np.mean(list(metrics.values()))
+        transformer_score += config_score
+        config_count += 1
+
+if config_count > 0:
+    transformer_score /= config_count
+
 print(f"\n📁 结果文件:")
 print(f"   • 结果目录: {result_dir}")
 print(f"   • 可视化图表: {result_dir}/visualizations")
@@ -1440,7 +1515,11 @@ print(f"   • Excel报告: transformer_summary.xlsx")
 transformer_score = np.mean(list(performance_metrics["TRANSFORMER"]['classification_metrics'].values()))
 
 print(f"\n🏆 Transformer综合性能评估:")
-print(f"   综合得分: {transformer_score:.3f}")
+if config_count > 0:
+    print(f"   综合得分: {transformer_score:.3f}")
+    print(f"   有效配置数: {config_count}/{len(WINDOW_CONFIGS)}")
+else:
+    print("   ⚠️ 无有效配置数据")
 
 print("\n" + "="*80)
 print("Transformer测试完成！请查看生成的可视化图表和分析报告。")
