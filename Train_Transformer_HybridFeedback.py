@@ -1285,37 +1285,215 @@ def main():
         os.makedirs('models')
     
     # 1. 保存Transformer模型
-    transformer_path = f'models/transformer_model{model_suffix}.pth'
-    torch.save(transformer.state_dict(), transformer_path)
-    print(f"✅ Transformer模型已保存: {transformer_path}")
+    transformer_save_paths = [
+        f'models/transformer_model{model_suffix}.pth',
+        f'/tmp/transformer_model{model_suffix}.pth',
+        f'./transformer_model{model_suffix}.pth',
+        f'/mnt/bz25t/bzhy/zhanglikang/project/transformer_model{model_suffix}.pth',  # 用户确认有空间的路径
+        f'/mnt/bz25t/bzhy/transformer_model{model_suffix}.pth'  # 备用路径
+    ]
+    
+    transformer_saved = False
+    for save_path in transformer_save_paths:
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(os.path.dirname(save_path))
+                print(f"📊 路径 {os.path.dirname(save_path)} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            torch.save(transformer.state_dict(), save_path)
+            print(f"✅ Transformer模型已保存: {save_path}")
+            transformer_saved = True
+            break
+        except OSError as e:
+            print(f"⚠️ 保存Transformer模型到 {save_path} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    if not transformer_saved:
+        print("❌ 警告: Transformer模型保存失败")
+        print("💡 建议: 检查目录权限或使用其他存储位置")
     
     # 2. 保存MC-AE模型
-    torch.save(net.state_dict(), f'models/net_model{model_suffix}.pth')
-    torch.save(netx.state_dict(), f'models/netx_model{model_suffix}.pth')
-    print(f"✅ MC-AE模型已保存: models/net_model{model_suffix}.pth, models/netx_model{model_suffix}.pth")
+    mcae_save_paths = [
+        f'models/net_model{model_suffix}.pth',
+        f'/tmp/net_model{model_suffix}.pth',
+        f'./net_model{model_suffix}.pth',
+        f'/mnt/bz25t/bzhy/zhanglikang/project/net_model{model_suffix}.pth',  # 用户确认有空间的路径
+        f'/mnt/bz25t/bzhy/datasave/net_model{model_suffix}.pth'  # 备用路径
+    ]
+    
+    mcae1_saved = False
+    for save_path in mcae_save_paths:
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(os.path.dirname(save_path))
+                print(f"📊 路径 {os.path.dirname(save_path)} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            torch.save(net.state_dict(), save_path)
+            print(f"✅ MC-AE1模型已保存: {save_path}")
+            mcae1_saved = True
+            break
+        except OSError as e:
+            print(f"⚠️ 保存MC-AE1模型到 {save_path} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    mcae2_save_paths = [
+        f'models/netx_model{model_suffix}.pth',
+        f'/tmp/netx_model{model_suffix}.pth',
+        f'./netx_model{model_suffix}.pth',
+        f'/mnt/bz25t/bzhy/zhanglikang/project/netx_model{model_suffix}.pth',  # 用户确认有空间的路径
+        f'/mnt/bz25t/bzhy/datasave/netx_model{model_suffix}.pth'  # 备用路径
+    ]
+    
+    mcae2_saved = False
+    for save_path in mcae2_save_paths:
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(os.path.dirname(save_path))
+                print(f"📊 路径 {os.path.dirname(save_path)} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            torch.save(netx.state_dict(), save_path)
+            print(f"✅ MC-AE2模型已保存: {save_path}")
+            mcae2_saved = True
+            break
+        except OSError as e:
+            print(f"⚠️ 保存MC-AE2模型到 {save_path} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    if not mcae1_saved or not mcae2_saved:
+        print("❌ 警告: 部分MC-AE模型保存失败")
+        print("💡 建议: 检查目录权限或使用其他存储位置")
     
     # 3. 保存重构误差数据
-    np.save(f'models/ERRORU{model_suffix}.npy', ERRORU)
-    np.save(f'models/ERRORX{model_suffix}.npy', ERRORX)
-    print(f"✅ 重构误差已保存: ERRORU{model_suffix}.npy, ERRORX{model_suffix}.npy")
+    error_save_paths = [
+        f'models/ERRORU{model_suffix}.npy',
+        f'/tmp/ERRORU{model_suffix}.npy',
+        f'./ERRORU{model_suffix}.npy',
+        f'/mnt/bz25t/bzhy/zhanglikang/project/ERRORU{model_suffix}.npy',  # 用户确认有空间的路径
+        f'/mnt/bz25t/bzhy/datasave/ERRORU{model_suffix}.npy'  # 备用路径
+    ]
     
-    # 4. 保存PCA分析结果
-    np.save(f'models/v_I{model_suffix}.npy', v_I)
-    np.save(f'models/v{model_suffix}.npy', v)
-    np.save(f'models/v_ratio{model_suffix}.npy', v_ratio)
-    np.save(f'models/p_k{model_suffix}.npy', p_k)
-    np.save(f'models/data_mean{model_suffix}.npy', data_mean)
-    np.save(f'models/data_std{model_suffix}.npy', data_std)
-    np.save(f'models/T_95_limit{model_suffix}.npy', T_95_limit)
-    np.save(f'models/T_99_limit{model_suffix}.npy', T_99_limit)
-    np.save(f'models/SPE_95_limit{model_suffix}.npy', SPE_95_limit)
-    np.save(f'models/SPE_99_limit{model_suffix}.npy', SPE_99_limit)
-    np.save(f'models/P{model_suffix}.npy', P)
-    np.save(f'models/k{model_suffix}.npy', k)
-    np.save(f'models/P_t{model_suffix}.npy', P_t)
-    np.save(f'models/X{model_suffix}.npy', X)
-    np.save(f'models/data_nor{model_suffix}.npy', data_nor)
-    print(f"✅ PCA分析结果已保存: models/*{model_suffix}.npy")
+    erroru_saved = False
+    for save_path in error_save_paths:
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(os.path.dirname(save_path))
+                print(f"📊 路径 {os.path.dirname(save_path)} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            np.save(save_path, ERRORU)
+            print(f"✅ ERRORU已保存: {save_path}")
+            erroru_saved = True
+            break
+        except OSError as e:
+            print(f"⚠️ 保存ERRORU到 {save_path} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    errorx_save_paths = [
+        f'models/ERRORX{model_suffix}.npy',
+        f'/tmp/ERRORX{model_suffix}.npy',
+        f'./ERRORX{model_suffix}.npy',
+        f'/mnt/bz25t/bzhy/zhanglikang/project/ERRORX{model_suffix}.npy',  # 用户确认有空间的路径
+        f'/mnt/bz25t/bzhy/datasave/ERRORX{model_suffix}.npy'  # 备用路径
+    ]
+    
+    errorx_saved = False
+    for save_path in errorx_save_paths:
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(os.path.dirname(save_path))
+                print(f"📊 路径 {os.path.dirname(save_path)} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            np.save(save_path, ERRORX)
+            print(f"✅ ERRORX已保存: {save_path}")
+            errorx_saved = True
+            break
+        except OSError as e:
+            print(f"⚠️ 保存ERRORX到 {save_path} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    if not erroru_saved or not errorx_saved:
+        print("❌ 警告: 部分重构误差数据保存失败")
+        print("💡 建议: 检查目录权限或使用其他存储位置")
+    
+    # 4. 保存PCA分析结果（简化版本，只保存关键参数）
+    pca_files = [
+        ('v_I', v_I), ('v', v), ('v_ratio', v_ratio), ('p_k', p_k),
+        ('data_mean', data_mean), ('data_std', data_std),
+        ('T_95_limit', T_95_limit), ('T_99_limit', T_99_limit),
+        ('SPE_95_limit', SPE_95_limit), ('SPE_99_limit', SPE_99_limit),
+        ('P', P), ('k', k), ('P_t', P_t), ('X', X), ('data_nor', data_nor)
+    ]
+    
+    pca_save_paths = [
+        f'models/',
+        f'/tmp/',
+        f'./',
+        f'/mnt/bz25t/bzhy/zhanglikang/project/',  # 用户确认有空间的路径
+        f'/mnt/bz25t/bzhy/datasave/'  # 备用路径
+    ]
+    
+    pca_saved_count = 0
+    for save_dir in pca_save_paths:
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(save_dir)
+                print(f"📊 路径 {save_dir} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            for name, data in pca_files:
+                save_path = f'{save_dir}{name}{model_suffix}.npy'
+                np.save(save_path, data)
+            print(f"✅ PCA分析结果已保存到: {save_dir}")
+            pca_saved_count += 1
+            break
+        except OSError as e:
+            print(f"⚠️ 保存PCA结果到 {save_dir} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    if pca_saved_count == 0:
+        print("❌ 警告: PCA分析结果保存失败")
+        print("💡 建议: 检查目录权限或使用其他存储位置")
+        print("💡 尝试手动创建目录: mkdir -p /mnt/bz25t/bzhy/zhanglikang/project")
     
     # 5. 保存PCA参数字典（用于反馈阶段）
     pca_params = {
@@ -1336,9 +1514,45 @@ def main():
         'data_nor': data_nor
     }
     
-    with open(f'models/pca_params{model_suffix}.pkl', 'wb') as f:
-        pickle.dump(pca_params, f)
-    print(f"✅ PCA参数字典已保存: models/pca_params{model_suffix}.pkl")
+    # 尝试多个保存路径，处理磁盘空间不足问题
+    save_paths = [
+        f'models/pca_params{model_suffix}.pkl',
+        f'/tmp/pca_params{model_suffix}.pkl',
+        f'./pca_params{model_suffix}.pkl',
+                            f'/mnt/bz25t/bzhy/zhanglikang/project/pca_params{model_suffix}.pkl',  # 用户确认有空间的路径
+                    f'/mnt/bz25t/bzhy/datasave/pca_params{model_suffix}.pkl'  # 备用路径
+    ]
+    
+    saved = False
+    for save_path in save_paths:
+        try:
+            # 确保目录存在
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(os.path.dirname(save_path))
+                print(f"📊 路径 {os.path.dirname(save_path)} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            with open(save_path, 'wb') as f:
+                pickle.dump(pca_params, f)
+            print(f"✅ PCA参数字典已保存: {save_path}")
+            saved = True
+            break
+        except OSError as e:
+            print(f"⚠️ 保存到 {save_path} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    if not saved:
+        print("❌ 警告: 所有保存路径都失败，PCA参数未保存")
+        print("💡 建议: 检查目录权限或使用其他存储位置")
+        print("💡 尝试手动创建目录: mkdir -p /mnt/bz25t/bzhy/zhanglikang/project")
+        # 将PCA参数保存到内存中，供后续使用
+        global_saved_pca_params = pca_params
     
     # 6. 计算训练阶段故障检测阈值
     threshold1, threshold2, threshold3 = calculate_training_threshold(
@@ -1351,9 +1565,45 @@ def main():
         'threshold3': threshold3   # 6σ阈值
     }
     
-    with open(f'models/fault_thresholds{model_suffix}.pkl', 'wb') as f:
-        pickle.dump(thresholds, f)
-    print(f"✅ 故障检测阈值已保存: models/fault_thresholds{model_suffix}.pkl")
+    # 尝试多个保存路径，处理磁盘空间不足问题
+    threshold_save_paths = [
+        f'models/fault_thresholds{model_suffix}.pkl',
+        f'/tmp/fault_thresholds{model_suffix}.pkl',
+        f'./fault_thresholds{model_suffix}.pkl',
+                            f'/mnt/bz25t/bzhy/zhanglikang/project/fault_thresholds{model_suffix}.pkl',  # 用户确认有空间的路径
+                    f'/mnt/bz25t/bzhy/datasave/fault_thresholds{model_suffix}.pkl'  # 备用路径
+    ]
+    
+    threshold_saved = False
+    for save_path in threshold_save_paths:
+        try:
+            # 确保目录存在
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(os.path.dirname(save_path))
+                print(f"📊 路径 {os.path.dirname(save_path)} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            with open(save_path, 'wb') as f:
+                pickle.dump(thresholds, f)
+            print(f"✅ 故障检测阈值已保存: {save_path}")
+            threshold_saved = True
+            break
+        except OSError as e:
+            print(f"⚠️ 保存阈值到 {save_path} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    if not threshold_saved:
+        print("❌ 警告: 所有阈值保存路径都失败")
+        print("💡 建议: 检查目录权限或使用其他存储位置")
+        print("💡 尝试手动创建目录: mkdir -p /mnt/bz25t/bzhy/zhanglikang/project")
+        # 将阈值保存到内存中，供后续使用
+        global_saved_thresholds = thresholds
     
     #----------------------------------------现在开始阶段3: 混合反馈训练------------------------------
     print("\n" + "="*60)
@@ -1493,9 +1743,45 @@ def main():
         }
     }
     
-    with open(f'models/hybrid_feedback_training_history.pkl', 'wb') as f:
-        pickle.dump(hybrid_feedback_history, f)
-    print(f"✅ 混合反馈训练历史已保存: models/hybrid_feedback_training_history.pkl")
+    # 尝试多个保存路径，处理磁盘空间不足问题
+    history_save_paths = [
+        f'models/hybrid_feedback_training_history.pkl',
+        f'/tmp/hybrid_feedback_training_history.pkl',
+        f'./hybrid_feedback_training_history.pkl',
+                            f'/mnt/bz25t/bzhy/zhanglikang/project/hybrid_feedback_training_history.pkl',  # 用户确认有空间的路径
+                    f'/mnt/bz25t/bzhy/datasave/hybrid_feedback_training_history.pkl'  # 备用路径
+    ]
+    
+    history_saved = False
+    for save_path in history_save_paths:
+        try:
+            # 确保目录存在
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # 检查磁盘空间（如果可能）
+            try:
+                import shutil
+                total, used, free = shutil.disk_usage(os.path.dirname(save_path))
+                print(f"📊 路径 {os.path.dirname(save_path)} 可用空间: {free / (1024**3):.2f} GB")
+            except:
+                pass
+            
+            with open(save_path, 'wb') as f:
+                pickle.dump(hybrid_feedback_history, f)
+            print(f"✅ 混合反馈训练历史已保存: {save_path}")
+            history_saved = True
+            break
+        except OSError as e:
+            print(f"⚠️ 保存训练历史到 {save_path} 失败: {e}")
+            print(f"   错误代码: {e.errno}, 错误信息: {e.strerror}")
+            continue
+    
+    if not history_saved:
+        print("❌ 警告: 所有训练历史保存路径都失败")
+        print("💡 建议: 检查目录权限或使用其他存储位置")
+        print("💡 尝试手动创建目录: mkdir -p /mnt/bz25t/bzhy/zhanglikang/project")
+        # 将训练历史保存到内存中，供后续使用
+        global_saved_training_history = hybrid_feedback_history
     
     # 6. 保存诊断特征
     print(f"💾 保存诊断特征（数据量: {df_data.shape}）...")
