@@ -192,21 +192,20 @@ def load_test_samples():
     """从Labels.xls加载测试样本"""
     try:
         import pandas as pd
-        labels_path = '../QAS/Labels.xls'
+        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
         df = pd.read_excel(labels_path)
         
         # 提取测试样本
         all_samples = df['Num'].tolist()
         all_labels = df['Label'].tolist()
         
-        # 201-334的正常样本
-        test_normal_samples = [str(i) for i in all_samples if 201 <= i <= 334 and all_labels[all_samples.index(i)] == 0]
-        # 335-392的故障样本
-        test_fault_samples = [str(i) for i in all_samples if 335 <= i <= 392 and all_labels[all_samples.index(i)] == 1]
+        # 指定测试样本：正常样本10,11 和故障样本335,336
+        test_normal_samples = ['10', '11']  # 正常样本
+        test_fault_samples = ['335', '336']  # 故障样本
         
         print(f"📋 从Labels.xls加载测试样本:")
-        print(f"   测试正常样本 (201-334): {len(test_normal_samples)} 个")
-        print(f"   测试故障样本 (335-392): {len(test_fault_samples)} 个")
+        print(f"   测试正常样本: {test_normal_samples}")
+        print(f"   测试故障样本: {test_fault_samples}")
         
         return {
             'normal': test_normal_samples,
@@ -216,27 +215,19 @@ def load_test_samples():
         print(f"❌ 加载Labels.xls失败: {e}")
         print("⚠️  使用默认测试样本")
         return {
-            'normal': ['166', '209'],
-            'fault': ['335', '386']
+            'normal': ['10', '11'],
+            'fault': ['335', '336']
         }
 
 TEST_SAMPLES = load_test_samples()
 ALL_TEST_SAMPLES = TEST_SAMPLES['normal'] + TEST_SAMPLES['fault']
 
-# 模型路径配置
+# 模型路径配置 (从datasave目录加载)
 MODEL_PATHS = {
     "TRANSFORMER": {
-        "transformer_model": "./models/transformer_model.pth",
-        "net_model": "./models/net_model_transformer.pth", 
-        "netx_model": "./models/netx_model_transformer.pth",
-        "pca_files": ["./models/v_I_transformer.npy", "./models/v_transformer.npy",
-                     "./models/v_ratio_transformer.npy", "./models/p_k_transformer.npy",
-                     "./models/data_mean_transformer.npy", "./models/data_std_transformer.npy",
-                     "./models/T_95_limit_transformer.npy", "./models/T_99_limit_transformer.npy",
-                     "./models/SPE_95_limit_transformer.npy", "./models/SPE_99_limit_transformer.npy",
-                     "./models/P_transformer.npy", "./models/k_transformer.npy",
-                     "./models/P_t_transformer.npy", "./models/X_transformer.npy",
-                     "./models/data_nor_transformer.npy"]
+        "transformer_model": "/mnt/bz25t/bzhy/datasave/transformer_model_hybrid_feedback.pth",
+        "net_model": "/mnt/bz25t/bzhy/datasave/net_model_hybrid_feedback.pth", 
+        "netx_model": "/mnt/bz25t/bzhy/datasave/netx_model_hybrid_feedback.pth"
     }
 }
 
@@ -271,22 +262,21 @@ def check_model_files():
     
     # 检查主模型文件
     for key, path in paths.items():
-        if key != "pca_files":
-            if not os.path.exists(path):
-                missing_files.append(f"TRANSFORMER: {path}")
-                print(f"   ❌ 缺失: {path}")
-            else:
-                file_size = os.path.getsize(path) / (1024 * 1024)  # MB
-                print(f"   ✅ 存在: {path} ({file_size:.1f}MB)")
+        if not os.path.exists(path):
+            missing_files.append(f"TRANSFORMER: {path}")
+            print(f"   ❌ 缺失: {path}")
         else:
-            # 检查PCA相关文件
-            for pca_file in path:
-                if not os.path.exists(pca_file):
-                    missing_files.append(f"TRANSFORMER: {pca_file}")
-                    print(f"   ❌ 缺失: {pca_file}")
-                else:
-                    file_size = os.path.getsize(pca_file) / (1024 * 1024)  # MB
-                    print(f"   ✅ 存在: {pca_file} ({file_size:.1f}MB)")
+            file_size = os.path.getsize(path) / (1024 * 1024)  # MB
+            print(f"   ✅ 存在: {path} ({file_size:.1f}MB)")
+    
+    # 检查PCA参数文件
+    pca_params_path = "/mnt/bz25t/bzhy/datasave/pca_params_hybrid_feedback.pkl"
+    if not os.path.exists(pca_params_path):
+        missing_files.append(f"PCA_PARAMS: {pca_params_path}")
+        print(f"   ❌ 缺失: {pca_params_path}")
+    else:
+        file_size = os.path.getsize(pca_params_path) / (1024 * 1024)  # MB
+        print(f"   ✅ 存在: {pca_params_path} ({file_size:.1f}MB)")
     
     if missing_files:
         print(f"\n❌ 缺失 {len(missing_files)} 个模型文件:")
@@ -396,7 +386,7 @@ def three_window_fault_detection(fai_values, threshold1, sample_id):
 #----------------------------------------数据加载函数------------------------------
 def load_test_sample(sample_id):
     """加载测试样本"""
-    base_path = f'../QAS/{sample_id}'
+    base_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}'
     
     # 检查样本目录是否存在
     if not os.path.exists(base_path):
@@ -422,7 +412,7 @@ def load_models():
     print("🔧 开始加载Transformer模型...")
     
     # 加载Transformer模型
-    from Train_Transformer import TransformerPredictor
+    from Train_Transformer_HybridFeedback import TransformerPredictor
     models['transformer'] = TransformerPredictor().to(device)
     
     # 使用安全加载函数
@@ -448,24 +438,15 @@ def load_models():
                           "MC-AE2"):
         raise RuntimeError("MC-AE2模型加载失败")
     
-    # 加载PCA参数
-    models['pca_params'] = {}
-    pca_files = MODEL_PATHS["TRANSFORMER"]["pca_files"]
-    models['pca_params']['v_I'] = np.load(pca_files[0])
-    models['pca_params']['v'] = np.load(pca_files[1])
-    models['pca_params']['v_ratio'] = np.load(pca_files[2])
-    models['pca_params']['p_k'] = np.load(pca_files[3])
-    models['pca_params']['data_mean'] = np.load(pca_files[4])
-    models['pca_params']['data_std'] = np.load(pca_files[5])
-    models['pca_params']['T_95_limit'] = np.load(pca_files[6])
-    models['pca_params']['T_99_limit'] = np.load(pca_files[7])
-    models['pca_params']['SPE_95_limit'] = np.load(pca_files[8])
-    models['pca_params']['SPE_99_limit'] = np.load(pca_files[9])
-    models['pca_params']['P'] = np.load(pca_files[10])
-    models['pca_params']['k'] = np.load(pca_files[11])
-    models['pca_params']['P_t'] = np.load(pca_files[12])
-    models['pca_params']['X'] = np.load(pca_files[13])
-    models['pca_params']['data_nor'] = np.load(pca_files[14])
+    # 加载PCA参数 (从pickle文件加载)
+    pca_params_path = "/mnt/bz25t/bzhy/datasave/pca_params_hybrid_feedback.pkl"
+    try:
+        with open(pca_params_path, 'rb') as f:
+            models['pca_params'] = pickle.load(f)
+        print(f"✅ PCA参数已加载: {pca_params_path}")
+    except Exception as e:
+        print(f"❌ 加载PCA参数失败: {e}")
+        raise RuntimeError("PCA参数加载失败")
     
     return models
 
