@@ -1205,10 +1205,18 @@ def main():
     print(f"   vin_2特征: x{x_recovered.shape}, y{y_recovered.shape}, z{z_recovered.shape}, q{q_recovered.shape}")
     print(f"   vin_3特征: x{x_recovered2.shape}, y{y_recovered2.shape}, z{z_recovered2.shape}, q{q_recovered2.shape}")
     
-    # MC-AE训练参数（保守优化）
-    EPOCH_MCAE = 200       # 从250减少到200（考虑后续反馈训练）
-    LR_MCAE = 7e-4         # 从5e-4增加到7e-4
-    BATCHSIZE_MCAE = 6000  # 从3000增加到6000
+    # MC-AE训练参数（与源代码Train_.py完全一致）
+    EPOCH_MCAE = 300       # 恢复源代码的300轮训练
+    LR_MCAE = 5e-4         # 恢复源代码的5e-4学习率
+    BATCHSIZE_MCAE = 100   # 恢复源代码的100批次大小
+    
+    print(f"\n🔧 MC-AE训练参数（与源代码Train_.py完全对齐）:")
+    print(f"   训练轮数: {EPOCH_MCAE} (源代码: 300)")
+    print(f"   学习率: {LR_MCAE} (源代码: 5e-4)")
+    print(f"   批次大小: {BATCHSIZE_MCAE} (源代码: 100)")
+    print(f"   优化器: Adam")
+    print(f"   损失函数: MSELoss")
+    print(f"   激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid")
     
     # 自定义多输入数据集类（复用Class_.py中的定义）
     class MCDataset(Dataset):
@@ -1225,8 +1233,7 @@ def main():
     # 第一组特征（vin_2）的MC-AE训练
     print("\n🔧 训练第一组MC-AE模型（vin_2）...")
     train_loader_u = DataLoader(MCDataset(x_recovered, y_recovered, z_recovered, q_recovered), 
-                               batch_size=BATCHSIZE_MCAE, shuffle=False, 
-                               num_workers=4, pin_memory=True)
+                               batch_size=BATCHSIZE_MCAE, shuffle=False)
     
     net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, 
                     activation_fn=custom_activation, use_dx_in_forward=True).to(device)
@@ -1260,8 +1267,7 @@ def main():
     
     # 获取第一组重构误差
     train_loader2 = DataLoader(MCDataset(x_recovered, y_recovered, z_recovered, q_recovered), 
-                              batch_size=len(x_recovered), shuffle=False,
-                              num_workers=4, pin_memory=True)
+                              batch_size=len(x_recovered), shuffle=False)
     for iteration, (x, y, z, q) in enumerate(train_loader2):
         x = x.to(device)
         y = y.to(device)
@@ -1277,8 +1283,7 @@ def main():
     # 第二组特征（vin_3）的MC-AE训练
     print("\n🔧 训练第二组MC-AE模型（vin_3）...")
     train_loader_soc = DataLoader(MCDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
-                                 batch_size=BATCHSIZE_MCAE, shuffle=False,
-                                 num_workers=4, pin_memory=True)
+                                 batch_size=BATCHSIZE_MCAE, shuffle=False)
     
     netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, 
                      activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
@@ -1311,8 +1316,7 @@ def main():
     
     # 获取第二组重构误差
     train_loaderx2 = DataLoader(MCDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
-                               batch_size=len(x_recovered2), shuffle=False,
-                               num_workers=4, pin_memory=True)
+                               batch_size=len(x_recovered2), shuffle=False)
     for iteration, (x, y, z, q) in enumerate(train_loaderx2):
         x = x.to(device)
         y = y.to(device)
@@ -1325,7 +1329,10 @@ def main():
     yTrainX = y_recovered2.cpu().detach().numpy()
     ERRORX = BB - yTrainX
     
-    print("✅ MC-AE训练完成!")
+    print("✅ MC-AE训练完成! (与源代码Train_.py参数完全一致)")
+    print(f"   MC-AE1最终损失: {train_losses_mcae1[-1]:.6f}")
+    print(f"   MC-AE2最终损失: {train_losses_mcae2[-1]:.6f}")
+    print(f"   训练参数: 轮数{EPOCH_MCAE}, 学习率{LR_MCAE}, 批次{BATCHSIZE_MCAE}")
     
     #----------------------------------------阶段3: 混合反馈训练------------------------------
     print("\n" + "="*60)
@@ -1368,7 +1375,7 @@ def main():
     
     # 1. 保存Transformer模型
     transformer_save_paths = [
-        f'/mnt/bz25t/bzhy/datasave/transformer_model{model_suffix}.pth',  # 用户指定路径
+        f'/mnt/bz25t/bzhy/datasave/Transformer/models/transformer_model{model_suffix}.pth',  # 用户指定路径
         f'/tmp/transformer_model{model_suffix}.pth',
         f'./transformer_model{model_suffix}.pth',
         f'/mnt/bz25t/bzhy/zhanglikang/project/transformer_model{model_suffix}.pth',
@@ -1403,7 +1410,7 @@ def main():
     
     # 2. 保存MC-AE模型
     mcae_save_paths = [
-        f'/mnt/bz25t/bzhy/datasave/net_model{model_suffix}.pth',  # 用户指定路径
+        f'/mnt/bz25t/bzhy/datasave/Transformer/models/net_model{model_suffix}.pth',  # 用户指定路径
         f'/tmp/net_model{model_suffix}.pth',
         f'./net_model{model_suffix}.pth',
         f'/mnt/bz25t/bzhy/zhanglikang/project/net_model{model_suffix}.pth',
@@ -1433,7 +1440,7 @@ def main():
             continue
     
     mcae2_save_paths = [
-        f'/mnt/bz25t/bzhy/datasave/netx_model{model_suffix}.pth',  # 用户指定路径
+        f'/mnt/bz25t/bzhy/datasave/Transformer/models/netx_model{model_suffix}.pth',  # 用户指定路径
         f'/tmp/netx_model{model_suffix}.pth',
         f'./netx_model{model_suffix}.pth',
         f'/mnt/bz25t/bzhy/zhanglikang/project/netx_model{model_suffix}.pth',
@@ -1598,7 +1605,7 @@ def main():
     
     # 尝试多个保存路径，处理磁盘空间不足问题
     save_paths = [
-                f'/mnt/bz25t/bzhy/datasave/pca_params{model_suffix}.pkl',  # 用户指定路径
+                f'/mnt/bz25t/bzhy/datasave/Transformer/models/pca_params{model_suffix}.pkl',  # 用户指定路径
         f'/tmp/pca_params{model_suffix}.pkl',
         f'./pca_params{model_suffix}.pkl',
         f'/mnt/bz25t/bzhy/zhanglikang/project/pca_params{model_suffix}.pkl',
@@ -2017,7 +2024,7 @@ def main():
     ax6.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plot_path = f'models/hybrid_feedback_training_results.png'
+    plot_path = f'/mnt/bz25t/bzhy/datasave/Transformer/models/hybrid_feedback_training_results.png'
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
@@ -2032,6 +2039,12 @@ def main():
     print("   阶段2: ✅ MC-AE训练 (使用Transformer增强数据)")
     print("   阶段3: ✅ 混合反馈训练 (样本8-9, epoch 21-40)")
     print("   阶段4: ✅ PCA分析和模型保存")
+    print("")
+    print("🔧 关键修复 (与源代码Train_.py对齐):")
+    print(f"   - MC-AE训练轮数: {EPOCH_MCAE} (源代码: 300)")
+    print(f"   - MC-AE学习率: {LR_MCAE} (源代码: 5e-4)")
+    print(f"   - MC-AE批次大小: {BATCHSIZE_MCAE} (源代码: 100)")
+    print("   - 激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid")
     print("")
     print("📊 关键创新:")
     print("   - 数据隔离策略：训练/反馈/测试样本严格分离")

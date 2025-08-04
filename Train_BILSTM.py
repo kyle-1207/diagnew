@@ -88,12 +88,12 @@ def load_train_samples():
 train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
-# 定义训练参数（参考源代码，回归合理设置）
-EPOCH = 100  # 减少训练轮数，适应小样本
-INIT_LR = 5e-4  # 回归源代码的学习率设置
+# 定义训练参数（与源代码Train_.py完全一致）
+EPOCH = 300  # 恢复源代码的300轮训练
+INIT_LR = 5e-4  # 与源代码LR=5e-4一致  
 MAX_LR = 5e-4   # 保持与源代码一致
-BATCHSIZE = 500  # 适应小样本训练
-WARMUP_EPOCHS = 5  # 减少预热轮数
+BATCHSIZE = 100  # 恢复源代码的100批次大小
+WARMUP_EPOCHS = 5  # 预热轮数
 
 # 梯度裁剪参数优化（更保守的设置）
 MAX_GRAD_NORM = 1.0  # 降低最大梯度阈值，防止梯度爆炸
@@ -103,19 +103,20 @@ MIN_GRAD_NORM = 0.001  # 降低最小梯度阈值，减少梯度过小警告
 def get_lr(epoch):
     return INIT_LR  # 使用固定学习率，参考源代码
 
-# 显示优化后的训练参数
-print(f"\n⚙️  BiLSTM训练参数（小样本快速训练版本，优化数值稳定性）:")
-print(f"   批次大小: {BATCHSIZE} (适应小样本训练，提高稳定性)")
-print(f"   训练轮数: {EPOCH} (减少轮数，快速收敛)")
-print(f"   学习率: {INIT_LR} (参考源代码设置)")
-print(f"   学习率调度: 固定学习率 (参考源代码)")
-print(f"   最大梯度阈值: {MAX_GRAD_NORM} (降低阈值，防止梯度爆炸)")
-print(f"   最小梯度阈值: {MIN_GRAD_NORM} (降低阈值，减少梯度过小警告)")
+# 显示训练参数（与源代码Train_.py对齐）
+print(f"\n⚙️  BiLSTM训练参数（与源代码Train_.py完全一致）:")
+print(f"   训练轮数: {EPOCH} (源代码: 300)")
+print(f"   学习率: {INIT_LR} (源代码: 5e-4)")
+print(f"   批次大小: {BATCHSIZE} (源代码: 100)")
+print(f"   预热轮数: {WARMUP_EPOCHS}")
+print(f"   最大梯度阈值: {MAX_GRAD_NORM}")
+print(f"   最小梯度阈值: {MIN_GRAD_NORM}")
+print(f"   学习率调度: 固定学习率 (与源代码一致)")
 print(f"   数据并行: 启用")
-print(f"   混合精度: 禁用 (参考源代码)")
-print(f"   数据类型: float32 (参考源代码)")
-print(f"   激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid")
-print(f"   梯度处理: 简化版本 (参考源代码)")
+print(f"   混合精度: 禁用 (与源代码一致)")
+print(f"   数据类型: float32 (与源代码一致)")
+print(f"   激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid (与源代码一致)")
+print(f"   梯度处理: 简化版本 (与源代码一致)")
 print(f"   训练样本: 0-9 (共{len(train_samples)}个样本)")
 
 #----------------------------------------MC-AE训练数据准备（直接使用原始数据）------------------------
@@ -1004,7 +1005,7 @@ yTrainX = y_recovered2.cpu().detach().numpy()
 ERRORX = BB - yTrainX
 
 # 创建结果目录
-result_dir = '/mnt/bz25t/bzhy/datasave/BILSTM'
+result_dir = '/mnt/bz25t/bzhy/datasave/BILSTM/models'
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
     print(f"✅ 创建结果目录: {result_dir}")
@@ -1194,21 +1195,22 @@ with open(f'{result_dir}/bilstm_training_history.pkl', 'wb') as f:
 print(f"✓ 保存训练历史: {result_dir}/bilstm_training_history.pkl")
 
 print("="*50)
-print("🎉 BiLSTM小样本快速训练完成！")
+print("🎉 BiLSTM基线训练完成！")
 print("="*50)
-print("BiLSTM小样本训练模式总结：")
+print("BiLSTM基线训练模式总结（与源代码Train_.py对齐）：")
 print("1. ✅ 跳过Transformer训练阶段")
 print("2. ✅ 直接使用原始vin_2[x[0]]和vin_3[x[0]]数据")
 print("3. ✅ 保持Pack Modeling输出vin_2[x[1]]和vin_3[x[1]]不变")
 print("4. ✅ MC-AE使用原始BiLSTM数据进行训练")
-print("5. ✅ 使用0-9样本进行快速训练（共{len(train_samples)}个样本）")
+print("5. ✅ 使用0-9样本进行训练（共{len(train_samples)}个样本）")
 print("6. ✅ 所有模型和结果文件添加'_bilstm_baseline'后缀")
 print("")
-print("📊 小样本训练优势：")
-print("   - 训练时间大幅缩短，适合快速验证")
-print("   - 内存占用更少，适合资源受限环境")
-print("   - 便于调试和参数调优")
-print("   - 可快速验证模型架构的有效性")
+print("🔧 与源代码一致的关键参数：")
+print(f"   - 训练轮数: {EPOCH} (源代码: 300)")
+print(f"   - 学习率: {INIT_LR} (源代码: 5e-4)")
+print(f"   - 批次大小: {BATCHSIZE} (源代码: 100)")
+print("   - 激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid")
+print("   - 数据类型: float32, 梯度处理: 简化版本")
 print("")
 print(f"📁 结果保存路径: {result_dir}")
 print("   - 训练结果图: bilstm_training_results.png")

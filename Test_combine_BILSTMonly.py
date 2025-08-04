@@ -225,8 +225,8 @@ ALL_TEST_SAMPLES = TEST_SAMPLES['normal'] + TEST_SAMPLES['fault']
 # 模型路径配置 (从BiLSTM训练结果目录加载)
 MODEL_PATHS = {
     "BILSTM": {
-        "net_model": "/mnt/bz25t/bzhy/datasave/BILSTM/net_model_bilstm_baseline.pth",
-        "netx_model": "/mnt/bz25t/bzhy/datasave/BILSTM/netx_model_bilstm_baseline.pth"
+        "net_model": "/mnt/bz25t/bzhy/datasave/BILSTM/models/net_model_bilstm_baseline.pth",
+        "netx_model": "/mnt/bz25t/bzhy/datasave/BILSTM/models/netx_model_bilstm_baseline.pth"
     }
 }
 
@@ -280,20 +280,20 @@ def check_model_files():
             print(f"   ✅ 存在: {path} ({file_size:.1f}MB)")
     
     # 检查PCA参数文件 (从BiLSTM训练结果加载)
-    pca_params_path = "/mnt/bz25t/bzhy/datasave/BILSTM/pca_params_bilstm_baseline.pkl"
+    pca_params_path = "/mnt/bz25t/bzhy/datasave/BILSTM/models/pca_params_bilstm_baseline.pkl"
     if not os.path.exists(pca_params_path):
         # 尝试从npy文件重建PCA参数
         print(f"   ⚠️  PCA参数文件不存在，尝试从npy文件重建...")
         try:
             # 加载PCA相关参数
-            data_mean = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/data_mean_bilstm_baseline.npy")
-            data_std = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/data_std_bilstm_baseline.npy")
-            v = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/v_bilstm_baseline.npy")
-            p_k = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/p_k_bilstm_baseline.npy")
-            v_I = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/v_I_bilstm_baseline.npy")
-            T_99_limit = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/T_99_limit_bilstm_baseline.npy")
-            SPE_99_limit = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/SPE_99_limit_bilstm_baseline.npy")
-            X = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/X_bilstm_baseline.npy")
+            data_mean = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/models/data_mean_bilstm_baseline.npy")
+            data_std = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/models/data_std_bilstm_baseline.npy")
+            v = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/models/v_bilstm_baseline.npy")
+            p_k = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/models/p_k_bilstm_baseline.npy")
+            v_I = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/models/v_I_bilstm_baseline.npy")
+            T_99_limit = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/models/T_99_limit_bilstm_baseline.npy")
+            SPE_99_limit = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/models/SPE_99_limit_bilstm_baseline.npy")
+            X = np.load("/mnt/bz25t/bzhy/datasave/BILSTM/models/X_bilstm_baseline.npy")
             
             # 重建PCA参数字典
             pca_params = {
@@ -506,7 +506,7 @@ def load_models():
         raise RuntimeError("MC-AE2模型加载失败")
     
     # 加载PCA参数 (从pickle文件加载)
-    pca_params_path = "/mnt/bz25t/bzhy/datasave/BILSTM/pca_params_bilstm_baseline.pkl"
+    pca_params_path = "/mnt/bz25t/bzhy/datasave/BILSTM/models/pca_params_bilstm_baseline.pkl"
     try:
         with open(pca_params_path, 'rb') as f:
             models['pca_params'] = pickle.load(f)
@@ -1268,7 +1268,7 @@ def save_test_results(test_results, performance_metrics):
     
     # 创建结果目录
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_dir = f"/mnt/bz25t/bzhy/datasave/BILSTM/bilstm_test_results_{timestamp}"
+    result_dir = f"/mnt/bz25t/bzhy/datasave/BILSTM/test_results/bilstm_test_results_{timestamp}"
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(f"{result_dir}/visualizations", exist_ok=True)
     os.makedirs(f"{result_dir}/detailed_results", exist_ok=True)

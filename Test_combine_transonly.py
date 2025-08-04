@@ -225,9 +225,9 @@ ALL_TEST_SAMPLES = TEST_SAMPLES['normal'] + TEST_SAMPLES['fault']
 # 模型路径配置 (从datasave目录加载)
 MODEL_PATHS = {
     "TRANSFORMER": {
-        "transformer_model": "/mnt/bz25t/bzhy/datasave/transformer_model_hybrid_feedback.pth",
-        "net_model": "/mnt/bz25t/bzhy/datasave/net_model_hybrid_feedback.pth", 
-        "netx_model": "/mnt/bz25t/bzhy/datasave/netx_model_hybrid_feedback.pth"
+        "transformer_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/transformer_model_hybrid_feedback.pth",
+        "net_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/net_model_hybrid_feedback.pth", 
+        "netx_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/netx_model_hybrid_feedback.pth"
     }
 }
 
@@ -281,7 +281,7 @@ def check_model_files():
             print(f"   ✅ 存在: {path} ({file_size:.1f}MB)")
     
     # 检查PCA参数文件
-    pca_params_path = "/mnt/bz25t/bzhy/datasave/pca_params_hybrid_feedback.pkl"
+    pca_params_path = "/mnt/bz25t/bzhy/datasave/Transformer/models/pca_params_hybrid_feedback.pkl"
     if not os.path.exists(pca_params_path):
         missing_files.append(f"PCA_PARAMS: {pca_params_path}")
         print(f"   ❌ 缺失: {pca_params_path}")
@@ -486,7 +486,7 @@ def load_models():
         raise RuntimeError("MC-AE2模型加载失败")
     
     # 加载PCA参数 (从pickle文件加载)
-    pca_params_path = "/mnt/bz25t/bzhy/datasave/pca_params_hybrid_feedback.pkl"
+    pca_params_path = "/mnt/bz25t/bzhy/datasave/Transformer/models/pca_params_hybrid_feedback.pkl"
     try:
         with open(pca_params_path, 'rb') as f:
             models['pca_params'] = pickle.load(f)
@@ -1243,7 +1243,7 @@ def save_test_results(test_results, performance_metrics):
     
     # 创建结果目录
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_dir = f"/mnt/bz25t/bzhy/datasave/Transformer/transformer_test_results_{timestamp}"
+    result_dir = f"/mnt/bz25t/bzhy/datasave/Transformer/test_results/transformer_test_results_{timestamp}"
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(f"{result_dir}/visualizations", exist_ok=True)
     os.makedirs(f"{result_dir}/detailed_results", exist_ok=True)
