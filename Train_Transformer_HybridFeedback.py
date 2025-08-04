@@ -48,7 +48,7 @@ HYBRID_FEEDBACK_CONFIG = {
     # 反馈机制配置
     'feedback_frequency': 15,               # 每15个epoch检查一次
     'use_feedback': True,                   # 启用反馈机制
-    'feedback_start_epoch': 20,             # 第20轮开始启用反馈
+    'feedback_start_epoch': 100,            # 第100轮开始启用反馈（增加训练轮数）
     
     # 反馈触发阈值（多级触发）
     'false_positive_thresholds': {
@@ -422,7 +422,7 @@ plt.rcParams['font.size'] = 10
 #----------------------------------------复用Train_Transformer.py的TransformerPredictor模型------------------------------
 class TransformerPredictor(nn.Module):
     """时序预测Transformer模型 - 直接预测真实物理值"""
-    def __init__(self, input_size=7, d_model=128, nhead=8, num_layers=3, output_size=2):
+    def __init__(self, input_size=7, d_model=256, nhead=16, num_layers=6, output_size=2):
         super(TransformerPredictor, self).__init__()
         self.input_size = input_size
         self.d_model = d_model
@@ -845,9 +845,9 @@ def main():
     # 初始化Transformer模型
     transformer = TransformerPredictor(
         input_size=7,      # vin_1前5维 + 电压 + SOC
-        d_model=128,       # 模型维度
-        nhead=8,           # 注意力头数
-        num_layers=3,      # Transformer层数
+        d_model=256,       # 模型维度（中等规模）
+        nhead=16,          # 注意力头数（中等规模）
+        num_layers=6,      # Transformer层数（中等规模）
         output_size=2      # 输出：电压 + SOC
     ).to(device).float()
     
@@ -864,7 +864,7 @@ def main():
     # 训练参数设置
     LR = 1.5e-3            # 学习率从1e-3增加到1.5e-3
     EPOCH_PHASE1 = config['feedback_start_epoch']  # 阶段1训练轮数
-    EPOCH_PHASE2 = 40      # 阶段2总轮数
+    EPOCH_PHASE2 = 80      # 阶段2总轮数（增加训练轮数）
     lr_decay_freq = 15     # 学习率衰减频率从10增加到15
     
     # 优化器和损失函数
