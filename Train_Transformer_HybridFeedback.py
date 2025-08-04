@@ -37,34 +37,51 @@ import time
 # 导入Transformer数据加载器
 from data_loader_transformer import TransformerBatteryDataset, create_transformer_dataloader
 
-# 混合反馈策略配置
+# 激进反馈策略配置 - 专注降低假阳率
 HYBRID_FEEDBACK_CONFIG = {
     # 数据分组配置（严格按照README规范）
     'train_samples': list(range(8)),        # QAS 0-7 (8个正常样本)
     'feedback_samples': [8, 9],             # QAS 8-9 (2个正常反馈样本)
     
-    # 反馈机制配置
-    'feedback_frequency': 15,               # 每15个epoch检查一次
+    # 激进反馈机制配置
+    'feedback_frequency': 3,                # 每3个epoch检查一次（大幅提高）
     'use_feedback': True,                   # 启用反馈机制
-    'feedback_start_epoch': 100,            # 第100轮开始启用反馈（增加训练轮数）
+    'feedback_start_epoch': 30,             # 第30轮就开始启用反馈（提前介入）
     
-    # 反馈触发阈值（更严格的多级触发）
+    # 极严格的反馈触发阈值（目标：正常样本接近0%假阳率）
     'false_positive_thresholds': {
-        'warning': 0.005,       # 0.5%预警（记录但不反馈）
-        'standard': 0.01,       # 1%标准反馈（更严格）
-        'enhanced': 0.02,       # 2%强化反馈（更严格）
-        'emergency': 0.03       # 3%紧急反馈（更严格）
+        'warning': 0.001,       # 0.1%预警（极低阈值）
+        'standard': 0.002,      # 0.2%标准反馈（激进）
+        'enhanced': 0.005,      # 0.5%强化反馈（激进）
+        'emergency': 0.01       # 1%紧急反馈（原来的标准）
     },
     
-    # 混合权重配置
-    'mcae_weight': 0.8,                     # MC-AE权重（主要依赖）
-    'transformer_weight': 0.2,             # Transformer权重（辅助校正）
+    # 激进的混合权重配置
+    'mcae_weight': 0.6,                     # 降低MC-AE权重
+    'transformer_weight': 0.4,             # 提高Transformer权重（增强预测精度）
     
-    # 自适应学习率配置（更严格的调整）
+    # 激进的自适应学习率配置
     'adaptive_lr_factors': {
-        'standard': 0.7,        # 标准反馈：LR * 0.7（更严格）
-        'enhanced': 0.5,        # 强化反馈：LR * 0.5（更严格）
-        'emergency': 0.3        # 紧急反馈：LR * 0.3（更严格）
+        'standard': 0.5,        # 标准反馈：LR * 0.5（激进调整）
+        'enhanced': 0.3,        # 强化反馈：LR * 0.3（激进调整）
+        'emergency': 0.1        # 紧急反馈：LR * 0.1（极激进调整）
+    },
+    
+    # 新增：动态反馈强度配置
+    'dynamic_feedback_weights': {
+        'min_feedback_weight': 0.1,        # 最小反馈权重
+        'max_feedback_weight': 2.0,        # 最大反馈权重（可超过基础训练）
+        'weight_increment': 0.2,           # 每次反馈增强幅度
+        'consecutive_trigger_boost': 1.5   # 连续触发时的权重提升倍数
+    },
+    
+    # 新增：正常样本特化训练配置（基于阈值相对优化）
+    'normal_sample_focus': {
+        'enable': True,                     # 启用正常样本特化训练
+        'focus_weight': 3.0,               # 正常样本的损失权重倍数
+        'threshold_margin': 0.8,           # 目标：FAI < threshold1 * 0.8 (保持20%安全边距)
+        'relative_penalty': True,          # 启用相对阈值惩罚
+        'penalty_factor': 5.0              # 超出目标阈值的惩罚因子
     }
 }
 
@@ -754,39 +771,56 @@ def calculate_false_positive_rate_comprehensive(feedback_samples, mcae_net1, mca
     
     return false_positive_rate, false_positives, total_normals
 
-def detect_feedback_trigger(false_positive_rate, epoch, config):
+def detect_feedback_trigger(false_positive_rate, epoch, config, consecutive_triggers=0):
     """
-    检测是否触发反馈机制
+    激进反馈触发检测（专注降低假阳率）
     
     参数:
         false_positive_rate: 当前假阳性率
         epoch: 当前训练轮数
         config: 反馈配置
+        consecutive_triggers: 连续触发次数
     
     返回:
-        trigger_level: 触发等级 ('none', 'standard', 'enhanced', 'emergency')
+        trigger_level: 触发等级 ('none', 'warning', 'standard', 'enhanced', 'emergency')
         lr_factor: 学习率调整因子
         feedback_weight: 反馈权重
     """
     thresholds = config['false_positive_thresholds']
+    dynamic_config = config['dynamic_feedback_weights']
     
-    # 判断触发等级
+    # 动态计算反馈权重（随连续触发次数增强）
+    base_weight = min(
+        dynamic_config['max_feedback_weight'],
+        dynamic_config['min_feedback_weight'] + consecutive_triggers * dynamic_config['weight_increment']
+    )
+    
+    # 连续触发时的权重提升
+    if consecutive_triggers > 0:
+        consecutive_boost = dynamic_config['consecutive_trigger_boost']
+        base_weight *= (1 + consecutive_boost * min(consecutive_triggers / 3, 1.0))
+    
+    # 激进反馈策略：极低阈值触发
     if false_positive_rate >= thresholds['emergency']:
+        # 紧急反馈：假阳率 >= 1%
         trigger_level = 'emergency'
         lr_factor = config['adaptive_lr_factors']['emergency']
-        feedback_weight = 1.0  # 最高反馈权重
+        feedback_weight = min(base_weight * 2.0, dynamic_config['max_feedback_weight'])
     elif false_positive_rate >= thresholds['enhanced']:
+        # 强化反馈：假阳率 >= 0.5%
         trigger_level = 'enhanced'
         lr_factor = config['adaptive_lr_factors']['enhanced']
-        feedback_weight = 0.8
+        feedback_weight = min(base_weight * 1.5, dynamic_config['max_feedback_weight'])
     elif false_positive_rate >= thresholds['standard']:
+        # 标准反馈：假阳率 >= 0.2%
         trigger_level = 'standard'
         lr_factor = config['adaptive_lr_factors']['standard']
-        feedback_weight = 0.5
+        feedback_weight = base_weight
     elif false_positive_rate >= thresholds['warning']:
+        # 轻度反馈：假阳率 >= 0.1%（不再仅记录，开始轻度干预）
         trigger_level = 'warning'
-        lr_factor = 1.0  # 预警时不调整学习率
-        feedback_weight = 0.0  # 只记录，不反馈
+        lr_factor = 0.8  # 轻度学习率调整
+        feedback_weight = base_weight * 0.3
     else:
         trigger_level = 'none'
         lr_factor = 1.0
@@ -811,6 +845,7 @@ def prepare_feedback_data(feedback_samples, device, batch_size=1000):
         
         all_vin1_data = []
         all_targets = []
+        sample_lengths = []
         
         for sample_id in feedback_samples:
             # 加载vin_1数据
@@ -821,6 +856,12 @@ def prepare_feedback_data(feedback_samples, device, batch_size=1000):
                     vin1_data = vin1_data.cpu()
                 else:
                     vin1_data = torch.tensor(vin1_data)
+                
+                # 记录数据长度和格式
+                sample_length = len(vin1_data)
+                sample_lengths.append(sample_length)
+                print(f"   样本{sample_id}: {sample_length}个数据点, 格式{vin1_data.shape}")
+                
                 all_vin1_data.append(vin1_data)
             
             # 加载目标数据
@@ -830,40 +871,151 @@ def prepare_feedback_data(feedback_samples, device, batch_size=1000):
                 terminal_voltages = np.array(targets['terminal_voltages'])
                 pack_socs = np.array(targets['pack_socs'])
                 
+                print(f"   样本{sample_id} targets: 电压{len(terminal_voltages)}点, SOC{len(pack_socs)}点")
+                
                 # 组合目标数据：下一时刻的电压和SOC
                 targets_combined = np.column_stack([terminal_voltages[1:], pack_socs[1:]])
                 targets_tensor = torch.tensor(targets_combined, dtype=torch.float32)
                 all_targets.append(targets_tensor)
         
-        # 合并所有数据
-        combined_vin1 = torch.cat(all_vin1_data, dim=0)
-        combined_targets = torch.cat(all_targets, dim=0)
+        # 检查数据长度一致性
+        if len(set(sample_lengths)) > 1:
+            print(f"   ⚠️ 警告: 样本长度不一致 {sample_lengths}")
+            print(f"   使用最小长度: {min(sample_lengths)}")
+            
+            # 统一截取到最小长度
+            min_length = min(sample_lengths)
+            for i in range(len(all_vin1_data)):
+                all_vin1_data[i] = all_vin1_data[i][:min_length]
+                all_targets[i] = all_targets[i][:min_length-1]  # targets少一个点
         
-        # 构建输入数据：vin_1前5维 + 当前时刻真实电压 + 当前时刻真实SOC
-        feedback_inputs = torch.zeros(len(combined_vin1), 7, dtype=torch.float32)
-        feedback_inputs[:, 0:5] = combined_vin1[:, 0, 0:5]  # vin_1前5维
+        # 分别处理每个样本，避免长度不匹配问题
+        all_feedback_inputs = []
+        all_feedback_targets = []
         
-        # 添加当前时刻的真实值（从targets中获取前一时刻的值）
-        feedback_inputs[1:, 5] = combined_targets[:-1, 0]  # 当前时刻电压
-        feedback_inputs[1:, 6] = combined_targets[:-1, 1]  # 当前时刻SOC
+        for i, (vin1_data, targets_data) in enumerate(zip(all_vin1_data, all_targets)):
+            # 构建输入数据：vin_1前5维 + 当前时刻真实电压 + 当前时刻真实SOC
+            feedback_inputs = torch.zeros(len(vin1_data), 7, dtype=torch.float32)
+            
+            # 根据数据格式调整索引
+            if len(vin1_data.shape) == 3:  # [time, 1, features]
+                feedback_inputs[:, 0:5] = vin1_data[:, 0, 0:5]  # vin_1前5维
+            elif len(vin1_data.shape) == 2:  # [time, features]
+                feedback_inputs[:, 0:5] = vin1_data[:, 0:5]  # vin_1前5维
+            else:
+                print(f"   ⚠️ 未知的vin1_data格式: {vin1_data.shape}")
+                continue
+            
+            # 添加当前时刻的真实值（从targets中获取前一时刻的值）
+            if len(targets_data) > 0:
+                feedback_inputs[1:, 5] = targets_data[:-1, 0]  # 当前时刻电压
+                feedback_inputs[1:, 6] = targets_data[:-1, 1]  # 当前时刻SOC
+                
+                # 对应的目标是下一时刻的值
+                feedback_targets = targets_data[1:]
+                feedback_inputs = feedback_inputs[1:]
+                
+                all_feedback_inputs.append(feedback_inputs)
+                all_feedback_targets.append(feedback_targets)
         
-        # 对应的目标是下一时刻的值
-        feedback_targets = combined_targets[1:]
-        feedback_inputs = feedback_inputs[1:]
-        
-        # 随机采样一个批次
-        total_samples = len(feedback_inputs)
-        if total_samples > batch_size:
-            indices = torch.randperm(total_samples)[:batch_size]
-            feedback_inputs = feedback_inputs[indices]
-            feedback_targets = feedback_targets[indices]
-        
-        print(f"   ✅ 反馈数据准备完成: 输入{feedback_inputs.shape}, 目标{feedback_targets.shape}")
-        return (feedback_inputs, feedback_targets)
+        # 合并所有样本的数据
+        if all_feedback_inputs:
+            combined_inputs = torch.cat(all_feedback_inputs, dim=0)
+            combined_targets = torch.cat(all_feedback_targets, dim=0)
+            
+            # 随机采样一个批次
+            total_samples = len(combined_inputs)
+            if total_samples > batch_size:
+                indices = torch.randperm(total_samples)[:batch_size]
+                combined_inputs = combined_inputs[indices]
+                combined_targets = combined_targets[indices]
+            
+            print(f"   ✅ 反馈数据准备完成: 输入{combined_inputs.shape}, 目标{combined_targets.shape}")
+            return (combined_inputs, combined_targets)
+        else:
+            print("   ❌ 没有有效的反馈数据")
+            return None
         
     except Exception as e:
         print(f"   ❌ 反馈数据准备失败: {e}")
+        print(f"   错误类型: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         return None
+
+def apply_normal_sample_focus_training(transformer, feedback_data, optimizer, criterion, config, device, current_threshold=None):
+    """
+    正常样本特化训练 - 基于阈值相对优化，使FAI低于threshold1
+    
+    参数:
+        transformer: Transformer模型
+        feedback_data: 正常样本反馈数据
+        optimizer: 优化器
+        criterion: 损失函数
+        config: 配置
+        device: 计算设备
+        current_threshold: 当前threshold1值
+    
+    返回:
+        focus_loss: 特化训练损失
+        avg_prediction_error: 平均预测误差
+        threshold_info: 阈值相关信息
+    """
+    if not config['normal_sample_focus']['enable'] or feedback_data is None:
+        return torch.tensor(0.0, device=device), 0.0, "未启用"
+    
+    try:
+        vin1_batch, targets_batch = feedback_data
+        vin1_batch = vin1_batch.to(device)
+        targets_batch = targets_batch.to(device)
+        
+        transformer.train()
+        
+        # 前向传播
+        predictions = transformer(vin1_batch)
+        
+        # 基础预测损失
+        base_loss = criterion(predictions, targets_batch)
+        
+        # 计算预测误差（用于FAI估算）
+        prediction_errors = torch.abs(predictions - targets_batch)
+        avg_prediction_error = prediction_errors.mean().item()
+        
+        # 基于阈值的相对优化
+        if current_threshold is not None and config['normal_sample_focus']['relative_penalty']:
+            # 目标：FAI < threshold1 * margin（例如：< threshold1 * 0.8）
+            target_threshold = current_threshold * config['normal_sample_focus']['threshold_margin']
+            
+            # 预测误差越大，FAI越可能超过目标阈值，施加相对惩罚
+            # 使用sigmoid函数平滑惩罚，避免梯度突变
+            error_ratio = prediction_errors / target_threshold
+            relative_penalty = torch.sigmoid(error_ratio - 1.0) * config['normal_sample_focus']['penalty_factor']
+            threshold_penalty = torch.mean(relative_penalty * prediction_errors)
+            
+            threshold_info = f"目标阈值={target_threshold:.4f}, 当前误差={avg_prediction_error:.4f}"
+        else:
+            # 如果没有阈值信息，使用基础FAI惩罚
+            threshold_penalty = torch.mean(prediction_errors * config['normal_sample_focus']['penalty_factor'])
+            threshold_info = f"基础惩罚模式, 预测误差={avg_prediction_error:.4f}"
+        
+        # 总损失 = 基础损失 * 权重 + 阈值相对惩罚
+        focus_weight = config['normal_sample_focus']['focus_weight']
+        total_loss = base_loss * focus_weight + threshold_penalty
+        
+        # 反向传播
+        optimizer.zero_grad()
+        total_loss.backward()
+        
+        # 梯度裁剪（防止梯度爆炸）
+        torch.nn.utils.clip_grad_norm_(transformer.parameters(), max_norm=1.0)
+        
+        optimizer.step()
+        
+        return total_loss, avg_prediction_error, threshold_info
+        
+    except Exception as e:
+        print(f"   ❌ 正常样本特化训练失败: {e}")
+        return torch.tensor(0.0, device=device), 0.0, f"失败: {e}"
 
 def apply_hybrid_feedback(transformer, mcae_net1, mcae_net2, feedback_data, 
                          feedback_weight, mcae_weight, transformer_weight, device):
@@ -946,12 +1098,14 @@ def main():
     print(f"📊 数据分组:")
     print(f"   训练样本: {config['train_samples']} (QAS 0-7)")
     print(f"   反馈样本: {config['feedback_samples']} (QAS 8-9)")
-    print(f"🔧 反馈机制（基于实际预测误差）:")
-    print(f"   反馈频率: 每{config['feedback_frequency']}个epoch")
-    print(f"   反馈启动轮数: 第{config['feedback_start_epoch']}轮")
-    print(f"   假阳性阈值（更严格）: {config['false_positive_thresholds']}")
-    print(f"   自适应学习率因子: {config['adaptive_lr_factors']}")
+    print(f"🔧 激进反馈机制（专注降低假阳率）:")
+    print(f"   反馈频率: 每{config['feedback_frequency']}个epoch （大幅提高）")
+    print(f"   反馈启动轮数: 第{config['feedback_start_epoch']}轮 （提前介入）")
+    print(f"   假阳性阈值（极严格）: {config['false_positive_thresholds']}")
+    print(f"   自适应学习率因子（激进）: {config['adaptive_lr_factors']}")
     print(f"   MC-AE权重: {config['mcae_weight']}, Transformer权重: {config['transformer_weight']}")
+    print(f"   动态反馈权重: {config['dynamic_feedback_weights']}")
+    print(f"   正常样本特化训练: 目标FAI < threshold1 * {config['normal_sample_focus']['threshold_margin']}")
     
     #----------------------------------------阶段1: 基础Transformer训练------------------------------
     print("\n" + "="*60)
@@ -1436,6 +1590,7 @@ def main():
     print("⚠️ 阶段3将在PCA分析完成后进行，需要先获取故障检测阈值")
     train_losses_phase2 = []
     feedback_history = []
+    consecutive_triggers = 0  # 连续触发计数器
     
     #----------------------------------------阶段4: PCA分析和保存模型（复用Train_Transformer.py逻辑）------------------------------
     print("\n" + "="*60)
@@ -1834,13 +1989,14 @@ def main():
                 
                 print(f"   当前假阳性率: {false_positive_rate:.4f} ({false_positive_rate*100:.2f}%)")
                 
-                # 检测反馈触发
+                # 检测反馈触发（集成连续触发追踪）
                 trigger_level, lr_factor, feedback_weight = detect_feedback_trigger(
-                    false_positive_rate, epoch, config)
+                    false_positive_rate, epoch, config, consecutive_triggers)
                 
                 if trigger_level != 'none':
                     feedback_triggered = True
-                    trigger_info = f"{trigger_level}反馈 (权重:{feedback_weight:.2f}, LR因子:{lr_factor:.2f})"
+                    consecutive_triggers += 1  # 增加连续触发计数
+                    trigger_info = f"{trigger_level}反馈 (权重:{feedback_weight:.2f}, LR因子:{lr_factor:.2f}, 连续:{consecutive_triggers})"
                     
                     # 调整学习率
                     if lr_factor != 1.0:
@@ -1851,12 +2007,20 @@ def main():
                     # 准备反馈数据（基于实际预测误差）
                     feedback_data = prepare_feedback_data(config['feedback_samples'], device, batch_size=500)
                     
-                    # 应用混合反馈
-                    feedback_loss, feedback_info = apply_hybrid_feedback(
-                        transformer, net, netx, feedback_data, 
-                        feedback_weight, config['mcae_weight'], config['transformer_weight'], device)
-                    
-                    print(f"   {feedback_info}")
+                    if feedback_data is not None:
+                        # 1. 应用正常样本特化训练（基于阈值相对优化）
+                        focus_loss, avg_pred_error, threshold_info = apply_normal_sample_focus_training(
+                            transformer, feedback_data, optimizer, criterion, config, device, current_threshold)
+                        print(f"   正常样本特化训练: 损失={focus_loss:.6f}, {threshold_info}")
+                        
+                        # 2. 应用混合反馈
+                        feedback_loss, feedback_info = apply_hybrid_feedback(
+                            transformer, net, netx, feedback_data, 
+                            feedback_weight, config['mcae_weight'], config['transformer_weight'], device)
+                        
+                        print(f"   {feedback_info}")
+                    else:
+                        print(f"   ⚠️ 反馈数据准备失败，跳过反馈训练")
                     
                     # 记录反馈历史
                     feedback_history.append({
@@ -1866,9 +2030,11 @@ def main():
                         'feedback_weight': feedback_weight,
                         'lr_factor': lr_factor,
                         'false_positives': false_positives,
-                        'total_normals': total_normals
+                        'total_normals': total_normals,
+                        'consecutive_triggers': consecutive_triggers
                     })
                 else:
+                    consecutive_triggers = 0  # 重置连续触发计数
                     print(f"   无需反馈 (假阳性率: {false_positive_rate:.4f})")
                     
             except Exception as e:
