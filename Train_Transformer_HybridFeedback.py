@@ -919,7 +919,7 @@ def main():
     # 训练参数设置
     LR = 1.5e-3            # 学习率从1e-3增加到1.5e-3
     EPOCH_PHASE1 = config['feedback_start_epoch']  # 阶段1训练轮数
-    EPOCH_PHASE2 = 80      # 阶段2总轮数（增加训练轮数）
+    EPOCH_PHASE2 = 120     # 阶段2总轮数（修正：必须大于EPOCH_PHASE1）
     lr_decay_freq = 15     # 学习率衰减频率从10增加到15
     
     # 优化器和损失函数
@@ -1786,7 +1786,10 @@ def main():
             current_lr = optimizer.param_groups[0]['lr']
             print(f'阶段3 Epoch: {epoch:3d} | Loss: {avg_loss:.6f} | LR: {current_lr:.6f} | {trigger_info}')
     
-    print(f"\n✅ 阶段3混合反馈训练完成! 最终损失: {train_losses_phase2[-1]:.6f}")
+    if train_losses_phase2:
+        print(f"\n✅ 阶段3混合反馈训练完成! 最终损失: {train_losses_phase2[-1]:.6f}")
+    else:
+        print(f"\n⚠️ 阶段3混合反馈训练完成! 但训练损失列表为空")
     print(f"📊 反馈触发次数: {len(feedback_history)}")
     if feedback_history:
         avg_fpr = np.mean([h['false_positive_rate'] for h in feedback_history])
@@ -2014,6 +2017,8 @@ def main():
     print(f"   阶段1最终损失: {train_losses_phase1[-1]:.6f}")
     if train_losses_phase2:
         print(f"   阶段3最终损失: {train_losses_phase2[-1]:.6f}")
+    else:
+        print(f"   阶段3最终损失: 无数据")
     print(f"   反馈触发次数: {len(feedback_history)}")
     print(f"   PCA主成分数量: {k}")
     print("")
