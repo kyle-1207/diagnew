@@ -243,10 +243,10 @@ MODEL_PATHS = {
 #    - 考虑故障的前后影响范围
 #    - 保证故障区域的完整性
 WINDOW_CONFIG = {
-    "detection_window": 50,      # 检测窗口：50个采样点 (25分钟)
-    "verification_window": 30,   # 验证窗口：30个采样点 (15分钟)
-    "marking_window": 40,        # 标记窗口：40个采样点 (20分钟)
-    "verification_threshold": 0.4 # 验证窗口内FAI异常比例阈值 (40%)
+    "detection_window": 25,      # 检测窗口：25个采样点 (12.5分钟)
+    "verification_window": 15,   # 验证窗口：15个采样点 (7.5分钟)
+    "marking_window": 20,        # 标记窗口：20个采样点 (10分钟)
+    "verification_threshold": 0.6 # 验证窗口内FAI异常比例阈值 (60%)
 }
 
 # 高分辨率可视化配置
