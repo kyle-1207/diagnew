@@ -116,6 +116,8 @@ print(f"   数据并行: 启用")
 print(f"   混合精度: 启用 (AMP)")
 print(f"   数据裁剪: 启用 (限制输入范围[-50,50])")
 print(f"   损失裁剪: 启用 (限制损失值[0,1e6])")
+print(f"   MC-AE2修复: 统一使用custom_activation激活函数")
+print(f"   梯度监控: 启用 (详细监控MC-AE2梯度问题)")
 print(f"   训练样本: 0-9 (共{len(train_samples)}个样本)")
 
 #----------------------------------------MC-AE训练数据准备（直接使用原始数据）------------------------
@@ -768,7 +770,7 @@ train_loader_u = DataLoader(MultiInputDataset(x_recovered, y_recovered, z_recove
 # 中文注释：初始化MC-AE模型（使用float32）
 net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
 
-netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).to(torch.float32)
+netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
 
 # 使用更稳定的权重初始化
 def stable_weight_init(model):
@@ -973,6 +975,18 @@ for epoch in range(EPOCH):
         z = z.to(device)
         q = q.to(device)
         
+        # MC-AE2输入数据检查（更严格）
+        if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
+            print(f"MC-AE2警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
+            continue
+        
+        # 检查输入数据范围是否合理（更严格的限制）
+        if x.abs().max() > 100 or y.abs().max() > 100:
+            print(f"MC-AE2警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
+            continue
+        
         # 数据标准化处理（防止数值过大）
         x_norm = torch.clamp(x, -50, 50)  # 限制输入范围
         y_norm = torch.clamp(y, -50, 50)  # 限制目标范围
@@ -1015,13 +1029,19 @@ for epoch in range(EPOCH):
             # 在检查梯度前unscale
             scaler2.unscale_(optimizer)
             
+            # 详细的梯度监控（针对MC-AE2）
             for name, param in netx.named_parameters():
                 if param.grad is not None:
                     if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                        print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                        print(f"MC-AE2警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                        print(f"   参数形状: {param.shape}")
+                        print(f"   参数范围: [{param.min():.4f}, {param.max():.4f}]")
+                        print(f"   梯度范围: [{param.grad.min():.4f}, {param.grad.max():.4f}]")
                         has_grad_issue = True
                         break
                     grad_norm += param.grad.data.norm(2).item() ** 2
+                else:
+                    print(f"MC-AE2警告：参数 {name} 的梯度为None")
             
             if has_grad_issue:
                 # 重置scaler状态
