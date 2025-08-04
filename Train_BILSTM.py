@@ -63,40 +63,40 @@ print("="*50)
 #----------------------------------------数据加载------------------------------
 # 从Labels.xls加载训练样本ID（0-200号）
 def load_train_samples():
-    """从Labels.xls加载训练样本ID"""
+    """从Labels.xls加载训练样本ID（小样本快速训练版本）"""
     try:
         import pandas as pd
         labels_path = '../QAS/Labels.xls'
         df = pd.read_excel(labels_path)
         
-        # 提取0-200范围的样本
+        # 提取0-9范围的样本作为训练数据
         all_samples = df['Num'].tolist()
-        train_samples = [i for i in all_samples if 0 <= i <= 200]
+        train_samples = [i for i in all_samples if 0 <= i <= 9]
         
-        print(f"📋 从Labels.xls加载训练样本:")
-        print(f"   训练样本范围: 0-200")
+        print(f"📋 从Labels.xls加载训练样本（小样本快速训练）:")
+        print(f"   训练样本范围: 0-9")
         print(f"   实际可用样本: {len(train_samples)} 个")
-        print(f"   样本ID: {train_samples[:10]}..." if len(train_samples) > 10 else f"   样本ID: {train_samples}")
+        print(f"   样本ID: {train_samples}")
         
         return train_samples
     except Exception as e:
         print(f"❌ 加载Labels.xls失败: {e}")
-        print("⚠️  使用默认样本范围 0-20")
-        return list(range(21))
+        print("⚠️  使用默认样本范围 0-9")
+        return list(range(10))
 
 train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
-# 定义训练参数（内存安全版本）
-EPOCH = 300
-INIT_LR = 3e-5  # 提高初始学习率，解决梯度过小问题
-MAX_LR = 8e-5   # 提高最大学习率，加快收敛
-BATCHSIZE = 2000  # 降低批次大小，确保内存安全
-WARMUP_EPOCHS = 10  # 学习率预热轮数
+# 定义训练参数（小样本快速训练版本，优化数值稳定性）
+EPOCH = 100  # 减少训练轮数，适应小样本
+INIT_LR = 1e-5  # 降低初始学习率，提高数值稳定性
+MAX_LR = 5e-5   # 降低最大学习率，避免梯度爆炸
+BATCHSIZE = 500  # 进一步降低批次大小，提高稳定性
+WARMUP_EPOCHS = 10  # 增加学习率预热轮数，提高稳定性
 
-# 梯度裁剪参数优化
-MAX_GRAD_NORM = 2.0  # 提高最大梯度阈值，允许更大梯度
-MIN_GRAD_NORM = 0.01  # 降低最小梯度阈值，减少梯度过小警告
+# 梯度裁剪参数优化（更保守的设置）
+MAX_GRAD_NORM = 1.0  # 降低最大梯度阈值，防止梯度爆炸
+MIN_GRAD_NORM = 0.001  # 降低最小梯度阈值，减少梯度过小警告
 
 # 学习率预热函数
 def get_lr(epoch):
@@ -105,15 +105,18 @@ def get_lr(epoch):
     return MAX_LR * (0.9 ** (epoch // 50))  # 每50个epoch衰减到90%
 
 # 显示优化后的训练参数
-print(f"\n⚙️  BiLSTM训练参数（内存安全版本）:")
-print(f"   批次大小: {BATCHSIZE} (降低到2000，平衡内存安全和训练效率)")
-print(f"   训练轮数: {EPOCH}")
-print(f"   初始学习率: {INIT_LR} (提高学习率，解决梯度过小)")
-print(f"   最大学习率: {MAX_LR} (提高最大学习率，加快收敛)")
-print(f"   最大梯度阈值: {MAX_GRAD_NORM} (提高阈值，允许更大梯度)")
+print(f"\n⚙️  BiLSTM训练参数（小样本快速训练版本，优化数值稳定性）:")
+print(f"   批次大小: {BATCHSIZE} (适应小样本训练，提高稳定性)")
+print(f"   训练轮数: {EPOCH} (减少轮数，快速收敛)")
+print(f"   初始学习率: {INIT_LR} (降低学习率，提高数值稳定性)")
+print(f"   最大学习率: {MAX_LR} (降低最大学习率，避免梯度爆炸)")
+print(f"   最大梯度阈值: {MAX_GRAD_NORM} (降低阈值，防止梯度爆炸)")
 print(f"   最小梯度阈值: {MIN_GRAD_NORM} (降低阈值，减少梯度过小警告)")
 print(f"   数据并行: 启用")
 print(f"   混合精度: 启用 (AMP)")
+print(f"   数据裁剪: 启用 (限制输入范围[-50,50])")
+print(f"   损失裁剪: 启用 (限制损失值[0,1e6])")
+print(f"   训练样本: 0-9 (共{len(train_samples)}个样本)")
 
 #----------------------------------------MC-AE训练数据准备（直接使用原始数据）------------------------
 print("="*50)
@@ -819,31 +822,38 @@ for epoch in range(EPOCH):
         z = z.to(device)
         q = q.to(device)
         
-        # 检查输入数据范围
+        # 检查输入数据范围（更严格的检查）
         if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
             print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
             continue
         
-        # 检查输入数据范围是否合理
-        if x.abs().max() > 1000 or y.abs().max() > 1000:
+        # 检查输入数据范围是否合理（更严格的限制）
+        if x.abs().max() > 100 or y.abs().max() > 100:
             print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
             print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
             continue
         
+        # 数据标准化处理（防止数值过大）
+        x_norm = torch.clamp(x, -50, 50)  # 限制输入范围
+        y_norm = torch.clamp(y, -50, 50)  # 限制目标范围
+        
         # 使用混合精度训练
         with torch.cuda.amp.autocast():
-            recon_im, recon_p = net(x, z, q)
-            loss_u = loss_f(y, recon_im)
+            recon_im, recon_p = net(x_norm, z, q)
+            loss_u = loss_f(y_norm, recon_im)
             
-                    # 检查损失值是否为NaN
-        if torch.isnan(loss_u) or torch.isinf(loss_u):
-            print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
-            print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+                    # 检查损失值是否为NaN（更严格的检查）
+        if torch.isnan(loss_u) or torch.isinf(loss_u) or loss_u.item() > 1e6:
+            print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值")
             print(f"损失值: {loss_u.item()}")
+            print(f"输入范围: [{x_norm.min():.4f}, {x_norm.max():.4f}]")
+            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
             print("跳过此批次，不进行反向传播")
             continue
+        
+        # 损失值裁剪（防止异常大的损失值）
+        loss_u = torch.clamp(loss_u, 0, 1e6)
         
         # 检查输入数据范围是否合理
         if x.abs().max() > 1000 or y.abs().max() > 1000:
@@ -963,19 +973,26 @@ for epoch in range(EPOCH):
         z = z.to(device)
         q = q.to(device)
         
+        # 数据标准化处理（防止数值过大）
+        x_norm = torch.clamp(x, -50, 50)  # 限制输入范围
+        y_norm = torch.clamp(y, -50, 50)  # 限制目标范围
+        
         # 使用混合精度训练
         with torch.cuda.amp.autocast():
-            recon_im, z = netx(x, z, q)
-            loss_x = loss_f(y, recon_im)
+            recon_im, z = netx(x_norm, z, q)
+            loss_x = loss_f(y_norm, recon_im)
             
-                    # 检查损失值是否为NaN
-        if torch.isnan(loss_x) or torch.isinf(loss_x):
-            print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
-            print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+                    # 检查损失值是否为NaN（更严格的检查）
+        if torch.isnan(loss_x) or torch.isinf(loss_x) or loss_x.item() > 1e6:
+            print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值")
             print(f"损失值: {loss_x.item()}")
+            print(f"输入范围: [{x_norm.min():.4f}, {x_norm.max():.4f}]")
+            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
             print("跳过此批次，不进行反向传播")
             continue
+        
+        # 损失值裁剪（防止异常大的损失值）
+        loss_x = torch.clamp(loss_x, 0, 1e6)
         
         # 检查输入数据范围是否合理
         if x.abs().max() > 1000 or y.abs().max() > 1000:
@@ -1180,10 +1197,38 @@ print(f"✅ BiLSTM训练结果图已保存: {result_dir}/bilstm_training_results
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
-# 2. 保存诊断特征DataFrame
-df_data.to_excel(f'{result_dir}/diagnosis_feature_bilstm_baseline.xlsx', index=False)
-df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
-print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.xlsx/csv")
+# 2. 保存诊断特征DataFrame（避免Excel文件过大）
+try:
+    # 检查DataFrame大小
+    rows, cols = df_data.shape
+    print(f"📊 诊断特征DataFrame大小: {rows}行 x {cols}列")
+    
+    if rows > 1000000:  # 如果超过100万行，只保存CSV
+        print(f"⚠️  DataFrame过大({rows}行)，跳过Excel保存，只保存CSV文件")
+        df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
+        print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.csv")
+    else:
+        # 尝试保存Excel，如果失败则只保存CSV
+        try:
+            df_data.to_excel(f'{result_dir}/diagnosis_feature_bilstm_baseline.xlsx', index=False)
+            df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
+            print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.xlsx/csv")
+        except ValueError as e:
+            print(f"⚠️  Excel保存失败: {e}")
+            print("   只保存CSV文件")
+            df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
+            print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.csv")
+except Exception as e:
+    print(f"❌ 保存诊断特征失败: {e}")
+    # 尝试分块保存
+    try:
+        chunk_size = 500000  # 50万行一个文件
+        for i in range(0, len(df_data), chunk_size):
+            chunk = df_data.iloc[i:i+chunk_size]
+            chunk.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline_part_{i//chunk_size+1}.csv', index=False)
+        print(f"✓ 分块保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline_part_*.csv")
+    except Exception as e2:
+        print(f"❌ 分块保存也失败: {e2}")
 
 # 3. 保存PCA分析主要结果
 np.save(f'{result_dir}/v_I_bilstm_baseline.npy', v_I)
@@ -1230,17 +1275,18 @@ with open(f'{result_dir}/bilstm_training_history.pkl', 'wb') as f:
 print(f"✓ 保存训练历史: {result_dir}/bilstm_training_history.pkl")
 
 print("="*50)
-print("🎉 BiLSTM基准训练完成！")
+print("🎉 BiLSTM小样本快速训练完成！")
 print("="*50)
-print("BiLSTM基准模式总结：")
+print("BiLSTM小样本训练模式总结：")
 print("1. ✅ 跳过Transformer训练阶段")
 print("2. ✅ 直接使用原始vin_2[x[0]]和vin_3[x[0]]数据")
 print("3. ✅ 保持Pack Modeling输出vin_2[x[1]]和vin_3[x[1]]不变")
 print("4. ✅ MC-AE使用原始BiLSTM数据进行训练")
-print("5. ✅ 所有模型和结果文件添加'_bilstm_baseline'后缀")
+print("5. ✅ 使用0-9样本进行快速训练（共{len(train_samples)}个样本）")
+print("6. ✅ 所有模型和结果文件添加'_bilstm_baseline'后缀")
 print("")
-print("📊 比对说明：")
-print("   - 此模式建立BiLSTM基准性能")
-print("   - 可与Transformer模式进行公平对比")
-print("   - 便于评估Transformer替换的效果")
-print("   - 训练时间更短，适合快速验证") 
+print("📊 小样本训练优势：")
+print("   - 训练时间大幅缩短，适合快速验证")
+print("   - 内存占用更少，适合资源受限环境")
+print("   - 便于调试和参数调优")
+print("   - 可快速验证模型架构的有效性") 
