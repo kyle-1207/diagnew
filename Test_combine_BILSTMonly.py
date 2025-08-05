@@ -588,32 +588,32 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     trigger_points = []
     marked_regions = []
     
-    # 更宽松的检测参数配置（保持合理的改进效果）
+    # 方案1：大幅放宽触发条件（保持阈值计算不变）
     detection_config = {
         'level_3': {
             'center_threshold': threshold3,
-            'neighbor_threshold': threshold1,  # 降低邻域要求
-            'min_neighbors': 2,  # 5个点中至少2个超过neighbor_threshold（宽松）
+            'neighbor_threshold': threshold1 * 0.7,  # 大幅降低邻域要求
+            'min_neighbors': 1,  # 只需1个邻居超过阈值
             'marking_range': 3,  # 标记±3个点（共7个点）
             'condition': 'severe_fault'
         },
         'level_2': {
             'center_threshold': threshold2,
-            'neighbor_threshold': threshold1,
-            'min_neighbors': 2,  # 5个点中至少2个超过neighbor_threshold（宽松）
+            'neighbor_threshold': threshold1 * 0.7,  # 大幅降低邻域要求
+            'min_neighbors': 1,  # 只需1个邻居超过阈值
             'marking_range': 2,  # 标记±2个点（共5个点）
             'condition': 'moderate_fault'
         },
         'level_1': {
             'center_threshold': threshold1,
-            'neighbor_threshold': threshold1,
-            'min_neighbors': 2,  # 5个点中至少2个超过threshold1（接近原版）
+            'neighbor_threshold': threshold1 * 0.7,  # 降低邻域阈值到70%
+            'min_neighbors': 1,  # 只需1个邻居超过阈值（最宽松）
             'marking_range': 2,  # 标记±2个点（共5个点）
             'condition': 'mild_fault'
         }
     }
     
-    # 第一轮：检测所有触发点和级别（使用改进的严格条件）
+    # 第一轮：检测所有触发点和级别（使用放宽的触发条件）
     triggers = []
     for i in range(2, len(fai_values) - 2):
         neighborhood = fai_values[i-2:i+3]  # 5个点的邻域
@@ -723,6 +723,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     
     print(f"   → 多级检测结果: L1={level_counts['level_1']}, L2={level_counts['level_2']}, L3={level_counts['level_3']}")
     print(f"   → 检测到 {len(triggers)} 个候选触发点, 处理后 {len(trigger_points)} 个实际触发点")
+    print(f"   → 使用放宽条件: 邻域阈值=T1*0.7, 最少邻居数=1")
     
     # 添加改进效果对比
     original_anomaly_count = np.sum(fai_values > threshold1)
