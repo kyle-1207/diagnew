@@ -908,6 +908,8 @@ def prepare_feedback_data(feedback_samples, device, batch_size=1000):
             
             # 添加当前时刻的真实值（从targets中获取前一时刻的值）
             if len(targets_data) > 0:
+                # 确保维度匹配：feedback_inputs[1:] 对应 targets_data[:-1]
+                # 因为feedback_inputs[0]对应targets_data[0]，但feedback_inputs[1]对应targets_data[0]
                 feedback_inputs[1:, 5] = targets_data[:-1, 0]  # 当前时刻电压
                 feedback_inputs[1:, 6] = targets_data[:-1, 1]  # 当前时刻SOC
                 
@@ -915,8 +917,14 @@ def prepare_feedback_data(feedback_samples, device, batch_size=1000):
                 feedback_targets = targets_data[1:]
                 feedback_inputs = feedback_inputs[1:]
                 
-                all_feedback_inputs.append(feedback_inputs)
-                all_feedback_targets.append(feedback_targets)
+                # 确保截断后的维度匹配
+                min_length = min(len(feedback_inputs), len(feedback_targets))
+                if min_length > 0:
+                    feedback_inputs = feedback_inputs[:min_length]
+                    feedback_targets = feedback_targets[:min_length]
+                    
+                    all_feedback_inputs.append(feedback_inputs)
+                    all_feedback_targets.append(feedback_targets)
         
         # 合并所有样本的数据
         if all_feedback_inputs:
@@ -2057,7 +2065,7 @@ def main():
                 loss = criterion(pred_output, batch_target)
                 
                 # 如果有反馈，添加反馈损失
-                if feedback_triggered:
+                if feedback_triggered and 'feedback_loss' in locals():
                     total_loss = loss + 0.1 * feedback_loss  # 反馈损失权重为0.1
                 else:
                     total_loss = loss
