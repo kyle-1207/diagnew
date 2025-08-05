@@ -29,6 +29,10 @@ from torchvision import transforms as tfs
 import scipy.stats as stats
 import seaborn as sns
 import pickle
+# 确保从当前目录导入更新后的Comprehensive_calculation函数
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
 from Comprehensive_calculation import Comprehensive_calculation
 
 # 新增导入
