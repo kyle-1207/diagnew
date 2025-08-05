@@ -587,27 +587,27 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     trigger_points = []
     marked_regions = []
     
-    # 改进的检测参数配置
+    # 改进但适中的检测参数配置（避免过于严格）
     detection_config = {
         'level_3': {
             'center_threshold': threshold3,
             'neighbor_threshold': threshold2,
-            'min_neighbors': 4,  # 5个点中至少4个超过neighbor_threshold
+            'min_neighbors': 3,  # 5个点中至少3个超过neighbor_threshold（适中）
             'marking_range': 4,  # 标记±4个点（共9个点）
             'condition': 'severe_fault'
         },
         'level_2': {
             'center_threshold': threshold2,
             'neighbor_threshold': threshold1,
-            'min_neighbors': 4,  # 5个点中至少4个超过neighbor_threshold（更严格）
+            'min_neighbors': 3,  # 5个点中至少3个超过neighbor_threshold（适中）
             'marking_range': 2,  # 标记±2个点（共5个点）
             'condition': 'moderate_fault'
         },
         'level_1': {
             'center_threshold': threshold1,
             'neighbor_threshold': threshold1,
-            'min_neighbors': 5,  # 5个点全部超过threshold1（最严格）
-            'marking_range': 1,  # 标记±1个点（共3个点）
+            'min_neighbors': 3,  # 5个点中至少3个超过threshold1（适中严格）
+            'marking_range': 2,  # 标记±2个点（共5个点）
             'condition': 'mild_fault'
         }
     }
@@ -721,6 +721,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     }
     
     print(f"   → 多级检测结果: L1={level_counts['level_1']}, L2={level_counts['level_2']}, L3={level_counts['level_3']}")
+    print(f"   → 检测到 {len(triggers)} 个候选触发点, 处理后 {len(trigger_points)} 个实际触发点")
     
     # 添加改进效果对比
     original_anomaly_count = np.sum(fai_values > threshold1)
@@ -728,6 +729,11 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count) if original_anomaly_count > 0 else 0
     
     print(f"   → 降噪效果: 原始异常点={original_anomaly_count}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
+    
+    # 如果没有检测到任何故障，给出提示
+    if detected_fault_count == 0:
+        print(f"   ⚠️  未检测到故障点，可能检测条件过于严格")
+        print(f"   → 建议: 检查阈值设置或进一步放宽检测条件")
     
     return fault_labels, detection_info
 
@@ -989,7 +995,7 @@ def main_test_process():
                 metrics = sample_result.get('performance_metrics', {})
                 detection_info = sample_result.get('detection_info', {})
                 
-                # 5点检测模式
+                # 5点检测模式 - 安全获取检测统计
                 detection_stats = detection_info.get('detection_stats', {})
                 detection_ratio = detection_stats.get('fault_ratio', 0.0)
                 
@@ -1517,7 +1523,7 @@ def create_three_window_visualization(test_results, save_path):
     # === 子图1：检测窗口统计 ===
     ax1 = fig.add_subplot(gs[1, 0])
     
-    detection_stats = detection_info['detection_stats']
+    detection_stats = detection_info.get('detection_stats', {})
     detection_data = [
         detection_stats.get('total_trigger_points', 0),
         detection_stats.get('total_marked_regions', 0), 
