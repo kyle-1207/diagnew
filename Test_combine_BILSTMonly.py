@@ -488,20 +488,16 @@ def three_window_fault_detection(fai_values, threshold1, sample_id):
 
 def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     """
-    基于FAI的5点故障检测机制（新设计）
-    
-    原理：
-    对于故障样本，如果某个采样点高于阈值，且前后相邻点也高于阈值，
-    则将该点及前后2个点（共5个点）都判定为真阳性
+    多级触发5点故障检测机制：高级别优先覆盖重叠区域
     
     Args:
-        fai_values: FAI序列（综合故障指标）
-        threshold1: FAI阈值
-        sample_id: 样本ID（用于记录）
-        config: 配置参数（兼容性参数，实际不使用）
+        fai_values: 综合诊断指标序列
+        threshold1: 一级预警阈值
+        sample_id: 样本ID（用于调试）
+        config: 配置参数（兼容性参数，可包含threshold2, threshold3）
     
     Returns:
-        fault_labels: 故障标签序列 (0=正常, 1=故障)
+        fault_labels: 故障标签序列 (0=正常, 1=轻微故障, 2=中等故障, 3=严重故障)
         detection_info: 检测过程详细信息
     """
     # 初始化输出
@@ -545,66 +541,148 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         print(f"   → fault_labels总和: {np.sum(fault_labels)} (应该为0)")
         return fault_labels, detection_info
     
-    # 故障样本：实施5点检测
+    # 获取多级阈值（严格按照源代码Test_.py的方式）
+    if config and 'threshold2' in config and 'threshold3' in config:
+        threshold2 = config['threshold2']
+        threshold3 = config['threshold3']
+    else:
+        # 按照源代码Test_.py的阈值计算方式
+        nm = 3000
+        mm = len(fai_values)
+        
+        if mm > nm:
+            # 使用后半段数据计算阈值（与源代码一致）
+            baseline_fai = fai_values[nm:mm]
+            mean_fai = np.mean(baseline_fai)
+            std_fai = np.std(baseline_fai)
+            
+            threshold1_calc = mean_fai + 3 * std_fai      # 对应源代码threshold1
+            threshold2 = mean_fai + 4.5 * std_fai        # 对应源代码threshold2  
+            threshold3 = mean_fai + 6 * std_fai          # 对应源代码threshold3
+            
+            # 验证threshold1是否与传入的一致（调试用）
+            print(f"   源代码阈值计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
+        else:
+            # 数据太短，使用全部数据
+            mean_fai = np.mean(fai_values)
+            std_fai = np.std(fai_values)
+            
+            threshold1_calc = mean_fai + 3 * std_fai
+            threshold2 = mean_fai + 4.5 * std_fai
+            threshold3 = mean_fai + 6 * std_fai
+            
+            print(f"   短数据阈值计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
+    
+    # 故障样本：实施多级5点检测
     trigger_points = []
     marked_regions = []
     
-    for i in range(1, len(fai_values) - 1):  # 跳过首尾点，避免越界
-        # 检查当前点及前后相邻点是否都高于阈值
-        current_above = fai_values[i] > threshold1
-        prev_above = fai_values[i-1] > threshold1
-        next_above = fai_values[i+1] > threshold1
+    # 第一轮：检测所有触发点和级别
+    triggers = []
+    for i in range(2, len(fai_values) - 2):
+        neighborhood = fai_values[i-2:i+3]
+        center = fai_values[i]
         
-        if current_above and prev_above and next_above:
-            # 触发5点检测：标记当前点及前后2个点
-            trigger_points.append(i)
+        # 级别3：严重故障（高阈值 + 强一致性）
+        if center > threshold3 and np.sum(neighborhood > threshold2) >= 4:
+            triggers.append({
+                'center': i,
+                'level': 3,
+                'range': (i-2, i+3),
+                'priority': 3,
+                'trigger_condition': 'severe_fault'
+            })
+        # 级别2：中等故障（中阈值 + 中等一致性）
+        elif center > threshold2 and np.sum(neighborhood > threshold1) >= 3:
+            triggers.append({
+                'center': i,
+                'level': 2,
+                'range': (i-1, i+2),
+                'priority': 2,
+                'trigger_condition': 'moderate_fault'
+            })
+        # 级别1：轻微故障（低阈值 + 基本一致性）
+        elif center > threshold1 and np.sum(neighborhood > threshold1) >= 2:
+            triggers.append({
+                'center': i,
+                'level': 1,
+                'range': (i, i+1),
+                'priority': 1,
+                'trigger_condition': 'mild_fault'
+            })
+    
+    # 第二轮：按优先级处理重叠（高级别优先覆盖）
+    processed_triggers = []
+    for level in [3, 2, 1]:  # 从高到低处理
+        level_triggers = [t for t in triggers if t['level'] == level]
+        
+        for trigger in level_triggers:
+            start, end = trigger['range']
+            center = trigger['center']
             
-            # 计算5点区域范围
-            start_region = max(0, i - 2)
-            end_region = min(len(fai_values), i + 3)  # +3因为切片是左闭右开
-            
-            # 标记5点区域
-            fault_labels[start_region:end_region] = 1
+            # 高级别直接覆盖，不考虑已有标记
+            fault_labels[start:end] = level
+            trigger_points.append(center)
             
             # 记录区域信息
-            region_data = fai_values[start_region:end_region]
+            region_data = fai_values[start:end]
             region_stats = {
                 'mean_fai': np.mean(region_data),
                 'max_fai': np.max(region_data),
                 'min_fai': np.min(region_data),
                 'std_fai': np.std(region_data),
-                'length': end_region - start_region
+                'length': end - start
             }
             
             marked_regions.append({
-                'trigger_point': i,
-                'range': (start_region, end_region),
-                'length': end_region - start_region,
+                'trigger_point': center,
+                'level': level,
+                'range': (start, end),
+                'length': end - start,
                 'region_stats': region_stats,
+                'trigger_condition': trigger['trigger_condition'],
                 'trigger_values': {
-                    'prev': fai_values[i-1],
-                    'current': fai_values[i],
-                    'next': fai_values[i+1]
+                    'center': fai_values[center],
+                    'neighborhood_above_t1': np.sum(fai_values[max(0, center-2):min(len(fai_values), center+3)] > threshold1),
+                    'neighborhood_above_t2': np.sum(fai_values[max(0, center-2):min(len(fai_values), center+3)] > threshold2),
+                    'neighborhood_above_t3': np.sum(fai_values[max(0, center-2):min(len(fai_values), center+3)] > threshold3)
                 }
             })
+            
+            processed_triggers.append(trigger)
     
     detection_info['trigger_points'] = trigger_points
     detection_info['marked_regions'] = marked_regions
+    detection_info['processed_triggers'] = processed_triggers
     
     # 为兼容三窗口检测模式的可视化代码，添加空的兼容字段
     detection_info['candidate_points'] = []  # 5点检测模式中不使用，但为兼容性保留
     detection_info['verified_points'] = []   # 5点检测模式中不使用，但为兼容性保留
     
     # 统计信息
+    level_counts = {
+        'level_1': np.sum(fault_labels == 1),
+        'level_2': np.sum(fault_labels == 2),
+        'level_3': np.sum(fault_labels == 3)
+    }
+    
     detection_info['detection_stats'] = {
         'total_trigger_points': len(trigger_points),
         'total_marked_regions': len(marked_regions),
-        'total_fault_points': np.sum(fault_labels),
-        'fault_ratio': np.sum(fault_labels) / len(fault_labels),
-        'detection_mode': 'five_point_fault',
+        'total_fault_points': np.sum(fault_labels > 0),
+        'fault_ratio': np.sum(fault_labels > 0) / len(fault_labels),
+        'detection_mode': 'multi_level_five_point',
+        'level_distribution': level_counts,
         'mean_region_length': np.mean([m['length'] for m in marked_regions]) if marked_regions else 0,
-        'mean_trigger_fai': np.mean([m['trigger_values']['current'] for m in marked_regions]) if marked_regions else 0
+        'mean_trigger_fai': np.mean([m['trigger_values']['center'] for m in marked_regions]) if marked_regions else 0,
+        'thresholds_used': {
+            'threshold1': threshold1,
+            'threshold2': threshold2,
+            'threshold3': threshold3
+        }
     }
+    
+    print(f"   → 多级检测结果: L1={level_counts['level_1']}, L2={level_counts['level_2']}, L3={level_counts['level_3']}")
     
     return fault_labels, detection_info
 
@@ -763,24 +841,13 @@ def process_single_sample(sample_id, models):
     
     print(f"   外部计算阈值: L1={threshold1:.4f}, L2={threshold2:.4f}, L3={threshold3:.4f}")
     
-    # 使用外部计算的阈值重新计算报警等级
-    print("   使用外部阈值重新计算报警等级...")
-    # 直接使用temp_result的结果，但重新计算level和maxlevel
-    lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, old_level, old_maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = temp_result
-    
-    # 使用外部阈值重新计算报警等级
-    level = np.zeros_like(fai, dtype=int)
-    level[fai > threshold1] = 1
-    level[fai > threshold2] = 2
-    level[fai > threshold3] = 3
-    maxlevel = np.max(level)
-    
-    # 显示修正后的报警统计
-    print(f"   修正后报警点数: L1={np.sum(level==1)}, L2={np.sum(level==2)}, L3={np.sum(level==3)}")
-    print(f"   最大报警等级: {maxlevel}")
+    # 直接使用Comprehensive_calculation的结果，不进行二次修正
+    print("   使用Comprehensive_calculation的报警等级结果...")
+    lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, level, maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = temp_result
     
     # 根据检测模式选择检测函数
     if CURRENT_DETECTION_MODE == "five_point":
+        # 5点检测函数内部会按照源代码方式计算threshold2和threshold3
         fault_labels, detection_info = five_point_fault_detection(fai, threshold1, sample_id)
     else:
         fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id)
@@ -909,20 +976,17 @@ def calculate_performance_metrics(test_results):
         
         # 对于每个时间点
         for i, (fai_val, fault_pred) in enumerate(zip(fai_values, fault_labels)):
-            all_true_labels.append(true_label)
+            # 正确的ROC逻辑：使用点级别的真实标签
+            if true_label == 0:  # 正常样本
+                point_true_label = 0  # 正常样本的所有点都是正常的
+            else:  # 故障样本
+                point_true_label = fault_pred  # 故障样本使用5点检测生成的伪标签
+            
+            all_true_labels.append(point_true_label)  # 使用点级别标签
             all_fai_values.append(fai_val)
             
-            # 修正后的ROC逻辑（与Test_combine.py保持一致）：
-            if true_label == 0:  # 正常样本
-                # 正常样本中：fai > threshold 就是FP，fai <= threshold 就是TN
-                prediction = 1 if fai_val > threshold1 else 0
-            else:  # 故障样本
-                # 故障样本中：需要fai > threshold 且 五点检测确认为故障 才是TP
-                if fai_val > threshold1 and fault_pred == 1:
-                    prediction = 1  # TP
-                else:
-                    prediction = 0  # FN
-            
+            # 预测逻辑：基于fai阈值判断
+            prediction = 1 if fai_val > threshold1 else 0
             all_fault_predictions.append(prediction)
     
     # 计算ROC指标
@@ -1017,18 +1081,25 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     for threshold in thresholds:
         tp = fp = tn = fn = 0
         
-        for i, (fai_val, true_label, fault_pred) in enumerate(zip(all_fai, all_labels, all_fault_labels)):
-            if true_label == 0:  # 正常样本
-                if fai_val > threshold:
-                    fp += 1
-                else:
-                    tn += 1
+        for i, (fai_val, sample_label, fault_pred) in enumerate(zip(all_fai, all_labels, all_fault_labels)):
+            # 正确的ROC逻辑：确定每个点的真实标签
+            if sample_label == 0:  # 正常样本
+                point_true_label = 0  # 正常样本的所有点都是正常的
             else:  # 故障样本
-                # 简化：这里用fai阈值代替五点检测确认（与Test_combine.py保持一致）
-                if fai_val > threshold:
-                    tp += 1
-                else:
-                    fn += 1
+                point_true_label = fault_pred  # 故障样本使用5点检测的伪标签
+            
+            # 基于fai阈值的预测
+            point_prediction = 1 if fai_val > threshold else 0
+            
+            # 计算混淆矩阵
+            if point_true_label == 0 and point_prediction == 0:
+                tn += 1  # 真阴性
+            elif point_true_label == 0 and point_prediction == 1:
+                fp += 1  # 假阳性
+            elif point_true_label == 1 and point_prediction == 0:
+                fn += 1  # 假阴性
+            elif point_true_label == 1 and point_prediction == 1:
+                tp += 1  # 真阳性
         
         tpr = tp / (tp + fn) if (tp + fn) > 0 else 0
         fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
