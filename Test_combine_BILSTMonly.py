@@ -727,9 +727,9 @@ def process_single_sample(sample_id, models):
     # 使用预训练的PCA参数进行综合计算
     time = np.arange(df_data.shape[0])
     
-    # 使用预训练的PCA参数进行综合计算（按照源代码方式）
-    print("   进行综合诊断计算...")
-    lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, level, maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = Comprehensive_calculation(
+    # 先进行初步计算获取fai值，用于阈值计算
+    print("   进行初步FAI计算...")
+    temp_result = Comprehensive_calculation(
         df_data.values, 
         pca_params['data_mean'], 
         pca_params['data_std'], 
@@ -741,26 +741,43 @@ def process_single_sample(sample_id, models):
         pca_params['X'], 
         time
     )
+    temp_fai = temp_result[9]  # fai是第10个返回值（索引9）
     
-    # 按照源代码方式计算阈值（在综合计算之后）
+    # 按照源代码方式计算阈值（与源代码保持一致）
     print("   计算报警阈值...")
     nm = 3000  # 固定值，与源代码一致
-    mm = len(fai)  # 数据总长度
+    mm = len(temp_fai)  # 数据总长度
     
     # 确保数据长度足够
     if mm > nm:
         # 使用后半段数据计算阈值
-        threshold1 = np.mean(fai[nm:mm]) + 3*np.std(fai[nm:mm])
-        threshold2 = np.mean(fai[nm:mm]) + 4.5*np.std(fai[nm:mm])
-        threshold3 = np.mean(fai[nm:mm]) + 6*np.std(fai[nm:mm])
+        threshold1 = np.mean(temp_fai[nm:mm]) + 3*np.std(temp_fai[nm:mm])
+        threshold2 = np.mean(temp_fai[nm:mm]) + 4.5*np.std(temp_fai[nm:mm])
+        threshold3 = np.mean(temp_fai[nm:mm]) + 6*np.std(temp_fai[nm:mm])
     else:
         # 数据太短，使用全部数据
         print(f"   ⚠️ 样本{sample_id}数据长度({mm})不足3000，使用全部数据计算阈值")
-        threshold1 = np.mean(fai) + 3*np.std(fai)
-        threshold2 = np.mean(fai) + 4.5*np.std(fai)
-        threshold3 = np.mean(fai) + 6*np.std(fai)
+        threshold1 = np.mean(temp_fai) + 3*np.std(temp_fai)
+        threshold2 = np.mean(temp_fai) + 4.5*np.std(temp_fai)
+        threshold3 = np.mean(temp_fai) + 6*np.std(temp_fai)
     
-    print(f"   计算得到阈值: L1={threshold1:.4f}, L2={threshold2:.4f}, L3={threshold3:.4f}")
+    print(f"   外部计算阈值: L1={threshold1:.4f}, L2={threshold2:.4f}, L3={threshold3:.4f}")
+    
+    # 使用外部计算的阈值重新计算报警等级
+    print("   使用外部阈值重新计算报警等级...")
+    # 直接使用temp_result的结果，但重新计算level和maxlevel
+    lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, old_level, old_maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = temp_result
+    
+    # 使用外部阈值重新计算报警等级
+    level = np.zeros_like(fai, dtype=int)
+    level[fai > threshold1] = 1
+    level[fai > threshold2] = 2
+    level[fai > threshold3] = 3
+    maxlevel = np.max(level)
+    
+    # 显示修正后的报警统计
+    print(f"   修正后报警点数: L1={np.sum(level==1)}, L2={np.sum(level==2)}, L3={np.sum(level==3)}")
+    print(f"   最大报警等级: {maxlevel}")
     
     # 根据检测模式选择检测函数
     if CURRENT_DETECTION_MODE == "five_point":
@@ -789,8 +806,13 @@ def process_single_sample(sample_id, models):
             'fai_std': np.std(fai),
             'fai_max': np.max(fai),
             'fai_min': np.min(fai),
-            'anomaly_count': np.sum(fai > threshold1),
-            'anomaly_ratio': np.sum(fai > threshold1) / len(fai)
+            'anomaly_count': np.sum(fai > threshold1),  # L1阈值异常点数
+            'anomaly_ratio': np.sum(fai > threshold1) / len(fai),
+            'alarm_counts': {
+                'L1': int(np.sum(level==1)),
+                'L2': int(np.sum(level==2)), 
+                'L3': int(np.sum(level==3))
+            }
         }
     }
     
@@ -890,16 +912,16 @@ def calculate_performance_metrics(test_results):
             all_true_labels.append(true_label)
             all_fai_values.append(fai_val)
             
-            # 修正后的ROC逻辑：
+            # 修正后的ROC逻辑（与Test_combine.py保持一致）：
             if true_label == 0:  # 正常样本
-                # 正常样本中：综合诊断值 > 阈值1 就是FP，否则就是TN
+                # 正常样本中：fai > threshold 就是FP，fai <= threshold 就是TN
                 prediction = 1 if fai_val > threshold1 else 0
             else:  # 故障样本
-                # 故障样本中：需要综合诊断值 > 阈值1 且 三窗口确认为故障 才是TP
+                # 故障样本中：需要fai > threshold 且 五点检测确认为故障 才是TP
                 if fai_val > threshold1 and fault_pred == 1:
                     prediction = 1  # TP
                 else:
-                    prediction = 0  # FN (包括：fai_val <= threshold1 或 fault_pred == 0)
+                    prediction = 0  # FN
             
             all_fault_predictions.append(prediction)
     
@@ -1002,8 +1024,8 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
                 else:
                     tn += 1
             else:  # 故障样本
-                # 故障样本：需要fai > threshold 且 三窗口确认为故障 才是TP
-                if fai_val > threshold and fault_pred == 1:
+                # 简化：这里用fai阈值代替五点检测确认（与Test_combine.py保持一致）
+                if fai_val > threshold:
                     tp += 1
                 else:
                     fn += 1
