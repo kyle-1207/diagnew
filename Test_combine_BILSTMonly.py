@@ -723,7 +723,12 @@ def process_single_sample(sample_id, models):
     # 使用预训练的PCA参数进行综合计算
     time = np.arange(df_data.shape[0])
     
-    lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, level, maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = Comprehensive_calculation(
+    # 先计算阈值 - 与源代码保持一致
+    # 这里先进行一次简单的FAI计算来获取阈值，然后再进行完整计算
+    
+    # 快速计算FAI用于阈值确定
+    print("   预计算FAI用于阈值确定...")
+    temp_result = Comprehensive_calculation(
         df_data.values, 
         pca_params['data_mean'], 
         pca_params['data_std'], 
@@ -735,23 +740,43 @@ def process_single_sample(sample_id, models):
         pca_params['X'], 
         time
     )
+    temp_fai = temp_result[9]  # fai是第10个返回值（索引9）
     
-    # 计算阈值 - 与源代码保持一致
     nm = 3000  # 固定值，与源代码一致
-    mm = len(fai)  # 数据总长度
+    mm = len(temp_fai)  # 数据总长度
     
     # 确保数据长度足够
     if mm > nm:
         # 使用后半段数据计算阈值
-        threshold1 = np.mean(fai[nm:mm]) + 3*np.std(fai[nm:mm])
-        threshold2 = np.mean(fai[nm:mm]) + 4.5*np.std(fai[nm:mm])
-        threshold3 = np.mean(fai[nm:mm]) + 6*np.std(fai[nm:mm])
+        threshold1 = np.mean(temp_fai[nm:mm]) + 3*np.std(temp_fai[nm:mm])
+        threshold2 = np.mean(temp_fai[nm:mm]) + 4.5*np.std(temp_fai[nm:mm])
+        threshold3 = np.mean(temp_fai[nm:mm]) + 6*np.std(temp_fai[nm:mm])
     else:
         # 数据太短，使用全部数据
         print(f"   ⚠️ 样本{sample_id}数据长度({mm})不足3000，使用全部数据计算阈值")
-        threshold1 = np.mean(fai) + 3*np.std(fai)
-        threshold2 = np.mean(fai) + 4.5*np.std(fai)
-        threshold3 = np.mean(fai) + 6*np.std(fai)
+        threshold1 = np.mean(temp_fai) + 3*np.std(temp_fai)
+        threshold2 = np.mean(temp_fai) + 4.5*np.std(temp_fai)
+        threshold3 = np.mean(temp_fai) + 6*np.std(temp_fai)
+    
+    print(f"   外部计算阈值: L1={threshold1:.4f}, L2={threshold2:.4f}, L3={threshold3:.4f}")
+    
+    # 使用计算好的阈值进行完整的综合计算
+    print("   使用外部阈值进行完整综合计算...")
+    lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, level, maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = Comprehensive_calculation(
+        df_data.values, 
+        pca_params['data_mean'], 
+        pca_params['data_std'], 
+        pca_params['v'].reshape(len(pca_params['v']), 1), 
+        pca_params['p_k'], 
+        pca_params['v_I'], 
+        pca_params['T_99_limit'], 
+        pca_params['SPE_99_limit'], 
+        pca_params['X'], 
+        time,
+        threshold1,  # 传入外部计算的阈值
+        threshold2,
+        threshold3
+    )
     
     # 根据检测模式选择检测函数
     if CURRENT_DETECTION_MODE == "five_point":
