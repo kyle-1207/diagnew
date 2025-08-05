@@ -517,8 +517,12 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     # 检查是否为故障样本（基于样本ID）
     is_fault_sample = sample_id in TEST_SAMPLES['fault']
     
+    # 调试信息
+    print(f"   样本{sample_id}: 类型={type(sample_id)}, 故障样本列表={TEST_SAMPLES['fault']}, 是故障样本={is_fault_sample}")
+    
     if not is_fault_sample:
         # 正常样本直接返回全0标签
+        print(f"   → 样本{sample_id}为正常样本，返回全0标签")
         detection_info['detection_stats'] = {
             'total_trigger_points': 0,
             'total_marked_regions': 0,
@@ -526,6 +530,9 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             'fault_ratio': 0.0,
             'detection_mode': 'normal_sample'
         }
+        # 确保fault_labels确实是全0
+        fault_labels.fill(0)
+        print(f"   → fault_labels总和: {np.sum(fault_labels)} (应该为0)")
         return fault_labels, detection_info
     
     # 故障样本：实施5点检测
@@ -815,18 +822,10 @@ def main_test_process():
                 # 输出简要结果
                 metrics = sample_result.get('performance_metrics', {})
                 detection_info = sample_result.get('detection_info', {})
-                window_stats = detection_info.get('window_stats', {})
                 
-                # 输出简要结果
-                metrics = sample_result.get('performance_metrics', {})
-                detection_info = sample_result.get('detection_info', {})
-                
-                if CURRENT_DETECTION_MODE == "three_window":
-                    window_stats = detection_info.get('window_stats', {})
-                    detection_ratio = window_stats.get('fault_ratio', 0.0)
-                else:
-                    detection_stats = detection_info.get('detection_stats', {})
-                    detection_ratio = detection_stats.get('fault_ratio', 0.0)
+                # 5点检测模式
+                detection_stats = detection_info.get('detection_stats', {})
+                detection_ratio = detection_stats.get('fault_ratio', 0.0)
                 
                 print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
                       f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
@@ -1314,13 +1313,13 @@ def create_three_window_visualization(test_results, save_path):
     # === 子图1：检测窗口统计 ===
     ax1 = fig.add_subplot(gs[1, 0])
     
-    window_stats = detection_info['window_stats']
+    detection_stats = detection_info['detection_stats']
     detection_data = [
-        window_stats['total_candidates'],
-        window_stats['verified_candidates'], 
-        window_stats['total_fault_points']
+        detection_stats.get('total_trigger_points', 0),
+        detection_stats.get('total_marked_regions', 0), 
+        detection_stats.get('total_fault_points', 0)
     ]
-    detection_labels = ['候选点', '验证点', '故障点']
+    detection_labels = ['触发点', '标记区域', '故障点']
     colors1 = ['orange', 'red', 'darkred']
     
     bars1 = ax1.bar(detection_labels, detection_data, color=colors1, alpha=0.7)
@@ -1379,8 +1378,8 @@ def create_three_window_visualization(test_results, save_path):
         fault_ratio = 0.0
     else:
         detection_info = sample_result.get('detection_info', {})
-        window_stats = detection_info.get('window_stats', {})
-        fault_ratio = window_stats.get('fault_ratio', 0.0)
+        detection_stats = detection_info.get('detection_stats', {})
+        fault_ratio = detection_stats.get('fault_ratio', 0.0)
     
     bars4 = ax4.bar(['BiLSTM'], [fault_ratio], color='blue', alpha=0.7)
     ax4.set_title('BiLSTM\n(故障检测比率)')
@@ -1472,9 +1471,9 @@ def save_test_results(test_results, performance_metrics):
         # 样本详情表
         sample_details = []
         for result in test_results["BILSTM"]:
-            # 安全获取detection_info和window_stats
+            # 安全获取detection_info和detection_stats
             detection_info = result.get('detection_info', {})
-            window_stats = detection_info.get('window_stats', {})
+            detection_stats = detection_info.get('detection_stats', {})
             performance_metrics = result.get('performance_metrics', {})
             
             sample_details.append({
@@ -1484,9 +1483,9 @@ def save_test_results(test_results, performance_metrics):
                 'FAI_Std': performance_metrics.get('fai_std', 0.0),
                 'FAI_Max': performance_metrics.get('fai_max', 0.0),
                 'Anomaly_Ratio': performance_metrics.get('anomaly_ratio', 0.0),
-                'Fault_Detection_Ratio': window_stats.get('fault_ratio', 0.0),
-                'Candidates_Found': window_stats.get('total_candidates', 0),
-                'Verified_Points': window_stats.get('verified_candidates', 0)
+                'Fault_Detection_Ratio': detection_stats.get('fault_ratio', 0.0),
+                'Trigger_Points_Found': detection_stats.get('total_trigger_points', 0),
+                'Marked_Regions': detection_stats.get('total_marked_regions', 0)
             })
         
         sample_df = pd.DataFrame(sample_details)
