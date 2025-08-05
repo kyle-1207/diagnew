@@ -1025,14 +1025,8 @@ def apply_normal_sample_focus_training(transformer, feedback_data, optimizer, cr
         focus_weight = config['normal_sample_focus']['focus_weight']
         total_loss = base_loss * focus_weight + threshold_penalty
         
-        # 反向传播
-        optimizer.zero_grad()
-        total_loss.backward()
-        
-        # 梯度裁剪（防止梯度爆炸）
-        torch.nn.utils.clip_grad_norm_(transformer.parameters(), max_norm=1.0)
-        
-        optimizer.step()
+        # 注意：这里不执行backward，返回loss给主训练循环处理
+        # 避免重复backward导致计算图错误
         
         return total_loss, avg_prediction_error, threshold_info
         
@@ -2042,8 +2036,16 @@ def main():
                             feedback_weight, config['mcae_weight'], config['transformer_weight'], device)
                         
                         print(f"   {feedback_info}")
+                        
+                        # 将反馈损失分离计算图，避免重复backward
+                        if feedback_loss is not None:
+                            feedback_loss_value = feedback_loss.detach()
+                        else:
+                            feedback_loss_value = None
                     else:
                         print(f"   ⚠️ 反馈数据准备失败，跳过反馈训练")
+                        focus_loss = None
+                        feedback_loss_value = None
                     
                     # 记录反馈历史
                     feedback_history.append({
@@ -2079,11 +2081,16 @@ def main():
                 pred_output = transformer(batch_input)
                 loss = criterion(pred_output, batch_target)
                 
-                # 如果有反馈，添加反馈损失
-                if feedback_triggered and 'feedback_loss' in locals():
-                    total_loss = loss + 0.1 * feedback_loss  # 反馈损失权重为0.1
-                else:
-                    total_loss = loss
+                # 如果有反馈，添加反馈相关损失
+                total_loss = loss
+                if feedback_triggered:
+                    # 添加焦点损失（如果存在）
+                    if 'focus_loss' in locals() and focus_loss is not None:
+                        total_loss = total_loss + 0.05 * focus_loss  # 焦点损失权重为0.05
+                    
+                    # 添加反馈损失值（已分离计算图）
+                    if 'feedback_loss_value' in locals() and feedback_loss_value is not None:
+                        total_loss = total_loss + 0.1 * feedback_loss_value  # 反馈损失权重为0.1
             
             # 混合精度反向传播
             scaler.scale(total_loss).backward()
