@@ -203,9 +203,9 @@ def load_test_samples():
         all_samples = df['Num'].tolist()
         all_labels = df['Label'].tolist()
         
-        # 指定测试样本：正常样本10,11 和故障样本335,336
+        # 指定测试样本：正常样本和多个故障样本
         test_normal_samples = ['10', '11']  # 正常样本
-        test_fault_samples = ['335', '336']  # 故障样本
+        test_fault_samples = ['335', '336', '337', '338', '339', '340']  # 故障样本
         
         print(f"📋 从Labels.xls加载测试样本:")
         print(f"   测试正常样本: {test_normal_samples}")
@@ -220,7 +220,7 @@ def load_test_samples():
         print("⚠️  使用默认测试样本")
         return {
             'normal': ['10', '11'],
-            'fault': ['335', '336']
+            'fault': ['335', '336', '337', '338', '339', '340']
         }
 
 TEST_SAMPLES = load_test_samples()
@@ -594,13 +594,13 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     
     detection_config = {
         'center_threshold': threshold1,           # 保持3σ阈值不变
-        'neighbor_threshold': threshold1 * 0.8,  # 邻域阈值降低到80%
+        'neighbor_threshold': threshold1 * 0.7,  # 邻域阈值降低到70%
         'min_neighbors': 1,                      # 只需1个邻居超过阈值
         'marking_range': 2,                      # 标记±2个点（共5个点）
         'condition': 'optimized_fault'
     }
     
-    print(f"   检测参数: 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.8:.4f}, 最少邻居=1个")
+    print(f"   检测参数: 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.7:.4f}, 最少邻居=1个")
     
     # 单级5点检测（策略1实现）
     triggers = []
@@ -697,7 +697,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     
     print(f"   → 策略1检测结果: 检测到故障点={fault_count}个 ({fault_count/len(fault_labels)*100:.2f}%)")
     print(f"   → 触发点数: {len(triggers)}个, 标记区域: {len(marked_regions)}个")
-    print(f"   → 检测参数: 中心阈值=3σ, 邻域阈值=0.8×3σ, 最少邻居=1个")
+    print(f"   → 检测参数: 中心阈值=3σ, 邻域阈值=0.7×3σ, 最少邻居=1个")
     
     # 添加改进效果对比
     original_anomaly_count = np.sum(fai_values > threshold1)
