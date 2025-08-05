@@ -255,6 +255,7 @@ DETECTION_MODES = {
 
 # 当前使用的检测模式
 CURRENT_DETECTION_MODE = "five_point_improved"  # 使用改进的5点检测模式
+# 备选：如果改进版仍然过严格，可以切换回 "five_point" 原版
 
 # 基于FAI的三窗口检测配置
 # 设计原理：
@@ -587,26 +588,26 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     trigger_points = []
     marked_regions = []
     
-    # 改进但适中的检测参数配置（避免过于严格）
+    # 更宽松的检测参数配置（保持合理的改进效果）
     detection_config = {
         'level_3': {
             'center_threshold': threshold3,
-            'neighbor_threshold': threshold2,
-            'min_neighbors': 3,  # 5个点中至少3个超过neighbor_threshold（适中）
-            'marking_range': 4,  # 标记±4个点（共9个点）
+            'neighbor_threshold': threshold1,  # 降低邻域要求
+            'min_neighbors': 2,  # 5个点中至少2个超过neighbor_threshold（宽松）
+            'marking_range': 3,  # 标记±3个点（共7个点）
             'condition': 'severe_fault'
         },
         'level_2': {
             'center_threshold': threshold2,
             'neighbor_threshold': threshold1,
-            'min_neighbors': 3,  # 5个点中至少3个超过neighbor_threshold（适中）
+            'min_neighbors': 2,  # 5个点中至少2个超过neighbor_threshold（宽松）
             'marking_range': 2,  # 标记±2个点（共5个点）
             'condition': 'moderate_fault'
         },
         'level_1': {
             'center_threshold': threshold1,
             'neighbor_threshold': threshold1,
-            'min_neighbors': 3,  # 5个点中至少3个超过threshold1（适中严格）
+            'min_neighbors': 2,  # 5个点中至少2个超过threshold1（接近原版）
             'marking_range': 2,  # 标记±2个点（共5个点）
             'condition': 'mild_fault'
         }
@@ -730,8 +731,67 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     
     print(f"   → 降噪效果: 原始异常点={original_anomaly_count}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
     
-    # 如果没有检测到任何故障，给出提示
-    if detected_fault_count == 0:
+    # 如果没有检测到任何故障，尝试使用更宽松的条件
+    if detected_fault_count == 0 and is_fault_sample:
+        print(f"   ⚠️  未检测到故障点，尝试使用宽松条件重新检测...")
+        
+        # 使用最宽松的条件重新检测
+        fallback_triggers = []
+        for i in range(2, len(fai_values) - 2):
+            center = fai_values[i]
+            neighborhood = fai_values[i-2:i+3]
+            
+            # 最宽松条件：只要中心点超过threshold1且至少1个邻居也超过
+            if center > threshold1 and np.sum(neighborhood > threshold1) >= 2:
+                start_mark = max(0, i - 1)
+                end_mark = min(len(fai_values), i + 2)
+                
+                # 直接标记，不重复处理
+                fault_labels[start_mark:end_mark] = 1
+                trigger_points.append(i)
+                
+                marked_regions.append({
+                    'trigger_point': i,
+                    'level': 1,
+                    'range': (start_mark, end_mark),
+                    'length': end_mark - start_mark,
+                    'region_stats': {
+                        'mean_fai': np.mean(fai_values[start_mark:end_mark]),
+                        'max_fai': np.max(fai_values[start_mark:end_mark]),
+                        'std_fai': np.std(fai_values[start_mark:end_mark]),
+                        'length': end_mark - start_mark
+                    },
+                    'trigger_condition': 'fallback_mild_fault',
+                    'trigger_values': {
+                        'center': center,
+                        'neighborhood_above_t1': np.sum(neighborhood > threshold1)
+                    }
+                })
+        
+        # 重新计算统计信息
+        detected_fault_count = np.sum(fault_labels > 0)
+        level_counts = {
+            'level_1': np.sum(fault_labels == 1),
+            'level_2': np.sum(fault_labels == 2),
+            'level_3': np.sum(fault_labels == 3)
+        }
+        
+        # 更新detection_info
+        detection_info['trigger_points'] = trigger_points
+        detection_info['marked_regions'] = marked_regions
+        detection_info['detection_stats']['total_trigger_points'] = len(trigger_points)
+        detection_info['detection_stats']['total_marked_regions'] = len(marked_regions)
+        detection_info['detection_stats']['total_fault_points'] = detected_fault_count
+        detection_info['detection_stats']['fault_ratio'] = detected_fault_count / len(fault_labels)
+        detection_info['detection_stats']['level_distribution'] = level_counts
+        detection_info['detection_stats']['detection_mode'] = 'fallback_detection'
+        
+        noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count) if original_anomaly_count > 0 else 0
+        
+        print(f"   → 宽松检测结果: L1={level_counts['level_1']}, 触发点={len(trigger_points)}")
+        print(f"   → 宽松降噪效果: 原始异常点={original_anomaly_count}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
+    
+    elif detected_fault_count == 0:
         print(f"   ⚠️  未检测到故障点，可能检测条件过于严格")
         print(f"   → 建议: 检查阈值设置或进一步放宽检测条件")
     
