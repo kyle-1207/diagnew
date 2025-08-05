@@ -39,9 +39,9 @@ from data_loader_transformer import TransformerBatteryDataset, create_transforme
 
 # 激进反馈策略配置 - 专注降低假阳率
 HYBRID_FEEDBACK_CONFIG = {
-    # 数据分组配置（严格按照README规范）
-    'train_samples': list(range(8)),        # QAS 0-7 (8个正常样本)
-    'feedback_samples': [8, 9],             # QAS 8-9 (2个正常反馈样本)
+    # 数据分组配置（快速测试版本）
+    'train_samples': list(range(5)),        # QAS 0-4 (5个正常样本)
+    'feedback_samples': [8],                # QAS 8 (1个正常反馈样本)
     
     # 激进反馈机制配置
     'feedback_frequency': 3,                # 每3个epoch检查一次（大幅提高）
@@ -1113,8 +1113,8 @@ def main():
     print("="*60)
     config = HYBRID_FEEDBACK_CONFIG
     print(f"📊 数据分组:")
-    print(f"   训练样本: {config['train_samples']} (QAS 0-7)")
-    print(f"   反馈样本: {config['feedback_samples']} (QAS 8-9)")
+    print(f"   训练样本: {config['train_samples']} (QAS 0-4, 共{len(config['train_samples'])}个)")
+    print(f"   反馈样本: {config['feedback_samples']} (QAS 8, 共{len(config['feedback_samples'])}个)")
     print(f"🔧 激进反馈机制（专注降低假阳率）:")
     print(f"   反馈频率: 每{config['feedback_frequency']}个epoch （大幅提高）")
     print(f"   反馈启动轮数: 第{config['feedback_start_epoch']}轮 （提前介入）")
@@ -1517,13 +1517,13 @@ def main():
             z = z.to(device)
             q = q.to(device)
             net = net.double()
+            optimizer_mcae.zero_grad()
             recon_im, recon_p = net(x, z, q)
             loss_u = loss_f(y, recon_im)
-            total_loss += loss_u.item()
-            num_batches += 1
-            optimizer_mcae.zero_grad()
             loss_u.backward()
             optimizer_mcae.step()
+            total_loss += loss_u.item()
+            num_batches += 1
         avg_loss = total_loss / num_batches
         train_losses_mcae1.append(avg_loss)
         if epoch % 50 == 0:
@@ -1566,13 +1566,13 @@ def main():
             z = z.to(device)
             q = q.to(device)
             netx = netx.double()
+            optimizer_mcae2.zero_grad()
             recon_im, z = netx(x, z, q)
             loss_x = loss_f(y, recon_im)
-            total_loss += loss_x.item()
-            num_batches += 1
-            optimizer_mcae2.zero_grad()
             loss_x.backward()
             optimizer_mcae2.step()
+            total_loss += loss_x.item()
+            num_batches += 1
         avg_loss = total_loss / num_batches
         train_losses_mcae2.append(avg_loss)
         if epoch % 50 == 0:
@@ -2037,14 +2037,19 @@ def main():
                         
                         print(f"   {feedback_info}")
                         
-                        # 将反馈损失分离计算图，避免重复backward
+                        # 将所有反馈损失分离计算图，避免重复backward
+                        if focus_loss is not None:
+                            focus_loss_value = focus_loss.detach()
+                        else:
+                            focus_loss_value = None
+                            
                         if feedback_loss is not None:
                             feedback_loss_value = feedback_loss.detach()
                         else:
                             feedback_loss_value = None
                     else:
                         print(f"   ⚠️ 反馈数据准备失败，跳过反馈训练")
-                        focus_loss = None
+                        focus_loss_value = None
                         feedback_loss_value = None
                     
                     # 记录反馈历史
@@ -2084,9 +2089,9 @@ def main():
                 # 如果有反馈，添加反馈相关损失
                 total_loss = loss
                 if feedback_triggered:
-                    # 添加焦点损失（如果存在）
-                    if 'focus_loss' in locals() and focus_loss is not None:
-                        total_loss = total_loss + 0.05 * focus_loss  # 焦点损失权重为0.05
+                    # 添加焦点损失（如果存在，已分离计算图）
+                    if 'focus_loss_value' in locals() and focus_loss_value is not None:
+                        total_loss = total_loss + 0.05 * focus_loss_value  # 焦点损失权重为0.05
                     
                     # 添加反馈损失值（已分离计算图）
                     if 'feedback_loss_value' in locals() and feedback_loss_value is not None:
