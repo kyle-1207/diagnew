@@ -841,9 +841,21 @@ def process_single_sample(sample_id, models):
     
     print(f"   外部计算阈值: L1={threshold1:.4f}, L2={threshold2:.4f}, L3={threshold3:.4f}")
     
-    # 直接使用Comprehensive_calculation的结果，不进行二次修正
-    print("   使用Comprehensive_calculation的报警等级结果...")
-    lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, level, maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = temp_result
+    # 使用外部计算的阈值重新计算报警等级（不使用Comprehensive_calculation内部的报警等级）
+    print("   使用外部阈值重新计算报警等级...")
+    lamda, CONTN, t_total, q_total, S, FAI, g, h, kesi, fai, f_time, old_level, old_maxlevel, contTT, contQ, X_ratio, CContn, data_mean, data_std = temp_result
+    
+    # 使用外部计算的阈值重新计算报警等级
+    level = np.zeros_like(fai, dtype=int)
+    level[fai > threshold1] = 1
+    level[fai > threshold2] = 2
+    level[fai > threshold3] = 3
+    maxlevel = np.max(level)
+    
+    # 显示修正后的报警统计
+    print(f"   外部阈值报警点数: L1={np.sum(level==1)}, L2={np.sum(level==2)}, L3={np.sum(level==3)}")
+    print(f"   最大报警等级: {maxlevel}")
+    print(f"   (内部计算的报警点数被忽略，使用外部阈值重新计算)")
     
     # 根据检测模式选择检测函数
     if CURRENT_DETECTION_MODE == "five_point":
@@ -879,7 +891,8 @@ def process_single_sample(sample_id, models):
                 'L1': int(np.sum(level==1)),
                 'L2': int(np.sum(level==2)), 
                 'L3': int(np.sum(level==3))
-            }
+            },
+            'external_thresholds_used': True  # 标记使用了外部阈值
         }
     }
     
