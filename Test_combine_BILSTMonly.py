@@ -230,6 +230,23 @@ MODEL_PATHS = {
     }
 }
 
+# 检测模式配置
+DETECTION_MODES = {
+    "three_window": {
+        "name": "三窗口检测模式",
+        "description": "基于FAI的三窗口故障检测机制（检测->验证->标记）",
+        "function": "three_window_fault_detection"
+    },
+    "five_point": {
+        "name": "5点检测模式", 
+        "description": "对于故障样本，如果某点高于阈值且前后相邻点也高于阈值，则标记该点及前后2个点（共5个点）",
+        "function": "five_point_fault_detection"
+    }
+}
+
+# 当前使用的检测模式
+CURRENT_DETECTION_MODE = "five_point"  # 默认使用新的5点检测模式
+
 # 基于FAI的三窗口检测配置
 # 设计原理：
 # 1. 检测窗口(50采样点=25分钟)：
@@ -260,7 +277,11 @@ print(f"📊 测试配置:")
 print(f"   测试样本: {ALL_TEST_SAMPLES}")
 print(f"   正常样本: {TEST_SAMPLES['normal']}")
 print(f"   故障样本: {TEST_SAMPLES['fault']}")
-print(f"   三窗口参数: {WINDOW_CONFIG}")
+print(f"   检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
+if CURRENT_DETECTION_MODE == "three_window":
+    print(f"   三窗口参数: {WINDOW_CONFIG}")
+else:
+    print(f"   5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
 
 #----------------------------------------模型文件检查------------------------------
 def check_model_files():
@@ -460,6 +481,113 @@ def three_window_fault_detection(fai_values, threshold1, sample_id):
     
     return fault_labels, detection_info
 
+
+def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
+    """
+    基于FAI的5点故障检测机制（新设计）
+    
+    原理：
+    对于故障样本，如果某个采样点高于阈值，且前后相邻点也高于阈值，
+    则将该点及前后2个点（共5个点）都判定为真阳性
+    
+    Args:
+        fai_values: FAI序列（综合故障指标）
+        threshold1: FAI阈值
+        sample_id: 样本ID（用于记录）
+        config: 配置参数（兼容性参数，实际不使用）
+    
+    Returns:
+        fault_labels: 故障标签序列 (0=正常, 1=故障)
+        detection_info: 检测过程详细信息
+    """
+    # 初始化输出
+    fault_labels = np.zeros(len(fai_values), dtype=int)
+    detection_info = {
+        'trigger_points': [],      # 触发5点检测的点
+        'marked_regions': [],      # 标记的5点区域
+        'detection_stats': {},     # 检测统计信息
+        'fai_stats': {            # FAI统计信息
+            'mean': np.mean(fai_values),
+            'std': np.std(fai_values),
+            'max': np.max(fai_values),
+            'min': np.min(fai_values)
+        }
+    }
+    
+    # 检查是否为故障样本（基于样本ID）
+    is_fault_sample = sample_id in TEST_SAMPLES['fault']
+    
+    if not is_fault_sample:
+        # 正常样本直接返回全0标签
+        detection_info['detection_stats'] = {
+            'total_trigger_points': 0,
+            'total_marked_regions': 0,
+            'total_fault_points': 0,
+            'fault_ratio': 0.0,
+            'detection_mode': 'normal_sample'
+        }
+        return fault_labels, detection_info
+    
+    # 故障样本：实施5点检测
+    trigger_points = []
+    marked_regions = []
+    
+    for i in range(1, len(fai_values) - 1):  # 跳过首尾点，避免越界
+        # 检查当前点及前后相邻点是否都高于阈值
+        current_above = fai_values[i] > threshold1
+        prev_above = fai_values[i-1] > threshold1
+        next_above = fai_values[i+1] > threshold1
+        
+        if current_above and prev_above and next_above:
+            # 触发5点检测：标记当前点及前后2个点
+            trigger_points.append(i)
+            
+            # 计算5点区域范围
+            start_region = max(0, i - 2)
+            end_region = min(len(fai_values), i + 3)  # +3因为切片是左闭右开
+            
+            # 标记5点区域
+            fault_labels[start_region:end_region] = 1
+            
+            # 记录区域信息
+            region_data = fai_values[start_region:end_region]
+            region_stats = {
+                'mean_fai': np.mean(region_data),
+                'max_fai': np.max(region_data),
+                'min_fai': np.min(region_data),
+                'std_fai': np.std(region_data),
+                'length': end_region - start_region
+            }
+            
+            marked_regions.append({
+                'trigger_point': i,
+                'range': (start_region, end_region),
+                'length': end_region - start_region,
+                'region_stats': region_stats,
+                'trigger_values': {
+                    'prev': fai_values[i-1],
+                    'current': fai_values[i],
+                    'next': fai_values[i+1]
+                }
+            })
+    
+    detection_info['trigger_points'] = trigger_points
+    detection_info['marked_regions'] = marked_regions
+    
+    # 统计信息
+    detection_info['detection_stats'] = {
+        'total_trigger_points': len(trigger_points),
+        'total_marked_regions': len(marked_regions),
+        'total_fault_points': np.sum(fault_labels),
+        'fault_ratio': np.sum(fault_labels) / len(fault_labels),
+        'detection_mode': 'five_point_fault',
+        'mean_region_length': np.mean([m['length'] for m in marked_regions]) if marked_regions else 0,
+        'mean_trigger_fai': np.mean([m['trigger_values']['current'] for m in marked_regions]) if marked_regions else 0
+    }
+    
+    return fault_labels, detection_info
+
+
 #----------------------------------------数据加载函数------------------------------
 def load_test_sample(sample_id):
     """加载测试样本"""
@@ -608,8 +736,11 @@ def process_single_sample(sample_id, models):
         threshold2 = np.mean(fai) + 4.5*np.std(fai)
         threshold3 = np.mean(fai) + 6*np.std(fai)
     
-    # 三窗口故障检测
-    fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id)
+    # 根据检测模式选择检测函数
+    if CURRENT_DETECTION_MODE == "five_point":
+        fault_labels, detection_info = five_point_fault_detection(fai, threshold1, sample_id)
+    else:
+        fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id)
     
     # 构建结果
     sample_result = {
@@ -649,6 +780,8 @@ def main_test_process():
         "metadata": {
             "test_samples": TEST_SAMPLES,
             "window_config": WINDOW_CONFIG,
+            "detection_modes": DETECTION_MODES,
+            "current_mode": CURRENT_DETECTION_MODE,
             "timestamp": datetime.now().isoformat()
         }
     }
@@ -657,6 +790,8 @@ def main_test_process():
     total_operations = len(ALL_TEST_SAMPLES)  # 4个样本 (2正常+2故障)
     
     print(f"\n🚀 开始BiLSTM模型测试...")
+    print(f"检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
+    print(f"检测描述: {DETECTION_MODES[CURRENT_DETECTION_MODE]['description']}")
     print(f"总共需要处理: {total_operations} 个样本")
     
     with tqdm(total=total_operations, desc="BiLSTM测试进度", 
@@ -682,9 +817,20 @@ def main_test_process():
                 detection_info = sample_result.get('detection_info', {})
                 window_stats = detection_info.get('window_stats', {})
                 
+                # 输出简要结果
+                metrics = sample_result.get('performance_metrics', {})
+                detection_info = sample_result.get('detection_info', {})
+                
+                if CURRENT_DETECTION_MODE == "three_window":
+                    window_stats = detection_info.get('window_stats', {})
+                    detection_ratio = window_stats.get('fault_ratio', 0.0)
+                else:
+                    detection_stats = detection_info.get('detection_stats', {})
+                    detection_ratio = detection_stats.get('fault_ratio', 0.0)
+                
                 print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
                       f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
-                      f"三窗口检测={window_stats.get('fault_ratio', 0.0):.2%}")
+                      f"检测率={detection_ratio:.2%}")
                 
             except Exception as e:
                 print(f"❌ 样本 {sample_id} 处理失败: {e}")
@@ -1382,7 +1528,11 @@ print("="*80)
 print(f"\n📊 测试结果总结:")
 print(f"   • 测试样本: {len(ALL_TEST_SAMPLES)} 个 (正常: {len(TEST_SAMPLES['normal'])}, 故障: {len(TEST_SAMPLES['fault'])})")
 print(f"   • 模型类型: BiLSTM")
-print(f"   • 三窗口检测: 检测({WINDOW_CONFIG['detection_window']}) → 验证({WINDOW_CONFIG['verification_window']}) → 标记({WINDOW_CONFIG['marking_window']})")
+print(f"   • 检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
+if CURRENT_DETECTION_MODE == "three_window":
+    print(f"   • 三窗口参数: 检测({WINDOW_CONFIG['detection_window']}) → 验证({WINDOW_CONFIG['verification_window']}) → 标记({WINDOW_CONFIG['marking_window']})")
+else:
+    print(f"   • 5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
 
 print(f"\n🔬 BiLSTM性能:")
 metrics = performance_metrics["BILSTM"]['classification_metrics']
