@@ -873,8 +873,13 @@ def prepare_feedback_data(feedback_samples, device, batch_size=1000):
                 
                 print(f"   样本{sample_id} targets: 电压{len(terminal_voltages)}点, SOC{len(pack_socs)}点")
                 
-                # 组合目标数据：下一时刻的电压和SOC
-                targets_combined = np.column_stack([terminal_voltages[1:], pack_socs[1:]])
+                # 组合目标数据：使用完整的电压和SOC数据
+                # 确保长度匹配：targets应该与vin1_data长度一致
+                min_target_length = min(len(terminal_voltages), len(pack_socs), sample_length)
+                targets_combined = np.column_stack([
+                    terminal_voltages[:min_target_length], 
+                    pack_socs[:min_target_length]
+                ])
                 targets_tensor = torch.tensor(targets_combined, dtype=torch.float32)
                 all_targets.append(targets_tensor)
         
@@ -887,7 +892,7 @@ def prepare_feedback_data(feedback_samples, device, batch_size=1000):
             min_length = min(sample_lengths)
             for i in range(len(all_vin1_data)):
                 all_vin1_data[i] = all_vin1_data[i][:min_length]
-                all_targets[i] = all_targets[i][:min_length-1]  # targets少一个点
+                all_targets[i] = all_targets[i][:min_length]  # targets与vin1_data长度一致
         
         # 分别处理每个样本，避免长度不匹配问题
         all_feedback_inputs = []
@@ -908,14 +913,24 @@ def prepare_feedback_data(feedback_samples, device, batch_size=1000):
             
             # 添加当前时刻的真实值（从targets中获取前一时刻的值）
             if len(targets_data) > 0:
-                # 确保维度匹配：feedback_inputs[1:] 对应 targets_data[:-1]
-                # 因为feedback_inputs[0]对应targets_data[0]，但feedback_inputs[1]对应targets_data[0]
-                feedback_inputs[1:, 5] = targets_data[:-1, 0]  # 当前时刻电压
-                feedback_inputs[1:, 6] = targets_data[:-1, 1]  # 当前时刻SOC
+                # 确保维度匹配：计算实际可用的长度
+                max_input_length = len(feedback_inputs) - 1  # feedback_inputs[1:]的长度
+                max_target_length = len(targets_data) - 1     # targets_data[:-1]的长度
                 
-                # 对应的目标是下一时刻的值
-                feedback_targets = targets_data[1:]
-                feedback_inputs = feedback_inputs[1:]
+                # 使用最小长度确保维度匹配
+                valid_length = min(max_input_length, max_target_length)
+                
+                if valid_length > 0:
+                    # 安全的索引操作
+                    feedback_inputs[1:1+valid_length, 5] = targets_data[:valid_length, 0]  # 当前时刻电压
+                    feedback_inputs[1:1+valid_length, 6] = targets_data[:valid_length, 1]  # 当前时刻SOC
+                    
+                    # 对应的目标是下一时刻的值，确保长度匹配
+                    feedback_targets = targets_data[1:1+valid_length]
+                    feedback_inputs = feedback_inputs[1:1+valid_length]
+                else:
+                    print(f"   ⚠️ 样本{feedback_samples[i]}数据长度不足，跳过")
+                    continue
                 
                 # 确保截断后的维度匹配
                 min_length = min(len(feedback_inputs), len(feedback_targets))
