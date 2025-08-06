@@ -37,16 +37,30 @@ import time
 # 导入Transformer数据加载器
 from data_loader_transformer import TransformerBatteryDataset, create_transformer_dataloader
 
-# 激进反馈策略配置 - 专注降低假阳率
+# 激进反馈策略配置 - 专注降低假阳率 + 负反馈机制
 HYBRID_FEEDBACK_CONFIG = {
-    # 数据分组配置（小样本测试版本）
-    'train_samples': list(range(6)),        # QAS 0-5 (6个正常样本)
-    'feedback_samples': [6, 7],             # QAS 6-7 (2个正常反馈样本)
+    # 数据分组配置（超小样本测试版本 - 服务器快速测试）
+    'train_samples': list(range(3)),        # QAS 0-2 (3个正常样本)
+    'feedback_samples': [3, 4],             # QAS 3-4 (2个正常反馈样本)
+    'fault_samples': [334, 340],            # 2个故障样本用于负反馈训练
     
     # 小样本反馈机制配置（密切监控）
     'feedback_frequency': 3,                # 每3个epoch检查一次（小样本，提高频率）
     'use_feedback': True,                   # 启用反馈机制
     'feedback_start_epoch': 20,             # 第20轮开始启用反馈（小样本，提前介入）
+    
+    # 🔥 新增：负反馈训练配置
+    'negative_feedback': {
+        'enable': True,                     # 启用负反馈训练
+        'enable_mcae_training': True,       # 启用MC-AE负反馈训练
+        'alpha': 0.3,                       # 负反馈权重
+        'beta': 1.0,                        # 正样本权重
+        'margin': 0.1,                      # 边界间隔
+        'fault_normal_ratio': 0.25,         # 故障样本与正常样本的比例 (1:4)
+        'start_epoch': 30,                  # 从第30轮开始引入负反馈（加快测试）
+        'evaluation_frequency': 20,         # 每20轮评估一次区分度
+        'min_separation': 2.0,              # 最小分离度要求
+    },
     
     # 严格的反馈触发阈值（小样本需要精确控制）
     'false_positive_thresholds': {
@@ -433,6 +447,158 @@ plt.rcParams['font.size'] = 10
 # 阶段4: PCA分析和模型保存
 # - 使用Transformer增强数据训练MC-AE
 # - 进行PCA分析，保存模型和参数
+
+#----------------------------------------负反馈训练组件------------------------------
+class ContrastiveMCAELoss(nn.Module):
+    """
+    对比学习的MC-AE损失函数
+    结合正样本重构损失和负样本排斥损失
+    """
+    def __init__(self, alpha=0.3, beta=1.0, margin=0.1):
+        super(ContrastiveMCAELoss, self).__init__()
+        self.alpha = alpha      # 负反馈权重
+        self.beta = beta        # 正样本权重
+        self.margin = margin    # 边界间隔
+        self.mse_loss = nn.MSELoss()
+        
+    def forward(self, recon_normal, target_normal, recon_fault=None, target_fault=None):
+        """
+        计算对比损失
+        
+        Args:
+            recon_normal: 正常样本重构结果
+            target_normal: 正常样本目标
+            recon_fault: 故障样本重构结果（可选）
+            target_fault: 故障样本目标（可选）
+        """
+        # 正样本重构损失（希望重构误差小）
+        positive_loss = self.mse_loss(recon_normal, target_normal)
+        
+        if recon_fault is not None and target_fault is not None:
+            # 负样本排斥损失（希望重构误差大）
+            negative_recon_error = self.mse_loss(recon_fault, target_fault)
+            
+            # 使用max(0, margin - error)确保误差足够大
+            negative_loss = torch.relu(self.margin - negative_recon_error)
+            
+            # 总损失：促进正样本重构 + 抑制故障样本重构
+            total_loss = self.beta * positive_loss + self.alpha * negative_loss
+            
+            return total_loss, positive_loss, negative_loss
+        else:
+            return positive_loss, positive_loss, torch.tensor(0.0)
+
+def load_fault_samples(fault_sample_ids, device):
+    """加载故障样本数据"""
+    fault_data = []
+    
+    for sample_id in fault_sample_ids:
+        base_path = f'./project/data/QAS/{sample_id}'
+        
+        try:
+            with open(f'{base_path}/vin_2.pkl', 'rb') as f:
+                vin2_fault = pickle.load(f)
+            with open(f'{base_path}/vin_3.pkl', 'rb') as f:
+                vin3_fault = pickle.load(f)
+            
+            # 转换为numpy
+            if hasattr(vin2_fault, 'detach'):
+                vin2_fault = vin2_fault.detach().cpu().numpy()
+            if hasattr(vin3_fault, 'detach'):
+                vin3_fault = vin3_fault.detach().cpu().numpy()
+            
+            fault_data.append({
+                'sample_id': sample_id,
+                'vin2': vin2_fault,
+                'vin3': vin3_fault
+            })
+            print(f"✅ 加载故障样本 {sample_id}: vin2{vin2_fault.shape}, vin3{vin3_fault.shape}")
+            
+        except Exception as e:
+            print(f"⚠️ 故障样本 {sample_id} 加载失败: {e}")
+    
+    return fault_data
+
+def prepare_fault_features(fault_data):
+    """预处理故障样本特征"""
+    fault_vin2_list = []
+    fault_vin3_list = []
+    
+    for sample in fault_data:
+        vin2 = sample['vin2']
+        vin3 = sample['vin3']
+        
+        # 按源代码方式切片
+        dim_x, dim_y, dim_z, dim_q = 2, 110, 110, 3
+        dim_x2, dim_y2, dim_z2, dim_q2 = 2, 110, 110, 4
+        
+        # vin_2切片
+        x_fault = vin2[:, :dim_x]
+        y_fault = vin2[:, dim_x:dim_x + dim_y]
+        z_fault = vin2[:, dim_x + dim_y: dim_x + dim_y + dim_z]
+        q_fault = vin2[:, dim_x + dim_y + dim_z:]
+        
+        # vin_3切片
+        x_fault2 = vin3[:, :dim_x2]
+        y_fault2 = vin3[:, dim_x2:dim_x2 + dim_y2]
+        z_fault2 = vin3[:, dim_x2 + dim_y2: dim_x2 + dim_y2 + dim_z2]
+        q_fault2 = vin3[:, dim_x2 + dim_y2 + dim_z2:]
+        
+        fault_vin2_list.append({
+            'x': x_fault, 'y': y_fault, 'z': z_fault, 'q': q_fault
+        })
+        fault_vin3_list.append({
+            'x': x_fault2, 'y': y_fault2, 'z': z_fault2, 'q': q_fault2
+        })
+    
+    return fault_vin2_list, fault_vin3_list
+
+def evaluate_mcae_discrimination(mcae_model, normal_data, fault_data, device):
+    """评估MC-AE正负样本区分度"""
+    mcae_model.eval()
+    
+    with torch.no_grad():
+        # 正样本重构误差
+        normal_x = torch.tensor(normal_data['x'], dtype=torch.double).to(device)
+        normal_y = torch.tensor(normal_data['y'], dtype=torch.double).to(device)
+        normal_z = torch.tensor(normal_data['z'], dtype=torch.double).to(device)
+        normal_q = torch.tensor(normal_data['q'], dtype=torch.double).to(device)
+        
+        recon_normal, _ = mcae_model(normal_x, normal_z, normal_q)
+        normal_errors = torch.mean((recon_normal - normal_y) ** 2, dim=1).cpu().numpy()
+        
+        # 故障样本重构误差
+        fault_errors_list = []
+        for sample in fault_data:
+            fault_x = torch.tensor(sample['x'], dtype=torch.double).to(device)
+            fault_y = torch.tensor(sample['y'], dtype=torch.double).to(device)
+            fault_z = torch.tensor(sample['z'], dtype=torch.double).to(device)
+            fault_q = torch.tensor(sample['q'], dtype=torch.double).to(device)
+            
+            recon_fault, _ = mcae_model(fault_x, fault_z, fault_q)
+            fault_errors = torch.mean((recon_fault - fault_y) ** 2, dim=1).cpu().numpy()
+            fault_errors_list.extend(fault_errors)
+        
+        fault_errors_all = np.array(fault_errors_list)
+        
+        # 计算区分度指标
+        normal_mean = np.mean(normal_errors)
+        fault_mean = np.mean(fault_errors_all)
+        normal_std = np.std(normal_errors)
+        fault_std = np.std(fault_errors_all)
+        
+        # 分离度指标
+        separation = abs(fault_mean - normal_mean) / (normal_std + fault_std)
+        
+        return {
+            'normal_errors': normal_errors,
+            'fault_errors': fault_errors_all,
+            'separation': separation,
+            'normal_mean': normal_mean,
+            'fault_mean': fault_mean,
+            'normal_std': normal_std,
+            'fault_std': fault_std
+        }
 
 #----------------------------------------复用Train_Transformer.py的TransformerPredictor模型------------------------------
 class TransformerPredictor(nn.Module):
@@ -1115,6 +1281,22 @@ def main():
     print(f"📊 数据分组:")
     print(f"   训练样本: QAS 0-5 (共{len(config['train_samples'])}个正常样本)")
     print(f"   反馈样本: QAS 6-7 (共{len(config['feedback_samples'])}个正常样本)")
+    print(f"   故障样本: QAS {config['fault_samples']} (用于负反馈训练)")
+    
+    print(f"🔥 负反馈训练配置:")
+    neg_config = config['negative_feedback']
+    if neg_config['enable']:
+        print(f"   ✅ 负反馈训练: 已启用")
+        print(f"   负反馈权重 α: {neg_config['alpha']}")
+        print(f"   正样本权重 β: {neg_config['beta']}")
+        print(f"   边界间隔 margin: {neg_config['margin']}")
+        print(f"   故障样本比例: {neg_config['fault_normal_ratio']} (1:4)")
+        print(f"   启动轮数: 第{neg_config['start_epoch']}轮")
+        print(f"   评估频率: 每{neg_config['evaluation_frequency']}轮")
+        print(f"   目标分离度: ≥{neg_config['min_separation']}")
+    else:
+        print(f"   ❌ 负反馈训练: 已禁用")
+    
     print(f"🔧 小样本反馈机制（密切监控）:")
     print(f"   反馈频率: 每{config['feedback_frequency']}个epoch （提高频率）")
     print(f"   反馈启动轮数: 第{config['feedback_start_epoch']}轮 （提前介入）")
@@ -1494,7 +1676,25 @@ def main():
         def __getitem__(self, idx):
             return self.x[idx], self.y[idx], self.z[idx], self.q[idx]
     
-    # 第一组特征（vin_2）的MC-AE训练
+    # 🔥 负反馈训练准备
+    fault_data = None
+    fault_vin2_list = None
+    negative_feedback_config = config['negative_feedback']
+    
+    if negative_feedback_config['enable']:
+        print("\n🔥 负反馈训练模式已启用")
+        print(f"   故障样本: {config['fault_samples']}")
+        print(f"   负反馈参数: α={negative_feedback_config['alpha']}, margin={negative_feedback_config['margin']}")
+        
+        # 加载故障样本
+        fault_data = load_fault_samples(config['fault_samples'], device)
+        if fault_data:
+            fault_vin2_list, fault_vin3_list = prepare_fault_features(fault_data)
+            print(f"✅ 故障样本加载完成: 共{len(fault_vin2_list)}个样本")
+        else:
+            print("⚠️ 故障样本加载失败，将使用传统训练模式")
+    
+    # 第一组特征（vin_2）的MC-AE训练 - 增强版
     print("\n🔧 训练第一组MC-AE模型（vin_2）...")
     train_loader_u = DataLoader(MCDataset(x_recovered, y_recovered, z_recovered, q_recovered), 
                                batch_size=BATCHSIZE_MCAE, shuffle=False)
@@ -1503,14 +1703,33 @@ def main():
                     activation_fn=custom_activation, use_dx_in_forward=True).to(device)
     
     optimizer_mcae = torch.optim.Adam(net.parameters(), lr=LR_MCAE)
-    loss_f = nn.MSELoss()
+    
+    # 选择损失函数
+    if negative_feedback_config['enable'] and fault_vin2_list:
+        loss_f = ContrastiveMCAELoss(
+            alpha=negative_feedback_config['alpha'],
+            beta=negative_feedback_config['beta'], 
+            margin=negative_feedback_config['margin']
+        )
+        print(f"✅ 使用对比学习损失函数")
+        use_negative_feedback = True
+    else:
+        loss_f = nn.MSELoss()
+        print(f"✅ 使用传统MSE损失函数")
+        use_negative_feedback = False
     
     # 记录训练损失
     train_losses_mcae1 = []
+    positive_losses_mcae1 = []
+    negative_losses_mcae1 = []
+    separation_scores = []
     
     for epoch in range(EPOCH_MCAE):
         total_loss = 0
+        total_pos_loss = 0
+        total_neg_loss = 0
         num_batches = 0
+        
         for iteration, (x, y, z, q) in enumerate(train_loader_u):
             x = x.to(device)
             y = y.to(device)
@@ -1519,15 +1738,69 @@ def main():
             net = net.double()
             optimizer_mcae.zero_grad()
             recon_im, recon_p = net(x, z, q)
-            loss_u = loss_f(y, recon_im)
+            
+            # 选择训练模式
+            if use_negative_feedback and epoch >= negative_feedback_config['start_epoch']:
+                # 负反馈训练模式
+                # 随机选择一个故障样本
+                fault_idx = np.random.randint(0, len(fault_vin2_list))
+                fault_sample = fault_vin2_list[fault_idx]
+                
+                # 从故障样本中随机采样
+                fault_size = min(len(x), len(fault_sample['x']))
+                fault_indices = np.random.choice(len(fault_sample['x']), fault_size, replace=False)
+                
+                fault_x = torch.tensor(fault_sample['x'][fault_indices], dtype=torch.double).to(device)
+                fault_y = torch.tensor(fault_sample['y'][fault_indices], dtype=torch.double).to(device)
+                fault_z = torch.tensor(fault_sample['z'][fault_indices], dtype=torch.double).to(device)
+                fault_q = torch.tensor(fault_sample['q'][fault_indices], dtype=torch.double).to(device)
+                
+                recon_fault, _ = net(fault_x, fault_z, fault_q)
+                
+                loss_u, pos_loss, neg_loss = loss_f(recon_im, y, recon_fault, fault_y)
+                total_pos_loss += pos_loss.item()
+                total_neg_loss += neg_loss.item() if isinstance(neg_loss, torch.Tensor) else neg_loss
+                
+            else:
+                # 传统训练模式
+                if use_negative_feedback:
+                    loss_u, pos_loss, neg_loss = loss_f(recon_im, y)
+                    total_pos_loss += pos_loss.item()
+                    total_neg_loss += neg_loss.item() if isinstance(neg_loss, torch.Tensor) else neg_loss
+                else:
+                    loss_u = loss_f(recon_im, y)
+                    total_pos_loss += loss_u.item()
+                    total_neg_loss += 0
+            
             loss_u.backward()
             optimizer_mcae.step()
             total_loss += loss_u.item()
             num_batches += 1
+            
         avg_loss = total_loss / num_batches
+        avg_pos_loss = total_pos_loss / num_batches
+        avg_neg_loss = total_neg_loss / num_batches
+        
         train_losses_mcae1.append(avg_loss)
-        if epoch % 50 == 0:
-            print(f'MC-AE1 Epoch: {epoch:3d} | Average Loss: {avg_loss:.6f}')
+        positive_losses_mcae1.append(avg_pos_loss)
+        negative_losses_mcae1.append(avg_neg_loss)
+        
+        # 评估区分度
+        if (use_negative_feedback and fault_vin2_list and 
+            epoch % negative_feedback_config['evaluation_frequency'] == 0 and epoch > 0):
+            normal_data = {'x': x_recovered.cpu().numpy(), 'y': y_recovered.cpu().numpy(), 
+                          'z': z_recovered.cpu().numpy(), 'q': q_recovered.cpu().numpy()}
+            discrimination_result = evaluate_mcae_discrimination(net, normal_data, fault_vin2_list, device)
+            separation_scores.append(discrimination_result['separation'])
+            
+            if epoch % 50 == 0:
+                print(f'MC-AE1 Epoch: {epoch:3d} | Total: {avg_loss:.6f} | Pos: {avg_pos_loss:.6f} | Neg: {avg_neg_loss:.6f} | Sep: {discrimination_result["separation"]:.3f}')
+        else:
+            if epoch % 50 == 0:
+                if use_negative_feedback:
+                    print(f'MC-AE1 Epoch: {epoch:3d} | Total: {avg_loss:.6f} | Pos: {avg_pos_loss:.6f} | Neg: {avg_neg_loss:.6f}')
+                else:
+                    print(f'MC-AE1 Epoch: {epoch:3d} | Average Loss: {avg_loss:.6f}')
     
     # 获取第一组重构误差
     train_loader2 = DataLoader(MCDataset(x_recovered, y_recovered, z_recovered, q_recovered), 
@@ -1544,7 +1817,7 @@ def main():
     yTrainU = y_recovered.cpu().detach().numpy()
     ERRORU = AA - yTrainU
     
-    # 第二组特征（vin_3）的MC-AE训练
+    # 第二组特征（vin_3）的MC-AE训练 - 增强版
     print("\n🔧 训练第二组MC-AE模型（vin_3）...")
     train_loader_soc = DataLoader(MCDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
                                  batch_size=BATCHSIZE_MCAE, shuffle=False)
@@ -1554,12 +1827,32 @@ def main():
     
     optimizer_mcae2 = torch.optim.Adam(netx.parameters(), lr=LR_MCAE)
     
+    # 选择损失函数（第二组也支持负反馈）
+    if negative_feedback_config['enable'] and fault_vin3_list:
+        loss_f2 = ContrastiveMCAELoss(
+            alpha=negative_feedback_config['alpha'],
+            beta=negative_feedback_config['beta'], 
+            margin=negative_feedback_config['margin']
+        )
+        print(f"✅ MC-AE2使用对比学习损失函数")
+        use_negative_feedback2 = True
+    else:
+        loss_f2 = nn.MSELoss()
+        print(f"✅ MC-AE2使用传统MSE损失函数")
+        use_negative_feedback2 = False
+    
     # 记录训练损失
     train_losses_mcae2 = []
+    positive_losses_mcae2 = []
+    negative_losses_mcae2 = []
+    separation_scores2 = []
     
     for epoch in range(EPOCH_MCAE):
         total_loss = 0
+        total_pos_loss = 0
+        total_neg_loss = 0
         num_batches = 0
+        
         for iteration, (x, y, z, q) in enumerate(train_loader_soc):
             x = x.to(device)
             y = y.to(device)
@@ -1567,16 +1860,68 @@ def main():
             q = q.to(device)
             netx = netx.double()
             optimizer_mcae2.zero_grad()
-            recon_im, z = netx(x, z, q)
-            loss_x = loss_f(y, recon_im)
+            recon_im, z_out = netx(x, z, q)
+            
+            # 选择训练模式
+            if use_negative_feedback2 and epoch >= negative_feedback_config['start_epoch']:
+                # 负反馈训练模式
+                fault_idx = np.random.randint(0, len(fault_vin3_list))
+                fault_sample = fault_vin3_list[fault_idx]
+                
+                fault_size = min(len(x), len(fault_sample['x']))
+                fault_indices = np.random.choice(len(fault_sample['x']), fault_size, replace=False)
+                
+                fault_x = torch.tensor(fault_sample['x'][fault_indices], dtype=torch.double).to(device)
+                fault_y = torch.tensor(fault_sample['y'][fault_indices], dtype=torch.double).to(device)
+                fault_z = torch.tensor(fault_sample['z'][fault_indices], dtype=torch.double).to(device)
+                fault_q = torch.tensor(fault_sample['q'][fault_indices], dtype=torch.double).to(device)
+                
+                recon_fault, _ = netx(fault_x, fault_z, fault_q)
+                
+                loss_x, pos_loss, neg_loss = loss_f2(recon_im, y, recon_fault, fault_y)
+                total_pos_loss += pos_loss.item()
+                total_neg_loss += neg_loss.item() if isinstance(neg_loss, torch.Tensor) else neg_loss
+                
+            else:
+                # 传统训练模式
+                if use_negative_feedback2:
+                    loss_x, pos_loss, neg_loss = loss_f2(recon_im, y)
+                    total_pos_loss += pos_loss.item()
+                    total_neg_loss += neg_loss.item() if isinstance(neg_loss, torch.Tensor) else neg_loss
+                else:
+                    loss_x = loss_f2(recon_im, y)
+                    total_pos_loss += loss_x.item()
+                    total_neg_loss += 0
+            
             loss_x.backward()
             optimizer_mcae2.step()
             total_loss += loss_x.item()
             num_batches += 1
+            
         avg_loss = total_loss / num_batches
+        avg_pos_loss = total_pos_loss / num_batches
+        avg_neg_loss = total_neg_loss / num_batches
+        
         train_losses_mcae2.append(avg_loss)
-        if epoch % 50 == 0:
-            print(f'MC-AE2 Epoch: {epoch:3d} | Average Loss: {avg_loss:.6f}')
+        positive_losses_mcae2.append(avg_pos_loss)
+        negative_losses_mcae2.append(avg_neg_loss)
+        
+        # 评估区分度
+        if (use_negative_feedback2 and fault_vin3_list and 
+            epoch % negative_feedback_config['evaluation_frequency'] == 0 and epoch > 0):
+            normal_data2 = {'x': x_recovered2.cpu().numpy(), 'y': y_recovered2.cpu().numpy(), 
+                           'z': z_recovered2.cpu().numpy(), 'q': q_recovered2.cpu().numpy()}
+            discrimination_result2 = evaluate_mcae_discrimination(netx, normal_data2, fault_vin3_list, device)
+            separation_scores2.append(discrimination_result2['separation'])
+            
+            if epoch % 50 == 0:
+                print(f'MC-AE2 Epoch: {epoch:3d} | Total: {avg_loss:.6f} | Pos: {avg_pos_loss:.6f} | Neg: {avg_neg_loss:.6f} | Sep: {discrimination_result2["separation"]:.3f}')
+        else:
+            if epoch % 50 == 0:
+                if use_negative_feedback2:
+                    print(f'MC-AE2 Epoch: {epoch:3d} | Total: {avg_loss:.6f} | Pos: {avg_pos_loss:.6f} | Neg: {avg_neg_loss:.6f}')
+                else:
+                    print(f'MC-AE2 Epoch: {epoch:3d} | Average Loss: {avg_loss:.6f}')
     
     # 获取第二组重构误差
     train_loaderx2 = DataLoader(MCDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
@@ -1597,6 +1942,61 @@ def main():
     print(f"   MC-AE1最终损失: {train_losses_mcae1[-1]:.6f}")
     print(f"   MC-AE2最终损失: {train_losses_mcae2[-1]:.6f}")
     print(f"   训练参数: 轮数{EPOCH_MCAE}, 学习率{LR_MCAE}, 批次{BATCHSIZE_MCAE}")
+    
+    # 🔥 负反馈效果评估总结
+    if negative_feedback_config['enable'] and (fault_vin2_list or fault_vin3_list):
+        print("\n" + "🔥"*50)
+        print("🔥 负反馈训练效果评估报告")
+        print("🔥"*50)
+        
+        # MC-AE1评估
+        if fault_vin2_list and use_negative_feedback:
+            print(f"\n📊 MC-AE1 (电压) 负反馈效果:")
+            print(f"   最终正样本损失: {positive_losses_mcae1[-1]:.6f}")
+            print(f"   最终负样本损失: {negative_losses_mcae1[-1]:.6f}")
+            if separation_scores:
+                print(f"   最终分离度: {separation_scores[-1]:.3f}")
+                print(f"   分离度变化: {separation_scores[0]:.3f} → {separation_scores[-1]:.3f}")
+                if separation_scores[-1] > separation_scores[0]:
+                    print("   ✅ 分离度提升，负反馈效果良好!")
+                else:
+                    print("   ⚠️ 分离度下降，需要调整负反馈参数")
+            
+            # 最终区分度评估
+            normal_data = {'x': x_recovered.cpu().numpy(), 'y': y_recovered.cpu().numpy(), 
+                          'z': z_recovered.cpu().numpy(), 'q': q_recovered.cpu().numpy()}
+            final_discrimination = evaluate_mcae_discrimination(net, normal_data, fault_vin2_list, device)
+            print(f"   正常样本误差: {final_discrimination['normal_mean']:.6f} ± {final_discrimination['normal_std']:.6f}")
+            print(f"   故障样本误差: {final_discrimination['fault_mean']:.6f} ± {final_discrimination['fault_std']:.6f}")
+            
+        # MC-AE2评估
+        if fault_vin3_list and use_negative_feedback2:
+            print(f"\n📊 MC-AE2 (SOC) 负反馈效果:")
+            print(f"   最终正样本损失: {positive_losses_mcae2[-1]:.6f}")
+            print(f"   最终负样本损失: {negative_losses_mcae2[-1]:.6f}")
+            if separation_scores2:
+                print(f"   最终分离度: {separation_scores2[-1]:.3f}")
+                print(f"   分离度变化: {separation_scores2[0]:.3f} → {separation_scores2[-1]:.3f}")
+                if separation_scores2[-1] > separation_scores2[0]:
+                    print("   ✅ 分离度提升，负反馈效果良好!")
+                else:
+                    print("   ⚠️ 分离度下降，需要调整负反馈参数")
+            
+            # 最终区分度评估
+            normal_data2 = {'x': x_recovered2.cpu().numpy(), 'y': y_recovered2.cpu().numpy(), 
+                           'z': z_recovered2.cpu().numpy(), 'q': q_recovered2.cpu().numpy()}
+            final_discrimination2 = evaluate_mcae_discrimination(netx, normal_data2, fault_vin3_list, device)
+            print(f"   正常样本误差: {final_discrimination2['normal_mean']:.6f} ± {final_discrimination2['normal_std']:.6f}")
+            print(f"   故障样本误差: {final_discrimination2['fault_mean']:.6f} ± {final_discrimination2['fault_std']:.6f}")
+        
+        print(f"\n💡 负反馈训练参数:")
+        print(f"   α (负反馈权重): {negative_feedback_config['alpha']}")
+        print(f"   margin (边界间隔): {negative_feedback_config['margin']}")
+        print(f"   故障样本: {config['fault_samples']}")
+        print(f"   启动轮数: {negative_feedback_config['start_epoch']}")
+        print("🔥"*50)
+    else:
+        print("\n📋 使用传统MC-AE训练模式（未启用负反馈）")
     
     #----------------------------------------阶段3: 混合反馈训练------------------------------
     print("\n" + "="*60)
