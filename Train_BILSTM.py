@@ -31,9 +31,9 @@ import scipy.stats as stats
 import seaborn as sns
 import pickle
 
-# GPU设备配置
+# GPU设备配置（指定使用GPU2）
 import os
-# 使用指定的GPU设备
+# 使用指定的GPU设备（GPU2和GPU3可用，当前使用GPU2）
 os.environ['CUDA_VISIBLE_DEVICES'] = '2'  # 只使用GPU2
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')  # 这里的cuda:0实际上是物理GPU2
 
@@ -45,52 +45,53 @@ if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(i)
         print(f"\n   GPU {i} ({props.name}):")
         print(f"      总显存: {props.total_memory/1024**3:.1f}GB")
-    print(f"\n   当前使用: 仅GPU2 (小样本训练优化，避免跨卡通信开销)")
+    print(f"\n   当前使用: 仅GPU2 (101样本训练，单卡优化)")
     print(f"   主GPU设备: cuda:0 (物理GPU2)")
+    print(f"   备注: GPU2和GPU3可用，样本更多时考虑跨卡训练")
 else:
     print("⚠️  未检测到GPU，使用CPU训练")
 
 # 中文注释：忽略警告信息
 warnings.filterwarnings('ignore')
 
-#----------------------------------------BiLSTM基准训练配置------------------------------
+#----------------------------------------BiLSTM统一训练配置------------------------------
 print("="*50)
-print("BiLSTM基准训练模式（优化版本）")
+print("BiLSTM统一训练模式（与Transformer脚本对齐）")
 print("直接使用原始vin_2[x[0]]和vin_3[x[0]]数据")
 print("跳过Transformer训练，直接进行MC-AE训练")
-print("启用双GPU数据并行和混合精度训练")
+print("统一配置：大数据量 + 混合精度训练 + 单卡GPU2优化")
 print("="*50)
 
 #----------------------------------------数据加载------------------------------
 # 从Labels.xls加载训练样本ID（0-200号）
 def load_train_samples():
-    """从Labels.xls加载训练样本ID（小样本快速训练版本）"""
+    """从Labels.xls加载训练样本ID（与Transformer统一版本）"""
     try:
         import pandas as pd
-        labels_path = '../QAS/Labels.xls'
+        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
         df = pd.read_excel(labels_path)
         
-        # 提取0-9范围的样本作为训练数据
+        # 提取0-100范围的样本作为训练数据（与Transformer统一）
         all_samples = df['Num'].tolist()
-        train_samples = [i for i in all_samples if 0 <= i <= 9]
+        train_samples = [i for i in all_samples if 0 <= i <= 100]
         
-        print(f"📋 从Labels.xls加载训练样本（小样本快速训练）:")
-        print(f"   训练样本范围: 0-9")
+        print(f"📋 从Labels.xls加载训练样本（与Transformer统一）:")
+        print(f"   训练样本范围: 0-100")
         print(f"   实际可用样本: {len(train_samples)} 个")
-        print(f"   样本ID: {train_samples}")
+        print(f"   样本ID: {train_samples[:10]}{'...' if len(train_samples) > 10 else ''}")
         
         return train_samples
     except Exception as e:
         print(f"❌ 加载Labels.xls失败: {e}")
-        print("⚠️  使用默认样本范围 0-9")
-        return list(range(10))
+        print("⚠️  使用默认样本范围 0-100")
+        return list(range(101))
 
 train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
 # 定义训练参数（与源代码Train_.py完全一致）
 EPOCH = 300  # 恢复源代码的300轮训练
-INIT_LR = 5e-4  # 与源代码LR=5e-4一致  
+INIT_LR = 8e-4  # 与Transformer统一，大数据量下适当提高学习率  
 MAX_LR = 5e-4   # 保持与源代码一致
 BATCHSIZE = 100  # 恢复源代码的100批次大小
 WARMUP_EPOCHS = 5  # 预热轮数
@@ -104,20 +105,21 @@ def get_lr(epoch):
     return INIT_LR  # 使用固定学习率，参考源代码
 
 # 显示训练参数（与源代码Train_.py对齐）
-print(f"\n⚙️  BiLSTM训练参数（与源代码Train_.py完全一致）:")
+print(f"\n⚙️  BiLSTM训练参数（与Transformer脚本统一）:")
+print(f"   训练样本: 0-100 (共{len(train_samples)}个样本) - 与Transformer统一")
 print(f"   训练轮数: {EPOCH} (源代码: 300)")
-print(f"   学习率: {INIT_LR} (源代码: 5e-4)")
+print(f"   学习率: {INIT_LR} (与Transformer统一: 8e-4)")
 print(f"   批次大小: {BATCHSIZE} (源代码: 100)")
 print(f"   预热轮数: {WARMUP_EPOCHS}")
 print(f"   最大梯度阈值: {MAX_GRAD_NORM}")
 print(f"   最小梯度阈值: {MIN_GRAD_NORM}")
 print(f"   学习率调度: 固定学习率 (与源代码一致)")
-print(f"   数据并行: 禁用（单GPU优化）")
-print(f"   混合精度: 禁用 (与源代码一致)")
+print(f"   GPU配置: 固定GPU2 (单卡优化，样本更多时考虑跨卡)")
+print(f"   混合精度: 启用 (与Transformer统一)")
+print(f"   数据路径: 绝对路径 (与Transformer统一)")
 print(f"   数据类型: float32 (与源代码一致)")
 print(f"   激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid (与源代码一致)")
 print(f"   梯度处理: 简化版本 (与源代码一致)")
-print(f"   训练样本: 0-9 (共{len(train_samples)}个样本)")
 
 #----------------------------------------MC-AE训练数据准备（直接使用原始数据）------------------------
 print("="*50)
@@ -630,8 +632,8 @@ print("📥 开始数据加载和质量检查")
 print("="*60)
 
 for sample_id in train_samples:
-    vin2_path = f'../QAS/{sample_id}/vin_2.pkl'
-    vin3_path = f'../QAS/{sample_id}/vin_3.pkl'
+    vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
+    vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
     
     # 加载原始vin_2数据
     try:
@@ -793,9 +795,9 @@ optimizer = torch.optim.Adam(net.parameters(), lr=INIT_LR)
 l1_lambda = 0.01
 loss_f = nn.MSELoss()
 
-# 禁用混合精度训练（参考源代码）
-# scaler = torch.cuda.amp.GradScaler()
-# print("✅ 启用混合精度训练 (AMP)")
+# 启用混合精度训练（与Transformer统一）
+scaler = torch.cuda.amp.GradScaler()
+print("✅ 启用混合精度训练 (AMP)")
 
 # 启用CUDA性能优化
 torch.backends.cudnn.benchmark = True
@@ -830,12 +832,15 @@ for epoch in range(EPOCH):
             print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
             continue
         
-        # 使用原始数据，按照源代码的方式处理
-        net = net.float()  # 确保模型使用float32
-        recon_im, recon_p = net(x, z, q)
-        loss_u = loss_f(y, recon_im)
+        # 使用混合精度训练（与Transformer统一）
+        optimizer.zero_grad()
+        
+        with torch.cuda.amp.autocast():
+            net = net.float()  # 确保模型使用float32
+            recon_im, recon_p = net(x, z, q)
+            loss_u = loss_f(y, recon_im)
             
-                    # 简化损失检查（参考源代码）
+        # 简化损失检查（参考源代码）
         if torch.isnan(loss_u) or torch.isinf(loss_u):
             print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
             continue
@@ -849,8 +854,9 @@ for epoch in range(EPOCH):
         
         total_loss += loss_u.item()
         num_batches += 1
-        optimizer.zero_grad()
-        loss_u.backward()
+        
+        # 混合精度反向传播
+        scaler.scale(loss_u).backward()
         
         # 简化的梯度处理（参考源代码）
         grad_norm = torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
@@ -861,7 +867,9 @@ for epoch in range(EPOCH):
         # 收集梯度范数用于监控
         grad_norms.append(grad_norm.item())
             
-        optimizer.step()
+        # 混合精度优化器步骤
+        scaler.step(optimizer)
+        scaler.update()
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
@@ -900,8 +908,8 @@ train_loader_soc = DataLoader(MultiInputDataset(x_recovered2, y_recovered2, z_re
 optimizer = torch.optim.Adam(netx.parameters(), lr=INIT_LR)
 loss_f = nn.MSELoss()
 
-# 禁用混合精度训练（参考源代码）
-# scaler2 = torch.cuda.amp.GradScaler()
+# 启用混合精度训练（与Transformer统一）
+scaler2 = torch.cuda.amp.GradScaler()
 
 avg_loss_list_x = []
 for epoch in range(EPOCH):
@@ -933,12 +941,15 @@ for epoch in range(EPOCH):
             print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
             continue
         
-        # 使用原始数据，按照源代码的方式处理
-        netx = netx.float()  # 确保模型使用float32
-        recon_im, z = netx(x, z, q)
-        loss_x = loss_f(y, recon_im)
+        # 使用混合精度训练（与Transformer统一）
+        optimizer.zero_grad()
+        
+        with torch.cuda.amp.autocast():
+            netx = netx.float()  # 确保模型使用float32
+            recon_im, z = netx(x, z, q)
+            loss_x = loss_f(y, recon_im)
             
-                    # 简化损失检查（参考源代码）
+        # 简化损失检查（参考源代码）
         if torch.isnan(loss_x) or torch.isinf(loss_x):
             print(f"MC-AE2警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
             continue
@@ -952,8 +963,9 @@ for epoch in range(EPOCH):
         
         total_loss += loss_x.item()
         num_batches += 1
-        optimizer.zero_grad()
-        loss_x.backward()
+        
+        # 混合精度反向传播
+        scaler2.scale(loss_x).backward()
         
         # 简化的梯度处理（参考源代码）
         grad_norm = torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
@@ -964,7 +976,9 @@ for epoch in range(EPOCH):
         # 收集梯度范数用于监控
         grad_norms_x.append(grad_norm.item())
             
-        optimizer.step()
+        # 混合精度优化器步骤
+        scaler2.step(optimizer)
+        scaler2.update()
     
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
