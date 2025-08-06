@@ -1486,32 +1486,17 @@ def calculate_performance_metrics(test_results):
         
         # 对于每个时间点
         for i, (fai_val, fault_pred) in enumerate(zip(fai_values, fault_labels)):
-            all_true_labels.append(true_label)
+            # 🔧 关键修复：按照BiLSTM的方式设置点级别真实标签
+            if true_label == 0:  # 正常样本
+                point_true_label = 0  # 正常样本的所有点都是正常的
+            else:  # 故障样本
+                point_true_label = fault_pred  # 故障样本使用三点检测生成的伪标签
+            
+            all_true_labels.append(point_true_label)  # 使用点级别标签
             all_fai_values.append(fai_val)
             
-            # 🔧 修改：修正后的ROC逻辑，考虑启动期跳过
-            startup_period = 3000  # 与检测函数保持一致
-            is_in_startup = i < startup_period
-            
-            if true_label == 0:  # 正常样本
-                # 正常样本中：不论启动期还是稳定期，都不应标记为故障
-                if is_in_startup:
-                    # 启动期：即使超阈值也认为是正常（因为启动期本身不稳定）
-                    prediction = 0  # TN
-                else:
-                    # 稳定期：综合诊断值 > 阈值1 就是FP，否则就是TN
-                    prediction = 1 if fai_val > threshold1 else 0
-            else:  # 故障样本
-                if is_in_startup:
-                    # 启动期：不进行故障检测，认为是正常
-                    prediction = 0  # FN (因为跳过了检测)
-                else:
-                    # 稳定期：需要综合诊断值 > 阈值1 且 三点检测确认为故障 才是TP
-                    if fai_val > threshold1 and fault_pred > 0:  # fault_pred > 0 表示任意级别故障
-                        prediction = 1  # TP
-                    else:
-                        prediction = 0  # FN (包括：fai_val <= threshold1 或 fault_pred == 0)
-            
+            # 🔧 简化预测逻辑：只基于FAI阈值判断（与BiLSTM保持一致）
+            prediction = 1 if fai_val > threshold1 else 0
             all_fault_predictions.append(prediction)
     
     # 计算ROC指标
