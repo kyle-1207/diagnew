@@ -624,12 +624,12 @@ def three_window_fault_detection(fai_values, threshold1, sample_id, config=None)
 
 def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     """
-    改进的5点故障检测机制：增强连续性检测和降噪能力
+    改进的5点故障检测机制：基于源代码设计，从3001点开始检测
     
-    设计原理：
-    1. 严格的触发条件：要求中心点及其邻域满足更严格的一致性
-    2. 合理的标记范围：根据故障级别标记不同大小的区域
-    3. 有效的降噪机制：过滤孤立异常点，关注持续性故障
+    设计原理（符合源代码思路）：
+    1. 前3000点为系统启动/不稳定期，不进行故障检测
+    2. 从第3001点开始应用三级分层检测机制
+    3. 与阈值计算基线保持一致（都使用3000点后的数据）
     
     Args:
         fai_values: 综合诊断指标序列
@@ -641,6 +641,9 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         fault_labels: 故障标签序列 (0=正常, 1=轻微故障, 2=中等故障, 3=严重故障)
         detection_info: 检测过程详细信息
     """
+    # 🔧 关键修改：符合源代码设计，前3000点不检测
+    STARTUP_PERIOD = 3000  # 源代码中的nm值，启动/不稳定期
+    
     # 初始化输出
     fault_labels = np.zeros(len(fai_values), dtype=int)
     detection_info = {
@@ -652,8 +655,26 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             'std': np.std(fai_values),
             'max': np.max(fai_values),
             'min': np.min(fai_values)
-        }
+        },
+        'startup_period': STARTUP_PERIOD,  # 记录启动期长度
+        'effective_detection_length': max(0, len(fai_values) - STARTUP_PERIOD)  # 有效检测长度
     }
+    
+    # 检查数据长度是否足够
+    if len(fai_values) <= STARTUP_PERIOD:
+        print(f"   ⚠️ 警告：数据长度({len(fai_values)})不足启动期({STARTUP_PERIOD})，无法进行有效检测")
+        detection_info['detection_stats'] = {
+            'total_trigger_points': 0,
+            'total_marked_regions': 0,
+            'total_fault_points': 0,
+            'fault_ratio': 0.0,
+            'detection_mode': 'insufficient_data',
+            'skip_reason': f'data_length_{len(fai_values)}_less_than_startup_{STARTUP_PERIOD}'
+        }
+        return fault_labels, detection_info
+    
+    print(f"   📊 检测配置：跳过前{STARTUP_PERIOD}点（启动期），从第{STARTUP_PERIOD+1}点开始检测")
+    print(f"   📊 有效检测长度：{len(fai_values) - STARTUP_PERIOD}点")
     
     # 🔧 关键修复：确保样本ID类型一致性检查
     # 将sample_id转换为字符串进行比较
@@ -677,15 +698,23 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         is_fault_sample = True
     
     if not is_fault_sample:
-        # 🔧 关键修复：正常样本不进行故障检测，所有采样点都是正常的
-        print(f"   → 样本{sample_id}为正常样本，所有采样点标记为正常（不进行故障检测）")
+        # 🔧 关键修复：正常样本不进行故障检测，前3000点为启动期，后续点也不检测故障
+        print(f"   → 样本{sample_id}为正常样本，前{STARTUP_PERIOD}点为启动期，其余点也不检测故障")
         print(f"   → 正常样本中超过阈值的点都是假阳性（误报），不应标记为故障")
         
-        # 统计正常样本中的假阳性情况（仅用于分析，不标记为故障）
-        false_positive_count = np.sum(fai_values > threshold1)
-        false_positive_ratio = false_positive_count / len(fai_values)
+        # 分别统计启动期和稳定期的假阳性
+        startup_fai = fai_values[:STARTUP_PERIOD] if len(fai_values) > STARTUP_PERIOD else fai_values
+        stable_fai = fai_values[STARTUP_PERIOD:] if len(fai_values) > STARTUP_PERIOD else []
         
-        print(f"   → 假阳性统计: {false_positive_count}个点超阈值 ({false_positive_ratio:.2%})")
+        startup_fp = np.sum(startup_fai > threshold1) if len(startup_fai) > 0 else 0
+        stable_fp = np.sum(stable_fai > threshold1) if len(stable_fai) > 0 else 0
+        total_fp = startup_fp + stable_fp
+        
+        print(f"   → 假阳性统计:")
+        print(f"     启动期({STARTUP_PERIOD}点): {startup_fp}个超阈值 ({startup_fp/len(startup_fai)*100:.1f}%)")
+        if len(stable_fai) > 0:
+            print(f"     稳定期({len(stable_fai)}点): {stable_fp}个超阈值 ({stable_fp/len(stable_fai)*100:.1f}%)")
+        print(f"     总计: {total_fp}个超阈值 ({total_fp/len(fai_values)*100:.1f}%)")
         
         detection_info['detection_stats'] = {
             'total_trigger_points': 0,
@@ -693,8 +722,12 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             'total_fault_points': 0,
             'fault_ratio': 0.0,
             'detection_mode': 'normal_sample',
-            'false_positive_count': false_positive_count,
-            'false_positive_ratio': false_positive_ratio
+            'startup_false_positives': startup_fp,
+            'stable_false_positives': stable_fp,
+            'total_false_positives': total_fp,
+            'startup_fp_ratio': startup_fp/len(startup_fai) if len(startup_fai) > 0 else 0,
+            'stable_fp_ratio': stable_fp/len(stable_fai) if len(stable_fai) > 0 else 0,
+            'total_fp_ratio': total_fp/len(fai_values)
         }
         # 为兼容性添加空字段
         detection_info['trigger_points'] = []
@@ -741,9 +774,10 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             
             print(f"   短数据重新计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
     
-    # 🔧 故障样本：使用3点检测方式找出真正的故障采样点
-    print(f"   → 样本{sample_id}为故障样本，开始故障采样点检测")
-    print(f"   → 说明：故障样本中有些采样点是故障的，有些是正常的")
+    # 🔧 故障样本：从3001点开始进行故障检测（符合源代码设计）
+    print(f"   → 样本{sample_id}为故障样本，从第{STARTUP_PERIOD+1}点开始故障采样点检测")
+    print(f"   → 说明：前{STARTUP_PERIOD}点为启动期，故障检测从稳定期开始")
+    print(f"   → 故障样本中稳定期的采样点有些是故障的，有些是正常的")
     print(f"   → 目标：通过3点检测方式识别真正的故障采样点")
     
     trigger_points = []
@@ -784,9 +818,14 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     print(f"   Level 2 (4.5σ): 中心阈值={threshold2:.4f}, 邻域阈值={threshold1:.4f}, 最少邻居=1个, 标记3点")
     print(f"   Level 1 (3σ): 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.67:.4f}, 最少邻居=1个, 标记3点")
     
-    # 三级分级检测实现
+    # 🔧 关键修改：三级分级检测实现，从STARTUP_PERIOD+2开始（确保邻域完整）
     triggers = []
-    for i in range(2, len(fai_values) - 2):
+    detection_start = max(STARTUP_PERIOD + 2, 2)  # 确保既跳过启动期，又有足够邻域
+    detection_end = len(fai_values) - 2
+    
+    print(f"   🔍 检测范围：索引[{detection_start}:{detection_end}]，共{detection_end - detection_start}个检测点")
+    
+    for i in range(detection_start, detection_end):
         neighborhood = fai_values[i-2:i+3]  # 5个点的邻域
         neighbors = [fai_values[i-2], fai_values[i-1], fai_values[i+1], fai_values[i+2]]  # 4个邻居
         center = fai_values[i]
@@ -910,8 +949,9 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     detection_info['candidate_points'] = []  # 5点检测模式中不使用，但为兼容性保留
     detection_info['verified_points'] = []   # 5点检测模式中不使用，但为兼容性保留
     
-    # 统计信息（分级检测）
-    fault_count = np.sum(fault_labels > 0)  # 任何级别都算故障
+    # 🔧 修改：统计信息（分级检测，基于有效区域）
+    fault_count = np.sum(fault_labels > 0)  # 任何级别都算故障（全序列）
+    effective_fault_count = np.sum(effective_labels > 0) if len(effective_labels) > 0 else 0  # 有效区域故障
     level1_count = np.sum(fault_labels == 1)
     level2_count = np.sum(fault_labels == 2)
     level3_count = np.sum(fault_labels == 3)
@@ -919,9 +959,13 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     detection_info['detection_stats'] = {
         'total_trigger_points': len(trigger_points),
         'total_marked_regions': len(marked_regions),
-        'total_fault_points': fault_count,
-        'fault_ratio': fault_count / len(fault_labels),
-        'detection_mode': 'hierarchical_three_level',
+        'total_fault_points': fault_count,  # 全序列故障点
+        'effective_fault_points': effective_fault_count,  # 有效区域故障点
+        'fault_ratio': fault_count / len(fault_labels),  # 全序列故障率
+        'effective_fault_ratio': effective_fault_count / len(effective_labels) if len(effective_labels) > 0 else 0,  # 有效区域故障率
+        'detection_mode': 'hierarchical_three_level_with_startup_skip',
+        'startup_period': STARTUP_PERIOD,
+        'effective_length': len(effective_labels) if len(effective_labels) > 0 else 0,
         'level_statistics': {
             'level_1_points': level1_count,
             'level_2_points': level2_count,
@@ -932,7 +976,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         },
         'mean_region_length': np.mean([m['length'] for m in marked_regions]) if marked_regions else 0,
         'mean_trigger_fai': np.mean([m['trigger_values']['center'] for m in marked_regions]) if marked_regions else 0,
-        'strategy_used': 'strategy_4_hierarchical_detection',
+        'strategy_used': 'strategy_4_hierarchical_detection_startup_aware',
         'parameters': detection_config
     }
     
@@ -940,42 +984,39 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     print(f"   → 分级统计: L1={level1_count}点, L2={level2_count}点, L3={level3_count}点")
     print(f"   → 触发点数: {len(triggers)}个, 标记区域: {len(marked_regions)}个")
     
-    # 添加改进效果对比
-    original_anomaly_count = np.sum(fai_values > threshold1)
-    detected_fault_count = np.sum(fault_labels > 0)
-    noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count) if original_anomaly_count > 0 else 0
+    # 🔧 修改：添加改进效果对比（只计算有效检测区域）
+    effective_fai = fai_values[STARTUP_PERIOD:] if len(fai_values) > STARTUP_PERIOD else []
+    effective_labels = fault_labels[STARTUP_PERIOD:] if len(fault_labels) > STARTUP_PERIOD else []
     
-    print(f"   → 降噪效果: 原始异常点={original_anomaly_count}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
+    original_anomaly_count_total = np.sum(fai_values > threshold1)  # 全序列异常点
+    original_anomaly_count_effective = np.sum(effective_fai > threshold1) if len(effective_fai) > 0 else 0  # 有效区域异常点
+    detected_fault_count = np.sum(effective_labels > 0) if len(effective_labels) > 0 else 0  # 检测到的故障点
     
-    # 🔧 添加检测效果诊断
-    if detected_fault_count == 0 and original_anomaly_count > 0:
-        print(f"   ⚠️ 检测效果诊断: 有{original_anomaly_count}个异常点但0个检测点")
+    noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count_effective) if original_anomaly_count_effective > 0 else 0
+    
+    print(f"   → 降噪效果分析:")
+    print(f"     全序列异常点: {original_anomaly_count_total}个 ({original_anomaly_count_total/len(fai_values)*100:.1f}%)")
+    print(f"     有效区域异常点: {original_anomaly_count_effective}个 ({original_anomaly_count_effective/len(effective_fai)*100:.1f}%)" if len(effective_fai) > 0 else "     有效区域异常点: 0个")
+    print(f"     检测故障点: {detected_fault_count}个, 降噪率: {noise_reduction_ratio:.2%}")
+    
+    # 🔧 添加检测效果诊断（基于有效区域）
+    if detected_fault_count == 0 and original_anomaly_count_effective > 0:
+        print(f"   ⚠️ 检测效果诊断: 有效区域有{original_anomaly_count_effective}个异常点但0个检测点")
         print(f"   ⚠️ 可能原因:")
         print(f"      1. 阈值设置过高 (T1={threshold1:.4f})")
         print(f"      2. 邻域验证条件过严")
         print(f"      3. 异常点分布过于分散，无法满足连续性要求")
         
-        # 建议降低阈值进行测试
-        suggested_t1 = np.percentile(fai_values, 95)  # 使用95%分位数
-        print(f"   💡 建议测试阈值: T1_suggest={suggested_t1:.4f} (95%分位数)")
-        
-        # 🔧 实验性：使用更宽松的阈值重新检测
-        if sample_id_str in TEST_SAMPLES['fault']:  # 只对故障样本尝试
-            print(f"   🧪 尝试更宽松的阈值设置...")
-            
-            # 使用分位数方法重新计算阈值  
-            alt_threshold1 = np.percentile(fai_values, 90)  # 90%分位数
-            alt_threshold2 = np.percentile(fai_values, 95)  # 95%分位数
-            alt_threshold3 = np.percentile(fai_values, 99)  # 99%分位数
-            
-            print(f"   备选阈值: T1_alt={alt_threshold1:.4f}, T2_alt={alt_threshold2:.4f}, T3_alt={alt_threshold3:.4f}")
-            
-            # 用备选阈值快速检测
-            alt_beyond_t1 = np.sum(fai_values > alt_threshold1)
-            print(f"   备选阈值效果: 超过T1_alt的点数={alt_beyond_t1} ({alt_beyond_t1/len(fai_values)*100:.1f}%)")
+        # 🔧 严格按照源代码：只提供阈值分析，不建议替代方案
+        if len(effective_fai) > 0:
+            print(f"   📊 源代码阈值分析:")
+            print(f"      T1(3σ)={threshold1:.4f} 对应有效区域 {np.sum(effective_fai > threshold1)/len(effective_fai)*100:.1f}% 分位数")
+            print(f"      T2(4.5σ)={threshold2:.4f} 对应有效区域 {np.sum(effective_fai > threshold2)/len(effective_fai)*100:.1f}% 分位数")
+            print(f"      T3(6σ)={threshold3:.4f} 对应有效区域 {np.sum(effective_fai > threshold3)/len(effective_fai)*100:.1f}% 分位数")
+            print(f"   💡 说明：源代码阈值在当前数据中的实际严格程度")
     
     # 如果策略1没有检测到故障，自动切换到策略2
-    if detected_fault_count == 0 and is_fault_sample:
+    if detected_fault_count == 0 and is_fault_sample and original_anomaly_count_effective > 0:
         print(f"   ⚠️  策略1未检测到故障点，自动切换到策略2...")
         print(f"   🔧 策略2: 进一步放宽邻域要求（邻域阈值=0.6×3σ, 无邻居要求）")
         
@@ -1037,11 +1078,11 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         detection_info['detection_stats']['strategy_used'] = 'strategy_2_center_only'
         detection_info['detection_stats']['parameters'] = strategy2_config
         
-        noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count) if original_anomaly_count > 0 else 0
+        noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count_effective) if original_anomaly_count_effective > 0 else 0
         
         print(f"   → 策略2检测结果: 检测到故障点={detected_fault_count}个 ({detected_fault_count/len(fault_labels)*100:.2f}%)")
         print(f"   → 触发点数: {len(trigger_points)}个, 标记区域: {len(marked_regions)}个")
-        print(f"   → 策略2降噪效果: 原始异常点={original_anomaly_count}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
+        print(f"   → 策略2降噪效果: 有效区域异常点={original_anomaly_count_effective}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
     
     elif detected_fault_count == 0:
         print(f"   ⚠️  正常样本未检测到故障点，符合预期")
@@ -1443,16 +1484,28 @@ def calculate_performance_metrics(test_results):
             all_true_labels.append(true_label)
             all_fai_values.append(fai_val)
             
-            # 修正后的ROC逻辑：
+            # 🔧 修改：修正后的ROC逻辑，考虑启动期跳过
+            startup_period = 3000  # 与检测函数保持一致
+            is_in_startup = i < startup_period
+            
             if true_label == 0:  # 正常样本
-                # 正常样本中：综合诊断值 > 阈值1 就是FP，否则就是TN
-                prediction = 1 if fai_val > threshold1 else 0
-            else:  # 故障样本
-                # 故障样本中：需要综合诊断值 > 阈值1 且 三窗口确认为故障 才是TP
-                if fai_val > threshold1 and fault_pred == 1:
-                    prediction = 1  # TP
+                # 正常样本中：不论启动期还是稳定期，都不应标记为故障
+                if is_in_startup:
+                    # 启动期：即使超阈值也认为是正常（因为启动期本身不稳定）
+                    prediction = 0  # TN
                 else:
-                    prediction = 0  # FN (包括：fai_val <= threshold1 或 fault_pred == 0)
+                    # 稳定期：综合诊断值 > 阈值1 就是FP，否则就是TN
+                    prediction = 1 if fai_val > threshold1 else 0
+            else:  # 故障样本
+                if is_in_startup:
+                    # 启动期：不进行故障检测，认为是正常
+                    prediction = 0  # FN (因为跳过了检测)
+                else:
+                    # 稳定期：需要综合诊断值 > 阈值1 且 三点检测确认为故障 才是TP
+                    if fai_val > threshold1 and fault_pred > 0:  # fault_pred > 0 表示任意级别故障
+                        prediction = 1  # TP
+                    else:
+                        prediction = 0  # FN (包括：fai_val <= threshold1 或 fault_pred == 0)
             
             all_fault_predictions.append(prediction)
     
