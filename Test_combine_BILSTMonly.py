@@ -712,25 +712,25 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         # 标记故障区域
         fault_labels[start:end] = level  # 使用级别作为标记值
         trigger_points.append(center)
-            
-            # 记录区域信息
+        
+        # 记录区域信息
         region_data = fai_values[start:end]
-            region_stats = {
-                'mean_fai': np.mean(region_data),
-                'max_fai': np.max(region_data),
-                'min_fai': np.min(region_data),
-                'std_fai': np.std(region_data),
+        region_stats = {
+            'mean_fai': np.mean(region_data),
+            'max_fai': np.max(region_data),
+            'min_fai': np.min(region_data),
+            'std_fai': np.std(region_data),
             'length': end - start
-            }
-            
-            marked_regions.append({
+        }
+        
+        marked_regions.append({
             'trigger_point': center,
             'level': level,  # 分级标记
             'range': (start, end),
             'length': end - start,
-                'region_stats': region_stats,
+            'region_stats': region_stats,
             'trigger_condition': trigger['trigger_condition'],
-                'trigger_values': {
+            'trigger_values': {
                 'center': fai_values[center],
                 'detection_level': f"Level {level}",
                 'trigger_reason': trigger['detection_details']['trigger_reason']
@@ -1444,18 +1444,18 @@ def create_fault_detection_timeline(test_results, save_path):
     # 根据检测模式显示不同的检测过程
     if CURRENT_DETECTION_MODE == "three_window":
         # 三窗口检测模式
-    # 标记候选点
+        # 标记候选点
         if detection_info.get('candidate_points'):
-        ax3.scatter(detection_info['candidate_points'], 
-                   [fai_values[i] for i in detection_info['candidate_points']],
-                   color='orange', s=30, label='候选点', alpha=0.8)
-    
-    # 标记验证通过的点
+            ax3.scatter(detection_info['candidate_points'], 
+                       [fai_values[i] for i in detection_info['candidate_points']],
+                       color='orange', s=30, label='候选点', alpha=0.8)
+        
+        # 标记验证通过的点
         if detection_info.get('verified_points'):
-        verified_indices = [v['point'] for v in detection_info['verified_points']]
-        ax3.scatter(verified_indices,
-                   [fai_values[i] for i in verified_indices],
-                   color='red', s=50, label='验证点', marker='^')
+            verified_indices = [v['point'] for v in detection_info['verified_points']]
+            ax3.scatter(verified_indices,
+                       [fai_values[i] for i in verified_indices],
+                       color='red', s=50, label='验证点', marker='^')
     
         ax3.set_ylabel('三窗口\n检测过程')
         ax3.set_title('三窗口检测过程 (BiLSTM)')
@@ -1474,7 +1474,7 @@ def create_fault_detection_timeline(test_results, save_path):
     # 标记故障区域（两种模式都有）
     if detection_info.get('marked_regions'):
         for i, region in enumerate(detection_info['marked_regions']):
-        start, end = region['range']
+            start, end = region['range']
             label = '标记故障区域' if i == 0 else ""
             ax3.axvspan(start, end, alpha=0.2, color='red', label=label)
     
