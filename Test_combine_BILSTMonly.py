@@ -613,7 +613,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             'center_threshold': threshold1,      # 3σ
             'neighbor_threshold': threshold1 * 0.67,  # 2σ
             'min_neighbors': 1,
-            'marking_range': [0],                # 只标记i
+            'marking_range': [-1, 0, 1],        # 标记i-1, i, i+1 (3个点)
             'condition': 'level1_basic_confidence'
         }
     }
@@ -621,7 +621,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     print(f"   检测参数:")
     print(f"   Level 3 (6σ): 中心阈值={threshold3:.4f}, 无邻域要求, 标记3点")
     print(f"   Level 2 (4.5σ): 中心阈值={threshold2:.4f}, 邻域阈值={threshold1:.4f}, 最少邻居=1个, 标记3点")
-    print(f"   Level 1 (3σ): 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.67:.4f}, 最少邻居=1个, 标记1点")
+    print(f"   Level 1 (3σ): 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.67:.4f}, 最少邻居=1个, 标记3点")
     
     # 三级分级检测实现
     triggers = []
@@ -712,25 +712,25 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         # 标记故障区域
         fault_labels[start:end] = level  # 使用级别作为标记值
         trigger_points.append(center)
-        
-        # 记录区域信息
+            
+            # 记录区域信息
         region_data = fai_values[start:end]
-        region_stats = {
-            'mean_fai': np.mean(region_data),
-            'max_fai': np.max(region_data),
-            'min_fai': np.min(region_data),
-            'std_fai': np.std(region_data),
+            region_stats = {
+                'mean_fai': np.mean(region_data),
+                'max_fai': np.max(region_data),
+                'min_fai': np.min(region_data),
+                'std_fai': np.std(region_data),
             'length': end - start
-        }
-        
-        marked_regions.append({
+            }
+            
+            marked_regions.append({
             'trigger_point': center,
             'level': level,  # 分级标记
             'range': (start, end),
             'length': end - start,
-            'region_stats': region_stats,
+                'region_stats': region_stats,
             'trigger_condition': trigger['trigger_condition'],
-            'trigger_values': {
+                'trigger_values': {
                 'center': fai_values[center],
                 'detection_level': f"Level {level}",
                 'trigger_reason': trigger['detection_details']['trigger_reason']
@@ -1444,19 +1444,19 @@ def create_fault_detection_timeline(test_results, save_path):
     # 根据检测模式显示不同的检测过程
     if CURRENT_DETECTION_MODE == "three_window":
         # 三窗口检测模式
-        # 标记候选点
+    # 标记候选点
         if detection_info.get('candidate_points'):
-            ax3.scatter(detection_info['candidate_points'], 
-                       [fai_values[i] for i in detection_info['candidate_points']],
-                       color='orange', s=30, label='候选点', alpha=0.8)
-        
-        # 标记验证通过的点
+        ax3.scatter(detection_info['candidate_points'], 
+                   [fai_values[i] for i in detection_info['candidate_points']],
+                   color='orange', s=30, label='候选点', alpha=0.8)
+    
+    # 标记验证通过的点
         if detection_info.get('verified_points'):
-            verified_indices = [v['point'] for v in detection_info['verified_points']]
-            ax3.scatter(verified_indices,
-                       [fai_values[i] for i in verified_indices],
-                       color='red', s=50, label='验证点', marker='^')
-        
+        verified_indices = [v['point'] for v in detection_info['verified_points']]
+        ax3.scatter(verified_indices,
+                   [fai_values[i] for i in verified_indices],
+                   color='red', s=50, label='验证点', marker='^')
+    
         ax3.set_ylabel('三窗口\n检测过程')
         ax3.set_title('三窗口检测过程 (BiLSTM)')
         
@@ -1474,7 +1474,7 @@ def create_fault_detection_timeline(test_results, save_path):
     # 标记故障区域（两种模式都有）
     if detection_info.get('marked_regions'):
         for i, region in enumerate(detection_info['marked_regions']):
-            start, end = region['range']
+        start, end = region['range']
             label = '标记故障区域' if i == 0 else ""
             ax3.axvspan(start, end, alpha=0.2, color='red', label=label)
     
@@ -1597,24 +1597,24 @@ def create_three_window_visualization(test_results, save_path):
     # 根据检测模式显示不同的检测过程
     if CURRENT_DETECTION_MODE == "three_window":
         # 三窗口检测模式
-        # 阶段1：检测窗口 - 标记候选点
+    # 阶段1：检测窗口 - 标记候选点
         if detection_info.get('candidate_points'):
-            candidate_points = detection_info['candidate_points']
-            ax_main.scatter(candidate_points, [fai_values[i] for i in candidate_points],
-                           color='orange', s=40, alpha=0.8, label=f'检测: {len(candidate_points)} 个候选点',
-                           marker='o', zorder=5)
-        
-        # 阶段2：验证窗口 - 标记验证通过的点
+        candidate_points = detection_info['candidate_points']
+        ax_main.scatter(candidate_points, [fai_values[i] for i in candidate_points],
+                       color='orange', s=40, alpha=0.8, label=f'检测: {len(candidate_points)} 个候选点',
+                       marker='o', zorder=5)
+    
+    # 阶段2：验证窗口 - 标记验证通过的点
         if detection_info.get('verified_points'):
-            verified_indices = [v['point'] for v in detection_info['verified_points']]
-            ax_main.scatter(verified_indices, [fai_values[i] for i in verified_indices],
-                           color='red', s=60, alpha=0.9, label=f'验证: {len(verified_indices)} 个确认点',
-                           marker='^', zorder=6)
-            
-            # 显示验证窗口范围
-            for v_point in detection_info['verified_points']:
-                verify_start, verify_end = v_point['verify_range']
-                ax_main.axvspan(verify_start, verify_end, alpha=0.1, color='yellow')
+        verified_indices = [v['point'] for v in detection_info['verified_points']]
+        ax_main.scatter(verified_indices, [fai_values[i] for i in verified_indices],
+                       color='red', s=60, alpha=0.9, label=f'验证: {len(verified_indices)} 个确认点',
+                       marker='^', zorder=6)
+        
+        # 显示验证窗口范围
+        for v_point in detection_info['verified_points']:
+            verify_start, verify_end = v_point['verify_range']
+            ax_main.axvspan(verify_start, verify_end, alpha=0.1, color='yellow')
     else:
         # 5点检测模式
         # 标记触发点
@@ -1670,17 +1670,17 @@ def create_three_window_visualization(test_results, save_path):
     
     if CURRENT_DETECTION_MODE == "three_window":
         # 三窗口检测模式
-        window_params = [
-            WINDOW_CONFIG['detection_window'],
-            WINDOW_CONFIG['verification_window'],
-            WINDOW_CONFIG['marking_window']
-        ]
-        window_labels = ['检测窗口\n(25)', '验证窗口\n(15)', '标记窗口\n(10)']
-        colors2 = ['lightblue', 'lightgreen', 'lightcoral']
-        
-        wedges, texts, autotexts = ax2.pie(window_params, labels=window_labels, colors=colors2,
-                                          autopct='%1.0f', startangle=90)
-        ax2.set_title('窗口大小\n(采样点数)')
+    window_params = [
+        WINDOW_CONFIG['detection_window'],
+        WINDOW_CONFIG['verification_window'],
+        WINDOW_CONFIG['marking_window']
+    ]
+    window_labels = ['检测窗口\n(25)', '验证窗口\n(15)', '标记窗口\n(10)']
+    colors2 = ['lightblue', 'lightgreen', 'lightcoral']
+    
+    wedges, texts, autotexts = ax2.pie(window_params, labels=window_labels, colors=colors2,
+                                      autopct='%1.0f', startangle=90)
+    ax2.set_title('窗口大小\n(采样点数)')
     else:
         # 5点检测模式
         mode_params = [5, 3, 1]  # 5点区域, 3点触发条件, 1个中心点
@@ -1697,23 +1697,23 @@ def create_three_window_visualization(test_results, save_path):
     if CURRENT_DETECTION_MODE == "three_window":
         # 三窗口检测模式：显示验证比率
         if detection_info.get('verified_points'):
-            continuous_ratios = [v['continuous_ratio'] for v in detection_info['verified_points']]
-            verify_points = [v['point'] for v in detection_info['verified_points']]
-            
-            bars3 = ax3.bar(range(len(continuous_ratios)), continuous_ratios, 
-                           color='green', alpha=0.7)
+        continuous_ratios = [v['continuous_ratio'] for v in detection_info['verified_points']]
+        verify_points = [v['point'] for v in detection_info['verified_points']]
+        
+        bars3 = ax3.bar(range(len(continuous_ratios)), continuous_ratios, 
+                       color='green', alpha=0.7)
             ax3.axhline(y=WINDOW_CONFIG['verification_threshold'], color='red', linestyle='--', 
                        alpha=0.7, label=f'阈值 ({WINDOW_CONFIG["verification_threshold"]*100:.0f}%)')
-            ax3.set_title('验证比率')
-            ax3.set_xlabel('验证点')
-            ax3.set_ylabel('连续比率')
-            ax3.set_xticks(range(len(continuous_ratios)))
-            ax3.set_xticklabels([f'P{i+1}' for i in range(len(continuous_ratios))])
-            ax3.legend()
-        else:
-            ax3.text(0.5, 0.5, '无验证点', ha='center', va='center', 
-                    transform=ax3.transAxes, fontsize=12)
-            ax3.set_title('验证比率')
+        ax3.set_title('验证比率')
+        ax3.set_xlabel('验证点')
+        ax3.set_ylabel('连续比率')
+        ax3.set_xticks(range(len(continuous_ratios)))
+        ax3.set_xticklabels([f'P{i+1}' for i in range(len(continuous_ratios))])
+        ax3.legend()
+    else:
+        ax3.text(0.5, 0.5, '无验证点', ha='center', va='center', 
+                transform=ax3.transAxes, fontsize=12)
+        ax3.set_title('验证比率')
     else:
         # 5点检测模式：显示触发点的FAI值分布
         if detection_info.get('trigger_points'):
@@ -1759,7 +1759,7 @@ def create_three_window_visualization(test_results, save_path):
     
     # === 底部：过程说明 ===
     if CURRENT_DETECTION_MODE == "three_window":
-        process_text = """
+    process_text = """
     BiLSTM三窗口检测过程:
     
     1. 检测窗口 (25点): 扫描候选故障点，条件：φ(FAI) > 阈值
@@ -1777,7 +1777,7 @@ def create_three_window_visualization(test_results, save_path):
     3. 区域标记: 标记当前点及前后2个点（共5个点）为故障
     
     优势: 简化检测逻辑，提高计算效率
-        """
+    """
     
     fig.text(0.02, 0.02, process_text, fontsize=10, 
              bbox=dict(boxstyle="round,pad=0.5", facecolor="lightyellow", alpha=0.8))
