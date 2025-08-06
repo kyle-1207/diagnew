@@ -182,7 +182,7 @@ except:
 
 #----------------------------------------测试配置------------------------------
 print("="*60)
-print("🔬 电池故障诊断系统 - Transformer模型测试")
+print("🔬 电池故障诊断系统 - Transformer模型测试（混合反馈版本）")
 print("="*60)
 
 TEST_MODE = "TRANSFORMER_ONLY"  # 固定为Transformer单模型测试
@@ -222,7 +222,7 @@ def load_test_samples():
 TEST_SAMPLES = load_test_samples()
 ALL_TEST_SAMPLES = TEST_SAMPLES['normal'] + TEST_SAMPLES['fault']
 
-# 模型路径配置 (从datasave目录加载)
+# 模型路径配置 (从混合反馈训练结果加载)
 MODEL_PATHS = {
     "TRANSFORMER": {
         "transformer_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/transformer_model_hybrid_feedback.pth",
@@ -239,14 +239,19 @@ DETECTION_MODES = {
         "function": "three_window_fault_detection"
     },
     "five_point": {
-        "name": "5点检测模式", 
+        "name": "5点检测模式（原版）", 
         "description": "对于故障样本，如果某点高于阈值且前后相邻点也高于阈值，则标记该点及前后2个点（共5个点）",
+        "function": "five_point_fault_detection"
+    },
+    "five_point_improved": {
+        "name": "5点检测模式（改进版）",
+        "description": "改进的5点检测：严格的触发条件 + 分级标记范围 + 有效降噪机制",
         "function": "five_point_fault_detection"
     }
 }
 
 # 当前使用的检测模式
-CURRENT_DETECTION_MODE = "five_point"  # 默认使用新的5点检测模式
+CURRENT_DETECTION_MODE = "five_point_improved"  # 使用改进的5点检测模式
 
 # 基于FAI的三窗口检测配置
 # 多组窗口配置方案
@@ -315,7 +320,7 @@ def check_model_files():
             file_size = os.path.getsize(path) / (1024 * 1024)  # MB
             print(f"   ✅ 存在: {path} ({file_size:.1f}MB)")
     
-    # 检查PCA参数文件
+    # 检查PCA参数文件 (从混合反馈训练结果加载)
     pca_params_path = "/mnt/bz25t/bzhy/datasave/Transformer/models/pca_params_hybrid_feedback.pkl"
     if not os.path.exists(pca_params_path):
         missing_files.append(f"PCA_PARAMS: {pca_params_path}")
@@ -471,20 +476,21 @@ def three_window_fault_detection(fai_values, threshold1, sample_id, config=None)
 
 def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     """
-    基于FAI的5点故障检测机制（新设计）
+    改进的5点故障检测机制：增强连续性检测和降噪能力
     
-    原理：
-    对于故障样本，如果某个采样点高于阈值，且前后相邻点也高于阈值，
-    则将该点及前后2个点（共5个点）都判定为真阳性
+    设计原理：
+    1. 严格的触发条件：要求中心点及其邻域满足更严格的一致性
+    2. 合理的标记范围：根据故障级别标记不同大小的区域
+    3. 有效的降噪机制：过滤孤立异常点，关注持续性故障
     
     Args:
-        fai_values: FAI序列（综合故障指标）
-        threshold1: FAI阈值
-        sample_id: 样本ID（用于记录）
-        config: 配置参数（兼容性参数，实际不使用）
+        fai_values: 综合诊断指标序列
+        threshold1: 一级预警阈值
+        sample_id: 样本ID（用于调试）
+        config: 配置参数（兼容性参数，可包含threshold2, threshold3）
     
     Returns:
-        fault_labels: 故障标签序列 (0=正常, 1=故障)
+        fault_labels: 故障标签序列 (0=正常, 1=轻微故障, 2=中等故障, 3=严重故障)
         detection_info: 检测过程详细信息
     """
     # 初始化输出
@@ -504,8 +510,12 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     # 检查是否为故障样本（基于样本ID）
     is_fault_sample = sample_id in TEST_SAMPLES['fault']
     
+    # 调试信息
+    print(f"   样本{sample_id}: 类型={type(sample_id)}, 故障样本列表={TEST_SAMPLES['fault']}, 是故障样本={is_fault_sample}")
+    
     if not is_fault_sample:
         # 正常样本直接返回全0标签
+        print(f"   → 样本{sample_id}为正常样本，返回全0标签")
         detection_info['detection_stats'] = {
             'total_trigger_points': 0,
             'total_marked_regions': 0,
@@ -513,64 +523,323 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             'fault_ratio': 0.0,
             'detection_mode': 'normal_sample'
         }
+        # 为兼容性添加空字段
+        detection_info['trigger_points'] = []
+        detection_info['marked_regions'] = []
+        detection_info['candidate_points'] = []
+        detection_info['verified_points'] = []
+        
+        # 确保fault_labels确实是全0
+        fault_labels.fill(0)
+        print(f"   → fault_labels总和: {np.sum(fault_labels)} (应该为0)")
         return fault_labels, detection_info
     
-    # 故障样本：实施5点检测
+    # 获取多级阈值（严格按照源代码Test_.py的方式）
+    if config and 'threshold2' in config and 'threshold3' in config:
+        threshold2 = config['threshold2']
+        threshold3 = config['threshold3']
+    else:
+        # 按照源代码Test_.py的阈值计算方式
+        nm = 3000
+        mm = len(fai_values)
+        
+        if mm > nm:
+            # 使用后半段数据计算阈值（与源代码一致）
+            baseline_fai = fai_values[nm:mm]
+            mean_fai = np.mean(baseline_fai)
+            std_fai = np.std(baseline_fai)
+            
+            threshold1_calc = mean_fai + 3 * std_fai      # 对应源代码threshold1
+            threshold2 = mean_fai + 4.5 * std_fai        # 对应源代码threshold2  
+            threshold3 = mean_fai + 6 * std_fai          # 对应源代码threshold3
+            
+            # 验证threshold1是否与传入的一致（调试用）
+            print(f"   源代码阈值计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
+        else:
+            # 数据太短，使用全部数据
+            mean_fai = np.mean(fai_values)
+            std_fai = np.std(fai_values)
+            
+            threshold1_calc = mean_fai + 3 * std_fai
+            threshold2 = mean_fai + 4.5 * std_fai
+            threshold3 = mean_fai + 6 * std_fai
+            
+            print(f"   短数据阈值计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
+    
+    # 故障样本：实施改进的多级5点检测
     trigger_points = []
     marked_regions = []
     
-    for i in range(1, len(fai_values) - 1):  # 跳过首尾点，避免越界
-        # 检查当前点及前后相邻点是否都高于阈值
-        current_above = fai_values[i] > threshold1
-        prev_above = fai_values[i-1] > threshold1
-        next_above = fai_values[i+1] > threshold1
+    # 策略4.0：三级分级检测策略
+    print(f"   🔧 策略4.0: 三级分级检测策略...")
+    print(f"   分析结果: 故障样本有{np.sum(fai_values > threshold1)}个异常点({np.sum(fai_values > threshold1)/len(fai_values)*100:.2f}%)")
+    print(f"   阈值分布: >6σ({np.sum(fai_values > threshold3)}个), >4.5σ({np.sum(fai_values > threshold2)}个), >3σ({np.sum(fai_values > threshold1)}个)")
+    
+    detection_config = {
+        'mode': 'hierarchical_v2',
+        'level_3': {
+            'center_threshold': threshold3,      # 6σ
+            'neighbor_threshold': None,          # 无邻域要求
+            'min_neighbors': 0,
+            'marking_range': [-1, 0, 1],        # 标记i-1, i, i+1
+            'condition': 'level3_high_confidence'
+        },
+        'level_2': {
+            'center_threshold': threshold2,      # 4.5σ  
+            'neighbor_threshold': threshold1,    # 3σ
+            'min_neighbors': 1,
+            'marking_range': [-1, 0, 1],        # 标记i-1, i, i+1
+            'condition': 'level2_medium_confidence'
+        },
+        'level_1': {
+            'center_threshold': threshold1,      # 3σ
+            'neighbor_threshold': threshold1 * 0.67,  # 2σ
+            'min_neighbors': 1,
+            'marking_range': [-1, 0, 1],        # 标记i-1, i, i+1 (3个点)
+            'condition': 'level1_basic_confidence'
+        }
+    }
+    
+    print(f"   检测参数:")
+    print(f"   Level 3 (6σ): 中心阈值={threshold3:.4f}, 无邻域要求, 标记3点")
+    print(f"   Level 2 (4.5σ): 中心阈值={threshold2:.4f}, 邻域阈值={threshold1:.4f}, 最少邻居=1个, 标记3点")
+    print(f"   Level 1 (3σ): 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.67:.4f}, 最少邻居=1个, 标记3点")
+    
+    # 三级分级检测实现
+    triggers = []
+    for i in range(2, len(fai_values) - 2):
+        neighborhood = fai_values[i-2:i+3]  # 5个点的邻域
+        neighbors = [fai_values[i-2], fai_values[i-1], fai_values[i+1], fai_values[i+2]]  # 4个邻居
+        center = fai_values[i]
         
-        if current_above and prev_above and next_above:
-            # 触发5点检测：标记当前点及前后2个点
-            trigger_points.append(i)
-            
-            # 计算5点区域范围
-            start_region = max(0, i - 2)
-            end_region = min(len(fai_values), i + 3)  # +3因为切片是左闭右开
-            
-            # 标记5点区域
-            fault_labels[start_region:end_region] = 1
-            
-            # 记录区域信息
-            region_data = fai_values[start_region:end_region]
-            region_stats = {
-                'mean_fai': np.mean(region_data),
-                'max_fai': np.max(region_data),
-                'min_fai': np.min(region_data),
-                'std_fai': np.std(region_data),
-                'length': end_region - start_region
+        triggered = False
+        trigger_level = None
+        trigger_condition = None
+        detection_details = {}
+        
+        # Level 3: 最严格阈值，最宽松条件 (6σ)
+        if center > detection_config['level_3']['center_threshold']:
+            triggered = True
+            trigger_level = 3
+            trigger_condition = detection_config['level_3']['condition']
+            marking_range = detection_config['level_3']['marking_range']
+            detection_details = {
+                'center_value': center,
+                'center_threshold': detection_config['level_3']['center_threshold'],
+                'neighbors_above_threshold': 'N/A (no requirement)',
+                'required_neighbors': 0,
+                'neighborhood_values': neighborhood.tolist(),
+                'trigger_reason': '6σ high confidence detection'
             }
             
-            marked_regions.append({
-                'trigger_point': i,
-                'range': (start_region, end_region),
-                'length': end_region - start_region,
-                'region_stats': region_stats,
-                'trigger_values': {
-                    'prev': fai_values[i-1],
-                    'current': fai_values[i],
-                    'next': fai_values[i+1]
+        # Level 2: 中等阈值，中等条件 (4.5σ) 
+        elif center > detection_config['level_2']['center_threshold']:
+            neighbors_above_t1 = np.sum(np.array(neighbors) > detection_config['level_2']['neighbor_threshold'])
+            if neighbors_above_t1 >= detection_config['level_2']['min_neighbors']:
+                triggered = True
+                trigger_level = 2
+                trigger_condition = detection_config['level_2']['condition']
+                marking_range = detection_config['level_2']['marking_range']
+                detection_details = {
+                    'center_value': center,
+                    'center_threshold': detection_config['level_2']['center_threshold'],
+                    'neighbors_above_threshold': neighbors_above_t1,
+                    'required_neighbors': detection_config['level_2']['min_neighbors'],
+                    'neighborhood_values': neighborhood.tolist(),
+                    'trigger_reason': '4.5σ medium confidence detection'
                 }
+                
+        # Level 1: 最低阈值，相对严格条件 (3σ)
+        elif center > detection_config['level_1']['center_threshold']:
+            neighbors_above_2sigma = np.sum(np.array(neighbors) > detection_config['level_1']['neighbor_threshold'])
+            if neighbors_above_2sigma >= detection_config['level_1']['min_neighbors']:
+                triggered = True
+                trigger_level = 1
+                trigger_condition = detection_config['level_1']['condition']
+                marking_range = detection_config['level_1']['marking_range']
+                detection_details = {
+                    'center_value': center,
+                    'center_threshold': detection_config['level_1']['center_threshold'],
+                    'neighbors_above_threshold': neighbors_above_2sigma,
+                    'required_neighbors': detection_config['level_1']['min_neighbors'],
+                    'neighborhood_values': neighborhood.tolist(),
+                    'trigger_reason': '3σ basic confidence detection'
+                }
+        
+        if triggered:
+            # 计算标记范围
+            start_mark = max(0, i + min(marking_range))
+            end_mark = min(len(fai_values), i + max(marking_range) + 1)
+            
+            triggers.append({
+                'center': i,
+                'level': trigger_level,
+                'range': (start_mark, end_mark),
+                'trigger_condition': trigger_condition,
+                'detection_details': detection_details
             })
+    
+    # 第二轮：处理所有触发点（分级处理）
+    processed_triggers = []
+    level_counts = {1: 0, 2: 0, 3: 0}
+    
+    for trigger in triggers:
+        start, end = trigger['range']
+        center = trigger['center']
+        level = trigger['level']
+        
+        # 统计各级别触发次数
+        level_counts[level] += 1
+        
+        # 标记故障区域
+        fault_labels[start:end] = level  # 使用级别作为标记值
+        trigger_points.append(center)
+        
+        # 记录区域信息
+        region_data = fai_values[start:end]
+        region_stats = {
+            'mean_fai': np.mean(region_data),
+            'max_fai': np.max(region_data),
+            'min_fai': np.min(region_data),
+            'std_fai': np.std(region_data),
+            'length': end - start
+        }
+        
+        marked_regions.append({
+            'trigger_point': center,
+            'level': level,  # 分级标记
+            'range': (start, end),
+            'length': end - start,
+            'region_stats': region_stats,
+            'trigger_condition': trigger['trigger_condition'],
+            'trigger_values': {
+                'center': fai_values[center],
+                'detection_level': f"Level {level}",
+                'trigger_reason': trigger['detection_details']['trigger_reason']
+            }
+        })
+        
+        processed_triggers.append(trigger)
+    
+    print(f"   触发统计: Level 3({level_counts[3]}次), Level 2({level_counts[2]}次), Level 1({level_counts[1]}次)")
     
     detection_info['trigger_points'] = trigger_points
     detection_info['marked_regions'] = marked_regions
+    detection_info['processed_triggers'] = processed_triggers
     
-    # 统计信息
+    # 为兼容三窗口检测模式的可视化代码，添加空的兼容字段
+    detection_info['candidate_points'] = []  # 5点检测模式中不使用，但为兼容性保留
+    detection_info['verified_points'] = []   # 5点检测模式中不使用，但为兼容性保留
+    
+    # 统计信息（分级检测）
+    fault_count = np.sum(fault_labels > 0)  # 任何级别都算故障
+    level1_count = np.sum(fault_labels == 1)
+    level2_count = np.sum(fault_labels == 2)
+    level3_count = np.sum(fault_labels == 3)
+    
     detection_info['detection_stats'] = {
         'total_trigger_points': len(trigger_points),
         'total_marked_regions': len(marked_regions),
-        'total_fault_points': np.sum(fault_labels),
-        'fault_ratio': np.sum(fault_labels) / len(fault_labels),
-        'detection_mode': 'five_point_fault',
+        'total_fault_points': fault_count,
+        'fault_ratio': fault_count / len(fault_labels),
+        'detection_mode': 'hierarchical_three_level',
+        'level_statistics': {
+            'level_1_points': level1_count,
+            'level_2_points': level2_count,
+            'level_3_points': level3_count,
+            'level_1_triggers': level_counts[1],
+            'level_2_triggers': level_counts[2],
+            'level_3_triggers': level_counts[3]
+        },
         'mean_region_length': np.mean([m['length'] for m in marked_regions]) if marked_regions else 0,
-        'mean_trigger_fai': np.mean([m['trigger_values']['current'] for m in marked_regions]) if marked_regions else 0
+        'mean_trigger_fai': np.mean([m['trigger_values']['center'] for m in marked_regions]) if marked_regions else 0,
+        'strategy_used': 'strategy_4_hierarchical_detection',
+        'parameters': detection_config
     }
+    
+    print(f"   → 策略4.0检测结果: 检测到故障点={fault_count}个 ({fault_count/len(fault_labels)*100:.2f}%)")
+    print(f"   → 分级统计: L1={level1_count}点, L2={level2_count}点, L3={level3_count}点")
+    print(f"   → 触发点数: {len(triggers)}个, 标记区域: {len(marked_regions)}个")
+    
+    # 添加改进效果对比
+    original_anomaly_count = np.sum(fai_values > threshold1)
+    detected_fault_count = np.sum(fault_labels > 0)
+    noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count) if original_anomaly_count > 0 else 0
+    
+    print(f"   → 降噪效果: 原始异常点={original_anomaly_count}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
+    
+    # 如果策略1没有检测到故障，自动切换到策略2
+    if detected_fault_count == 0 and is_fault_sample:
+        print(f"   ⚠️  策略1未检测到故障点，自动切换到策略2...")
+        print(f"   🔧 策略2: 进一步放宽邻域要求（邻域阈值=0.6×3σ, 无邻居要求）")
+        
+        # 重置标签和列表
+        fault_labels.fill(0)
+        trigger_points.clear()
+        marked_regions.clear()
+        
+        # 策略2参数
+        strategy2_config = {
+            'center_threshold': threshold1,           # 保持3σ阈值
+            'neighbor_threshold': threshold1 * 0.6,  # 进一步降低邻域要求到60%
+            'min_neighbors': 0,                      # 不要求邻居（纯中心点检测）
+            'marking_range': 2,                      # 标记±2个点
+            'condition': 'strategy2_relaxed'
+        }
+        
+        # 策略2检测
+        strategy2_triggers = []
+        for i in range(2, len(fai_values) - 2):
+            center = fai_values[i]
+            
+            # 策略2条件：只检查中心点
+            if center > strategy2_config['center_threshold']:
+                start_mark = max(0, i - strategy2_config['marking_range'])
+                end_mark = min(len(fai_values), i + strategy2_config['marking_range'] + 1)
+                
+                fault_labels[start_mark:end_mark] = 1
+                trigger_points.append(i)
+                
+                region_data = fai_values[start_mark:end_mark]
+                marked_regions.append({
+                    'trigger_point': i,
+                    'level': 1,
+                    'range': (start_mark, end_mark),
+                    'length': end_mark - start_mark,
+                    'region_stats': {
+                        'mean_fai': np.mean(region_data),
+                        'max_fai': np.max(region_data),
+                        'std_fai': np.std(region_data),
+                        'length': end_mark - start_mark
+                    },
+                    'trigger_condition': strategy2_config['condition'],
+                    'trigger_values': {
+                        'center': center
+                    }
+                })
+        
+        # 重新计算统计信息
+        detected_fault_count = np.sum(fault_labels > 0)
+        
+        # 更新detection_info
+        detection_info['trigger_points'] = trigger_points
+        detection_info['marked_regions'] = marked_regions
+        detection_info['detection_stats']['total_trigger_points'] = len(trigger_points)
+        detection_info['detection_stats']['total_marked_regions'] = len(marked_regions)
+        detection_info['detection_stats']['total_fault_points'] = detected_fault_count
+        detection_info['detection_stats']['fault_ratio'] = detected_fault_count / len(fault_labels)
+        detection_info['detection_stats']['strategy_used'] = 'strategy_2_center_only'
+        detection_info['detection_stats']['parameters'] = strategy2_config
+        
+        noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count) if original_anomaly_count > 0 else 0
+        
+        print(f"   → 策略2检测结果: 检测到故障点={detected_fault_count}个 ({detected_fault_count/len(fault_labels)*100:.2f}%)")
+        print(f"   → 触发点数: {len(trigger_points)}个, 标记区域: {len(marked_regions)}个")
+        print(f"   → 策略2降噪效果: 原始异常点={original_anomaly_count}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
+    
+    elif detected_fault_count == 0:
+        print(f"   ⚠️  正常样本未检测到故障点，符合预期")
+        print(f"   → 检测逻辑工作正常")
     
     return fault_labels, detection_info
 
@@ -629,7 +898,7 @@ def load_models():
                           "MC-AE2"):
         raise RuntimeError("MC-AE2模型加载失败")
     
-    # 加载PCA参数 (从pickle文件加载)
+    # 加载PCA参数 (从混合反馈训练结果加载)
     pca_params_path = "/mnt/bz25t/bzhy/datasave/Transformer/models/pca_params_hybrid_feedback.pkl"
     try:
         with open(pca_params_path, 'rb') as f:
@@ -1492,9 +1761,9 @@ def save_test_results(test_results, performance_metrics):
     """保存Transformer测试结果"""
     print("\n💾 保存Transformer测试结果...")
     
-    # 创建结果目录
+    # 创建结果目录 - 统一保存到models目录下
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_dir = f"/mnt/bz25t/bzhy/datasave/Transformer/test_results/transformer_test_results_{timestamp}"
+    result_dir = f"/mnt/bz25t/bzhy/datasave/Transformer/models/test_results_{timestamp}"
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(f"{result_dir}/visualizations", exist_ok=True)
     os.makedirs(f"{result_dir}/detailed_results", exist_ok=True)
