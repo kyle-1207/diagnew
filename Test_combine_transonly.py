@@ -772,7 +772,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         },
         'level_1': {
             'center_threshold': threshold1,      # 3σ
-            'neighbor_threshold': threshold1 * 0.67,  # 2σ
+            'neighbor_threshold': threshold1 * 0.67,  # 约2σ (优化后)
             'min_neighbors': 1,
             'marking_range': [-1, 0, 1],        # 标记i-1, i, i+1 (3个点)
             'condition': 'level1_basic_confidence'
@@ -946,6 +946,33 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     noise_reduction_ratio = 1 - (detected_fault_count / original_anomaly_count) if original_anomaly_count > 0 else 0
     
     print(f"   → 降噪效果: 原始异常点={original_anomaly_count}, 检测故障点={detected_fault_count}, 降噪率={noise_reduction_ratio:.2%}")
+    
+    # 🔧 添加检测效果诊断
+    if detected_fault_count == 0 and original_anomaly_count > 0:
+        print(f"   ⚠️ 检测效果诊断: 有{original_anomaly_count}个异常点但0个检测点")
+        print(f"   ⚠️ 可能原因:")
+        print(f"      1. 阈值设置过高 (T1={threshold1:.4f})")
+        print(f"      2. 邻域验证条件过严")
+        print(f"      3. 异常点分布过于分散，无法满足连续性要求")
+        
+        # 建议降低阈值进行测试
+        suggested_t1 = np.percentile(fai_values, 95)  # 使用95%分位数
+        print(f"   💡 建议测试阈值: T1_suggest={suggested_t1:.4f} (95%分位数)")
+        
+        # 🔧 实验性：使用更宽松的阈值重新检测
+        if sample_id_str in TEST_SAMPLES['fault']:  # 只对故障样本尝试
+            print(f"   🧪 尝试更宽松的阈值设置...")
+            
+            # 使用分位数方法重新计算阈值  
+            alt_threshold1 = np.percentile(fai_values, 90)  # 90%分位数
+            alt_threshold2 = np.percentile(fai_values, 95)  # 95%分位数
+            alt_threshold3 = np.percentile(fai_values, 99)  # 99%分位数
+            
+            print(f"   备选阈值: T1_alt={alt_threshold1:.4f}, T2_alt={alt_threshold2:.4f}, T3_alt={alt_threshold3:.4f}")
+            
+            # 用备选阈值快速检测
+            alt_beyond_t1 = np.sum(fai_values > alt_threshold1)
+            print(f"   备选阈值效果: 超过T1_alt的点数={alt_beyond_t1} ({alt_beyond_t1/len(fai_values)*100:.1f}%)")
     
     # 如果策略1没有检测到故障，自动切换到策略2
     if detected_fault_count == 0 and is_fault_sample:
@@ -1215,11 +1242,32 @@ def process_single_sample(sample_id, models, config=None):
     
     print(f"   📊 阈值计算: nm={nm}, mm={mm}, 使用数据段=[{nm}:{mm}]")
     
+    # 🔧 添加FAI分布分析
+    print(f"   📊 FAI值分布分析:")
+    print(f"      全序列统计: 均值={np.mean(fai):.6f}, 标准差={np.std(fai):.6f}")
+    print(f"      全序列范围: 最小值={np.min(fai):.6f}, 最大值={np.max(fai):.6f}")
+    print(f"      分位数: 50%={np.percentile(fai, 50):.6f}, 95%={np.percentile(fai, 95):.6f}, 99%={np.percentile(fai, 99):.6f}")
+    
     if mm > nm:
         # 严格按照源代码：使用后半段数据计算阈值
         fai_baseline = fai[nm:mm]
         mean_baseline = np.mean(fai_baseline)
         std_baseline = np.std(fai_baseline)
+        
+        # 🔧 添加基线数据合理性检查
+        fai_early = fai[:nm] if nm < len(fai) else fai[:len(fai)//2]
+        mean_early = np.mean(fai_early)
+        std_early = np.std(fai_early)
+        
+        print(f"   🔍 基线数据合理性检查:")
+        print(f"      前段数据(0:{min(nm, len(fai)//2)}): 均值={mean_early:.6f}, 标准差={std_early:.6f}")
+        print(f"      后段数据({nm}:{mm}): 均值={mean_baseline:.6f}, 标准差={std_baseline:.6f}")
+        print(f"      统计差异: 均值差={abs(mean_baseline-mean_early):.6f}, 标准差比={std_baseline/std_early:.2f}")
+        
+        # 如果前后段差异过大，给出警告
+        if abs(mean_baseline - mean_early) > std_early or std_baseline/std_early > 2.0 or std_baseline/std_early < 0.5:
+            print(f"   ⚠️ 警告：前后段数据差异较大，基线选择可能不合理")
+            print(f"   💡 建议：考虑使用全数据或更稳定的分段方式")
         
         threshold1 = mean_baseline + 3 * std_baseline      # 3σ
         threshold2 = mean_baseline + 4.5 * std_baseline    # 4.5σ  
@@ -1228,6 +1276,22 @@ def process_single_sample(sample_id, models, config=None):
         print(f"   ✅ 源代码方式计算阈值:")
         print(f"      基线段统计: 均值={mean_baseline:.6f}, 标准差={std_baseline:.6f}")
         print(f"      T1(3σ)={threshold1:.6f}, T2(4.5σ)={threshold2:.6f}, T3(6σ)={threshold3:.6f}")
+        
+        # 🔧 添加阈值合理性分析
+        print(f"   🔍 阈值合理性分析:")
+        beyond_t1 = np.sum(fai > threshold1)
+        beyond_t2 = np.sum(fai > threshold2)
+        beyond_t3 = np.sum(fai > threshold3)
+        print(f"      超过T1的点数: {beyond_t1} ({beyond_t1/len(fai)*100:.2f}%)")
+        print(f"      超过T2的点数: {beyond_t2} ({beyond_t2/len(fai)*100:.2f}%)")
+        print(f"      超过T3的点数: {beyond_t3} ({beyond_t3/len(fai)*100:.2f}%)")
+        
+        # 显示阈值与最大值的关系
+        fai_max = np.max(fai)
+        print(f"      FAI最大值: {fai_max:.6f}")
+        print(f"      最大值相对于T1: {fai_max/threshold1:.2f}倍")
+        print(f"      最大值相对于T2: {fai_max/threshold2:.2f}倍")
+        print(f"      最大值相对于T3: {fai_max/threshold3:.2f}倍")
     else:
         # 数据太短，使用全部数据（但记录警告）
         print(f"   ⚠️ 警告：样本{sample_id}数据长度({mm})不足3000，无法按源代码方式计算")
