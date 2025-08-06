@@ -253,37 +253,13 @@ DETECTION_MODES = {
 # 当前使用的检测模式
 CURRENT_DETECTION_MODE = "five_point_improved"  # 使用改进的5点检测模式
 
-# 基于FAI的三窗口检测配置
-# 多组窗口配置方案
-WINDOW_CONFIGS = {
-    "config_1": {  # 小窗口配置(当前)
-        "detection_window": 20,    
-        "verification_window": 10,  
-        "marking_window": 8,      
-        "verification_threshold": 0.13
-    },
-    "config_2": {  # 中等窗口配置
-        "detection_window": 50,    
-        "verification_window": 25,  
-        "marking_window": 20,     
-        "verification_threshold": 0.25
-    },
-    "config_3": {  # 大窗口配置
-        "detection_window": 100,   
-        "verification_window": 50,  
-        "marking_window": 40,     
-        "verification_threshold": 0.3
-    },
-    "config_4": {  # 超大窗口配置
-        "detection_window": 200,   
-        "verification_window": 100, 
-        "marking_window": 80,     
-        "verification_threshold": 0.35
-    }
+# 基于FAI的三窗口检测配置 (与BiLSTM测试脚本保持一致)
+WINDOW_CONFIG = {
+    "detection_window": 25,      # 检测窗口：25个采样点 (12.5分钟)
+    "verification_window": 15,   # 验证窗口：15个采样点 (7.5分钟)
+    "marking_window": 10,        # 标记窗口：10个采样点 (5分钟)
+    "verification_threshold": 0.6 # 验证窗口内FAI异常比例阈值 (60%)
 }
-
-# 当前使用的配置
-WINDOW_CONFIG = WINDOW_CONFIGS["config_1"]
 
 # 高分辨率可视化配置
 PLOT_CONFIG = {
@@ -952,7 +928,7 @@ def load_models():
             print(f"✅ PCA参数从npy文件重建成功")
         except Exception as e2:
             print(f"❌ PCA参数重建也失败: {e2}")
-            raise RuntimeError("PCA参数加载失败")
+        raise RuntimeError("PCA参数加载失败")
     
     return models
 
@@ -1092,7 +1068,7 @@ def main_test_process():
         "TRANSFORMER": [],
         "metadata": {
             "test_samples": TEST_SAMPLES,
-            "window_configs": WINDOW_CONFIGS,
+            "window_config": WINDOW_CONFIG,
             "detection_modes": DETECTION_MODES,
             "current_mode": CURRENT_DETECTION_MODE,
             "timestamp": datetime.now().isoformat()
@@ -1102,36 +1078,33 @@ def main_test_process():
     print(f"\n🚀 开始Transformer模型测试...")
     print(f"检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
     print(f"检测描述: {DETECTION_MODES[CURRENT_DETECTION_MODE]['description']}")
-    print(f"总共需要处理: {len(ALL_TEST_SAMPLES)} 个样本 × {len(WINDOW_CONFIGS)} 种配置")
+    print(f"总共需要处理: {len(ALL_TEST_SAMPLES)} 个样本")
     
     # 加载模型
     print(f"\n{'='*20} 加载模型 {'='*20}")
     models = load_models()
     print(f"✅ Transformer 模型加载完成")
     
-    # 对每个配置进行测试
-    for config_name, config in WINDOW_CONFIGS.items():
-        print(f"\n{'='*20} 测试配置: {config_name} {'='*20}")
+    # 单配置测试 (与BiLSTM保持一致)
+    print(f"\n{'='*20} 测试 Transformer 模型 {'='*20}")
         if CURRENT_DETECTION_MODE == "three_window":
-            print(f"   检测窗口: {config['detection_window']}")
-            print(f"   验证窗口: {config['verification_window']}")
-            print(f"   标记窗口: {config['marking_window']}")
-            print(f"   验证阈值: {config['verification_threshold']}")
+        print(f"   检测窗口: {WINDOW_CONFIG['detection_window']}")
+        print(f"   验证窗口: {WINDOW_CONFIG['verification_window']}")
+        print(f"   标记窗口: {WINDOW_CONFIG['marking_window']}")
+        print(f"   验证阈值: {WINDOW_CONFIG['verification_threshold']}")
         else:
             print(f"   5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
         
-        config_results = []
-        
-        with tqdm(total=len(ALL_TEST_SAMPLES), desc=f"{config_name}测试进度",
+    with tqdm(total=len(ALL_TEST_SAMPLES), desc="Transformer测试进度",
                   bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]') as pbar:
             
             for sample_id in ALL_TEST_SAMPLES:
-                pbar.set_description(f"{config_name}-样本{sample_id}")
-                
-                try:
-                    # 使用当前配置处理样本
-                    sample_result = process_single_sample(sample_id, models, config)
-                    config_results.append(sample_result)
+            pbar.set_description(f"Transformer-样本{sample_id}")
+            
+            try:
+                # 使用窗口配置处理样本
+                sample_result = process_single_sample(sample_id, models, WINDOW_CONFIG)
+                test_results["TRANSFORMER"].append(sample_result)
                     
                     # 输出简要结果
                     metrics = sample_result.get('performance_metrics', {})
@@ -1154,38 +1127,9 @@ def main_test_process():
                 
                 pbar.update(1)
                 time.sleep(0.1)  # 避免进度条更新过快
-        
-        # 计算当前配置的性能指标
-        config_metrics = calculate_performance_metrics({"TRANSFORMER": config_results})
-        
-        # 保存配置结果
-        test_results[f"TRANSFORMER_{config_name}"] = {
-            "config": config,
-            "results": config_results,
-            "metrics": config_metrics["TRANSFORMER"]
-        }
-        
-        # 输出当前配置的性能总结
-        metrics = config_metrics["TRANSFORMER"]['classification_metrics']
-        print(f"\n📊 {config_name} 性能指标:")
-        print(f"   准确率: {metrics['accuracy']:.3f}")
-        print(f"   精确率: {metrics['precision']:.3f}")
-        print(f"   召回率: {metrics['recall']:.3f}")
-        print(f"   F1分数: {metrics['f1_score']:.3f}")
-        print(f"   TPR: {metrics['tpr']:.3f}")
-        print(f"   FPR: {metrics['fpr']:.3f}")
     
     print(f"\n✅ Transformer测试完成!")
-    
-    # 统计所有配置的处理结果
-    total_processed = 0
-    for config_name in WINDOW_CONFIGS.keys():
-        if f"TRANSFORMER_{config_name}" in test_results:
-            config_count = len(test_results[f"TRANSFORMER_{config_name}"]["results"])
-            total_processed += config_count
-            print(f"   {config_name}: 成功处理 {config_count} 个样本")
-    
-    print(f"   总计: 成功处理 {total_processed} 个样本")
+    print(f"   Transformer: 成功处理 {len(test_results['TRANSFORMER'])} 个样本")
     
     return test_results
 
@@ -1297,15 +1241,11 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     # === 子图1: 连续阈值ROC曲线 ===
     ax1.set_title('(a) Transformer ROC Curve\n(Continuous Threshold Scan)')
     
-    # 使用第一个可用的配置结果
-    available_configs = [key for key in test_results.keys() if key.startswith("TRANSFORMER_")]
-    if not available_configs:
+    # 使用Transformer结果
+    model_results = test_results["TRANSFORMER"]
+    if not model_results:
         print("   ⚠️ 警告: 没有可用的Transformer结果")
         return
-    
-    # 使用第一个配置的结果
-    first_config = available_configs[0]
-    model_results = test_results[first_config]["results"]
     
     # 收集所有fai值和真实标签，用于连续阈值ROC
     all_fai = []
@@ -1378,14 +1318,12 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     # === 子图2: 固定阈值工作点 ===
     ax2.set_title('(b) Working Point\n(Three-Level Alarm Threshold)')
     
-    # 使用第一个配置的性能指标
-    available_configs = [key for key in performance_metrics.keys() if key.startswith("TRANSFORMER_")]
-    if not available_configs:
+    # 使用Transformer性能指标
+    if "TRANSFORMER" not in performance_metrics:
         print("   ⚠️ 警告: 没有可用的性能指标")
         return
     
-    first_config = available_configs[0]
-    metrics = performance_metrics[first_config]['classification_metrics']
+    metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
     ax2.scatter(metrics['fpr'], metrics['tpr'], 
                s=200, color='blue', 
                label=f'Transformer\n(TPR={metrics["tpr"]:.3f}, FPR={metrics["fpr"]:.3f})',
@@ -1402,7 +1340,7 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     
     metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'Specificity']
     metric_mapping = {'Accuracy': 'accuracy', 'Precision': 'precision', 'Recall': 'recall', 'F1-Score': 'f1_score', 'Specificity': 'specificity'}
-    transformer_values = [performance_metrics[first_config]['classification_metrics'][metric_mapping[m]] 
+    transformer_values = [performance_metrics["TRANSFORMER"]['classification_metrics'][metric_mapping[m]] 
                          for m in metrics_names]
     
     x = np.arange(len(metrics_names))
@@ -1425,10 +1363,10 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     
     sample_metrics = ['Avg φ(Normal)', 'Avg φ(Fault)', 'Anomaly Rate(Normal)', 'Anomaly Rate(Fault)']
     transformer_sample_values = [
-        performance_metrics[first_config]['sample_metrics']['avg_fai_normal'],
-        performance_metrics[first_config]['sample_metrics']['avg_fai_fault'],
-        performance_metrics[first_config]['sample_metrics']['avg_anomaly_ratio_normal'],
-        performance_metrics[first_config]['sample_metrics']['avg_anomaly_ratio_fault']
+        performance_metrics["TRANSFORMER"]['sample_metrics']['avg_fai_normal'],
+        performance_metrics["TRANSFORMER"]['sample_metrics']['avg_fai_fault'],
+        performance_metrics["TRANSFORMER"]['sample_metrics']['avg_anomaly_ratio_normal'],
+        performance_metrics["TRANSFORMER"]['sample_metrics']['avg_anomaly_ratio_fault']
     ]
     
     x = np.arange(len(sample_metrics))
@@ -1462,17 +1400,11 @@ def create_fault_detection_timeline(test_results, save_path):
     fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
     
     # 找到对应样本的结果
-    available_configs = [key for key in test_results.keys() if key.startswith("TRANSFORMER_")]
-    if not available_configs:
-        print("   ⚠️ 警告: 没有可用的Transformer结果")
-        return
-    
-    first_config = available_configs[0]
-    sample_result = next((r for r in test_results[first_config]["results"] if r.get('sample_id') == fault_sample_id), None)
+    sample_result = next((r for r in test_results["TRANSFORMER"] if r.get('sample_id') == fault_sample_id), None)
     
     if sample_result is None:
         print(f"   ⚠️ 未找到样本 {fault_sample_id} 的结果，使用第一个可用结果")
-        sample_result = test_results[first_config]["results"][0] if test_results[first_config]["results"] else None
+        sample_result = test_results["TRANSFORMER"][0] if test_results["TRANSFORMER"] else None
     
     if sample_result is None:
         print("   ❌ 没有可用的测试结果")
@@ -1567,19 +1499,16 @@ def create_performance_radar(performance_metrics, save_path):
         '检测稳定性': 'accuracy'  # 检测稳定性 (用准确率代表)
     }
     
-    # 使用第一个配置的性能指标
-    available_configs = [key for key in performance_metrics.keys() if key.startswith("TRANSFORMER_")]
-    if not available_configs:
+    # 使用Transformer性能指标
+    if "TRANSFORMER" not in performance_metrics:
         print("   ⚠️ 警告: 没有可用的性能指标")
         return
-    
-    first_config = available_configs[0]
     
     # 数据预处理：FPR需要转换为控制能力 (1-FPR)
     transformer_values = []
     
     for metric_name, metric_key in radar_metrics.items():
-        transformer_val = performance_metrics[first_config]['classification_metrics'][metric_key]
+        transformer_val = performance_metrics["TRANSFORMER"]['classification_metrics'][metric_key]
         
         # 特殊处理：误报控制 = 1 - FPR
         if metric_name == '误报控制':
@@ -1643,17 +1572,11 @@ def create_three_window_visualization(test_results, save_path):
     ax_main = fig.add_subplot(gs[0, :])
     
     # 选择Transformer结果进行可视化
-    available_configs = [key for key in test_results.keys() if key.startswith("TRANSFORMER_")]
-    if not available_configs:
-        print("   ⚠️ 警告: 没有可用的Transformer结果")
-        return
-    
-    first_config = available_configs[0]
-    transformer_result = next((r for r in test_results[first_config]["results"] if r.get('sample_id') == fault_sample_id), None)
+    transformer_result = next((r for r in test_results["TRANSFORMER"] if r.get('sample_id') == fault_sample_id), None)
     
     if transformer_result is None:
         print(f"   ⚠️ 未找到样本 {fault_sample_id} 的结果，使用第一个可用结果")
-        transformer_result = test_results[first_config]["results"][0] if test_results[first_config]["results"] else None
+        transformer_result = test_results["TRANSFORMER"][0] if test_results["TRANSFORMER"] else None
     
     if transformer_result is None:
         print("   ❌ 没有可用的测试结果")
@@ -1836,16 +1759,14 @@ def save_test_results(test_results, performance_metrics):
     summary_file = f"{result_dir}/detailed_results/transformer_summary.xlsx"
     
     with pd.ExcelWriter(summary_file) as writer:
-        # 使用第一个配置的性能指标
-        available_configs = [key for key in performance_metrics.keys() if key.startswith("TRANSFORMER_")]
-        if not available_configs:
+        # 使用Transformer性能指标
+        if "TRANSFORMER" not in performance_metrics:
             print("   ⚠️ 警告: 没有可用的性能指标")
             return result_dir
         
-        first_config = available_configs[0]
-        metrics = performance_metrics[first_config]['classification_metrics']
-        confusion = performance_metrics[first_config]['confusion_matrix']
-        sample_metrics = performance_metrics[first_config]['sample_metrics']
+        metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
+        confusion = performance_metrics["TRANSFORMER"]['confusion_matrix']
+        sample_metrics = performance_metrics["TRANSFORMER"]['sample_metrics']
         
         performance_data = [{
             'Model': 'TRANSFORMER',
@@ -1869,7 +1790,7 @@ def save_test_results(test_results, performance_metrics):
         
         # 样本详情表
         sample_details = []
-        for result in test_results[first_config]["results"]:
+        for result in test_results["TRANSFORMER"]:
             # 安全获取detection_info和window_stats
             detection_info = result.get('detection_info', {})
             window_stats = detection_info.get('window_stats', {})
@@ -1926,36 +1847,20 @@ print("="*80)
 print(f"\n📊 测试结果总结:")
 print(f"   • 测试样本: {len(ALL_TEST_SAMPLES)} 个 (正常: {len(TEST_SAMPLES['normal'])}, 故障: {len(TEST_SAMPLES['fault'])})")
 print(f"   • 模型类型: Transformer")
-print(f"   • 配置数量: {len(WINDOW_CONFIGS)} 种")
+print(f"   • 检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
 
-print("\n🔬 各配置性能对比:")
-for config_name, config in WINDOW_CONFIGS.items():
-    print(f"\n   {config_name}:")
-    print(f"   • 窗口配置: 检测({config['detection_window']}) → 验证({config['verification_window']}) → 标记({config['marking_window']})")
-    
-    if f"TRANSFORMER_{config_name}" in test_results:
-        metrics = test_results[f"TRANSFORMER_{config_name}"]["metrics"]["classification_metrics"]
-        print(f"   • 性能指标:")
-        print(f"     准确率: {metrics['accuracy']:.3f}")
-        print(f"     精确率: {metrics['precision']:.3f}")
-        print(f"     召回率: {metrics['recall']:.3f}")
-        print(f"     F1分数: {metrics['f1_score']:.3f}")
-        print(f"     TPR: {metrics['tpr']:.3f}, FPR: {metrics['fpr']:.3f}")
+print(f"\n🔬 Transformer性能:")
+if CURRENT_DETECTION_MODE == "three_window":
+    print(f"   • 窗口配置: 检测({WINDOW_CONFIG['detection_window']}) → 验证({WINDOW_CONFIG['verification_window']}) → 标记({WINDOW_CONFIG['marking_window']})")
     else:
-        print("   ⚠️ 无性能数据")
+    print(f"   • 5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
 
-# 计算综合性能评估
-transformer_score = 0
-config_count = 0
-for config_name in WINDOW_CONFIGS.keys():
-    if f"TRANSFORMER_{config_name}" in test_results:
-        metrics = test_results[f"TRANSFORMER_{config_name}"]["metrics"]["classification_metrics"]
-        config_score = np.mean(list(metrics.values()))
-        transformer_score += config_score
-        config_count += 1
-
-if config_count > 0:
-    transformer_score /= config_count
+metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
+print(f"   准确率: {metrics['accuracy']:.3f}")
+print(f"   精确率: {metrics['precision']:.3f}")
+print(f"   召回率: {metrics['recall']:.3f}")
+print(f"   F1分数: {metrics['f1_score']:.3f}")
+print(f"   TPR: {metrics['tpr']:.3f}, FPR: {metrics['fpr']:.3f}")
 
 print(f"\n📁 结果文件:")
 print(f"   • 结果目录: {result_dir}")
@@ -1971,11 +1876,7 @@ print(f"   • Excel报告: transformer_summary.xlsx")
 transformer_score = np.mean(list(performance_metrics["TRANSFORMER"]['classification_metrics'].values()))
 
 print(f"\n🏆 Transformer综合性能评估:")
-if config_count > 0:
     print(f"   综合得分: {transformer_score:.3f}")
-    print(f"   有效配置数: {config_count}/{len(WINDOW_CONFIGS)}")
-else:
-    print("   ⚠️ 无有效配置数据")
 
 print("\n" + "="*80)
 print("Transformer测试完成！请查看生成的可视化图表和分析报告。")
