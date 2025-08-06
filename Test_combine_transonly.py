@@ -180,6 +180,156 @@ try:
 except:
     print("⚠️ 字体缓存清理失败，继续使用当前配置")
 
+#----------------------------------------数据预处理函数------------------------------
+def physics_based_data_processing_silent(data, feature_type='general'):
+    """基于物理约束的数据处理（静默模式，只返回处理后的数据）"""
+    # 转换为numpy进行预处理
+    if isinstance(data, torch.Tensor):
+        data_np = data.cpu().numpy()
+    else:
+        data_np = np.array(data)
+    
+    # 记录原始数据点数量
+    original_data_points = data_np.shape[0]
+    
+    # 1. 处理缺失数据 (Missing Data) - 用中位数替换全NaN行，保持数据点数量
+    complete_nan_rows = np.isnan(data_np).all(axis=1)
+    if complete_nan_rows.any():
+        # 对每个特征维度计算中位数
+        for col in range(data_np.shape[1]):
+            # 对于vin_3数据的第224列，跳过处理
+            if data_np.shape[1] == 226 and col == 224:
+                continue
+                
+            valid_values = data_np[~np.isnan(data_np[:, col]), col]
+            if len(valid_values) > 0:
+                median_val = np.median(valid_values)
+                # 替换全NaN行中该特征的值
+                data_np[complete_nan_rows, col] = median_val
+            else:
+                # 如果该特征全部为NaN，用0替换
+                data_np[complete_nan_rows, col] = 0.0
+    
+    # 2. 处理异常数据 (Abnormal Data) - 基于物理约束过滤
+    if feature_type == 'vin2':
+        # vin_2数据处理（225列）
+        
+        # 索引0,1：BiLSTM和Pack电压预测值 - 限制在[0,5]V
+        voltage_pred_columns = [0, 1]
+        for col in voltage_pred_columns:
+            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                data_np[data_np[:, col] < 0, col] = 0
+                data_np[data_np[:, col] > 5, col] = 5
+        
+        # 索引2-221：220个特征值 - 统一限制在[-5,5]范围内
+        voltage_columns = list(range(2, 222))
+        for col in voltage_columns:
+            col_valid_mask = (data_np[:, col] >= -5) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                data_np[data_np[:, col] < -5, col] = -5
+                data_np[data_np[:, col] > 5, col] = 5
+        
+        # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
+        temp_col = 222
+        temp_valid_mask = (data_np[:, temp_col] >= -40) & (data_np[:, temp_col] <= 80)
+        temp_invalid_count = (~temp_valid_mask).sum()
+        if temp_invalid_count > 0:
+            data_np[data_np[:, temp_col] < -40, temp_col] = -40
+            data_np[data_np[:, temp_col] > 80, temp_col] = 80
+        
+        # 索引224：电流数据 - 限制在[-1004,162]A
+        current_col = 224
+        current_valid_mask = (data_np[:, current_col] >= -1004) & (data_np[:, current_col] <= 162)
+        current_invalid_count = (~current_valid_mask).sum()
+        if current_invalid_count > 0:
+            data_np[data_np[:, current_col] < -1004, current_col] = -1004
+            data_np[data_np[:, current_col] > 162, current_col] = 162
+            
+    elif feature_type == 'vin3':
+        # vin_3数据处理（226列）
+        
+        # 索引0,1：BiLSTM和Pack SOC预测值 - 限制在[0,1]
+        soc_pred_columns = [0, 1]
+        for col in soc_pred_columns:
+            col_valid_mask = (data_np[:, col] >= 0) & (data_np[:, col] <= 1)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                data_np[data_np[:, col] < 0, col] = 0
+                data_np[data_np[:, col] > 1, col] = 1
+        
+        # 索引2-221：220个特征值 - 统一限制在[-5,5]范围内
+        voltage_columns = list(range(2, 222))
+        for col in voltage_columns:
+            col_valid_mask = (data_np[:, col] >= -5) & (data_np[:, col] <= 5)
+            col_invalid_count = (~col_valid_mask).sum()
+            if col_invalid_count > 0:
+                data_np[data_np[:, col] < -5, col] = -5
+                data_np[data_np[:, col] > 5, col] = 5
+        
+        # 索引222：电池温度 - 限制在合理温度范围[-40,80]°C
+        temp_col = 222
+        temp_valid_mask = (data_np[:, temp_col] >= -40) & (data_np[:, temp_col] <= 80)
+        temp_invalid_count = (~temp_valid_mask).sum()
+        if temp_invalid_count > 0:
+            data_np[data_np[:, temp_col] < -40, temp_col] = -40
+            data_np[data_np[:, temp_col] > 80, temp_col] = 80
+        
+        # 索引224：专用数据列 - 保持原值不处理
+        # (根据验证结果，这一列包含特殊数据，不进行处理)
+        
+        # 索引225：新增的第4维特征 - 限制在[0,1]
+        feature4_col = 225
+        feature4_valid_mask = (data_np[:, feature4_col] >= 0) & (data_np[:, feature4_col] <= 1)
+        feature4_invalid_count = (~feature4_valid_mask).sum()
+        if feature4_invalid_count > 0:
+            data_np[data_np[:, feature4_col] < 0, feature4_col] = 0
+            data_np[data_np[:, feature4_col] > 1, feature4_col] = 1
+    
+    # 3. 进一步处理残留的NaN/Inf值
+    # 使用原始方法：替换为全局中位数
+    if np.isnan(data_np).any() or np.isinf(data_np).any():
+        for col in range(data_np.shape[1]):
+            col_data = data_np[:, col]
+            
+            # 跳过特殊列
+            if data_np.shape[1] == 226 and col == 224:
+                continue
+            
+            # 处理NaN
+            if np.isnan(col_data).any():
+                valid_mask = ~np.isnan(col_data)
+                if valid_mask.any():
+                    median_val = np.median(col_data[valid_mask])
+                    data_np[~valid_mask, col] = median_val
+                else:
+                    data_np[:, col] = 0.0
+            
+            # 处理Inf
+            if np.isinf(col_data).any():
+                inf_mask = np.isinf(col_data)
+                finite_mask = np.isfinite(col_data)
+                if finite_mask.any():
+                    # 正无穷替换为最大有限值，负无穷替换为最小有限值
+                    max_finite = np.max(col_data[finite_mask])
+                    min_finite = np.min(col_data[finite_mask])
+                    data_np[col_data == np.inf, col] = max_finite
+                    data_np[col_data == -np.inf, col] = min_finite
+                else:
+                    data_np[inf_mask, col] = 0.0
+    
+    # 确保没有残留的异常值
+    assert not np.isnan(data_np).any(), f"Still have NaN values after processing"
+    assert not np.isinf(data_np).any(), f"Still have Inf values after processing"
+    
+    # 转换回原始数据类型
+    if isinstance(data, torch.Tensor):
+        return torch.tensor(data_np, dtype=data.dtype, device=data.device)
+    else:
+        return data_np
+
 #----------------------------------------测试配置------------------------------
 print("="*60)
 print("🔬 电池故障诊断系统 - Transformer模型测试（混合反馈版本）")
@@ -692,18 +842,18 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         # 标记故障区域
         fault_labels[start:end] = level  # 使用级别作为标记值
         trigger_points.append(center)
-        
-        # 记录区域信息
+            
+            # 记录区域信息
         region_data = fai_values[start:end]
-        region_stats = {
-            'mean_fai': np.mean(region_data),
-            'max_fai': np.max(region_data),
-            'min_fai': np.min(region_data),
-            'std_fai': np.std(region_data),
+            region_stats = {
+                'mean_fai': np.mean(region_data),
+                'max_fai': np.max(region_data),
+                'min_fai': np.min(region_data),
+                'std_fai': np.std(region_data),
             'length': end - start
-        }
-        
-        marked_regions.append({
+            }
+            
+            marked_regions.append({
             'trigger_point': center,
             'level': level,  # 分级标记
             'range': (start, end),
@@ -946,6 +1096,19 @@ def process_single_sample(sample_id, models, config=None):
     # 加载样本数据
     vin1_data, vin2_data, vin3_data = load_test_sample(sample_id)
     
+    # 🔧 关键修复：添加数据预处理（与BiLSTM保持一致）
+    print(f"   📊 原始数据: vin2_shape={vin2_data.shape}, vin3_shape={vin3_data.shape}")
+    
+    # 对vin2_data进行物理约束处理
+    vin2_processed = physics_based_data_processing_silent(vin2_data, feature_type='vin2')
+    vin3_processed = physics_based_data_processing_silent(vin3_data, feature_type='vin3')
+    
+    print(f"   ✅ 处理后数据: vin2_shape={vin2_processed.shape}, vin3_shape={vin3_processed.shape}")
+    
+    # 使用处理后的数据
+    vin2_data = vin2_processed
+    vin3_data = vin3_processed
+    
     # 数据预处理
     if len(vin1_data.shape) == 2:
         vin1_data = vin1_data.unsqueeze(1)
@@ -1087,38 +1250,38 @@ def main_test_process():
               bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]') as pbar:
         
         print(f"\n{'='*20} 测试 Transformer 模型 {'='*20}")
-        
-        # 加载模型
+    
+    # 加载模型
         pbar.set_description(f"加载Transformer模型")
-        models = load_models()
-        print(f"✅ Transformer 模型加载完成")
-        
-        for sample_id in ALL_TEST_SAMPLES:
+    models = load_models()
+    print(f"✅ Transformer 模型加载完成")
+            
+            for sample_id in ALL_TEST_SAMPLES:
             pbar.set_description(f"Transformer-样本{sample_id}")
             
             try:
                 # 处理单个样本
                 sample_result = process_single_sample(sample_id, models, WINDOW_CONFIG)
                 test_results["TRANSFORMER"].append(sample_result)
-                
-                # 输出简要结果
-                metrics = sample_result.get('performance_metrics', {})
-                detection_info = sample_result.get('detection_info', {})
-                
+                    
+                    # 输出简要结果
+                    metrics = sample_result.get('performance_metrics', {})
+                    detection_info = sample_result.get('detection_info', {})
+                    
                 # 5点检测模式 - 安全获取检测统计
-                detection_stats = detection_info.get('detection_stats', {})
-                detection_ratio = detection_stats.get('fault_ratio', 0.0)
+                        detection_stats = detection_info.get('detection_stats', {})
+                        detection_ratio = detection_stats.get('fault_ratio', 0.0)
+                    
+                    print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
+                          f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
+                          f"检测率={detection_ratio:.2%}")
+                    
+                except Exception as e:
+                    print(f"❌ 样本 {sample_id} 处理失败: {e}")
+                    continue
                 
-                print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
-                      f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
-                      f"检测率={detection_ratio:.2%}")
-                
-            except Exception as e:
-                print(f"❌ 样本 {sample_id} 处理失败: {e}")
-                continue
-            
-            pbar.update(1)
-            time.sleep(0.1)  # 避免进度条更新过快
+                pbar.update(1)
+                time.sleep(0.1)  # 避免进度条更新过快
     
     print(f"\n✅ Transformer测试完成!")
     print(f"   Transformer: 成功处理 {len(test_results['TRANSFORMER'])} 个样本")
@@ -1844,7 +2007,7 @@ print(f"   • 检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
 print(f"\n🔬 Transformer性能:")
 if CURRENT_DETECTION_MODE == "three_window":
     print(f"   • 窗口配置: 检测({WINDOW_CONFIG['detection_window']}) → 验证({WINDOW_CONFIG['verification_window']}) → 标记({WINDOW_CONFIG['marking_window']})")
-else:
+    else:
     print(f"   • 5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
 
 metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
@@ -1868,7 +2031,7 @@ print(f"   • Excel报告: transformer_summary.xlsx")
 transformer_score = np.mean(list(performance_metrics["TRANSFORMER"]['classification_metrics'].values()))
 
 print(f"\n🏆 Transformer综合性能评估:")
-print(f"   综合得分: {transformer_score:.3f}")
+    print(f"   综合得分: {transformer_score:.3f}")
 
 print("\n" + "="*80)
 print("Transformer测试完成！请查看生成的可视化图表和分析报告。")
