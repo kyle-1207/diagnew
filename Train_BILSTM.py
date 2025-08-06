@@ -796,7 +796,7 @@ l1_lambda = 0.01
 loss_f = nn.MSELoss()
 
 # 启用混合精度训练（与Transformer统一）
-scaler = torch.cuda.amp.GradScaler()
+scaler = torch.cuda.amp.GradScaler(enabled=True)
 print("✅ 启用混合精度训练 (AMP)")
 
 # 启用CUDA性能优化
@@ -815,63 +815,70 @@ for epoch in range(EPOCH):
         param_group['lr'] = current_lr
     
     for iteration, (x, y, z, q) in enumerate(train_loader_u):
-        x = x.to(device)
-        y = y.to(device)
-        z = z.to(device)
-        q = q.to(device)
-        
-        # 检查输入数据范围（更严格的检查）
-        if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
-            print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
-            continue
-        
-        # 检查输入数据范围是否合理（更严格的限制）
-        if x.abs().max() > 100 or y.abs().max() > 100:
-            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
-            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-            continue
-        
-        # 使用混合精度训练（与Transformer统一）
-        optimizer.zero_grad()
-        
-        with torch.cuda.amp.autocast():
-            net = net.float()  # 确保模型使用float32
-            recon_im, recon_p = net(x, z, q)
-            loss_u = loss_f(y, recon_im)
+        try:
+            x = x.to(device)
+            y = y.to(device)
+            z = z.to(device)
+            q = q.to(device)
             
-        # 简化损失检查（参考源代码）
-        if torch.isnan(loss_u) or torch.isinf(loss_u):
-            print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
-            continue
-        
-        # 检查输入数据范围是否合理
-        if x.abs().max() > 1000 or y.abs().max() > 1000:
-            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
-            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-            continue
-        
-        total_loss += loss_u.item()
-        num_batches += 1
-        
-        # 混合精度反向传播
-        scaler.scale(loss_u).backward()
-        
-        # 混合精度下的梯度处理（正确顺序）
-        scaler.unscale_(optimizer)  # 先unscale梯度
-        grad_norm = torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
-        
-        if torch.isnan(grad_norm) or torch.isinf(grad_norm):
-            print(f"警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
-            continue
-        
-        # 收集梯度范数用于监控
-        grad_norms.append(grad_norm.item())
+            # 检查输入数据范围（更严格的检查）
+            if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
+                print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
+                continue
             
-        # 混合精度优化器步骤
-        scaler.step(optimizer)
-        scaler.update()
+            # 检查输入数据范围是否合理（更严格的限制）
+            if x.abs().max() > 100 or y.abs().max() > 100:
+                print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+                print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+                print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
+                continue
+            
+            # 使用混合精度训练（与Transformer统一）
+            optimizer.zero_grad()
+            
+            with torch.cuda.amp.autocast():
+                net = net.float()  # 确保模型使用float32
+                recon_im, recon_p = net(x, z, q)
+                loss_u = loss_f(y, recon_im)
+                
+            # 简化损失检查（参考源代码）
+            if torch.isnan(loss_u) or torch.isinf(loss_u):
+                print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
+                continue
+            
+            total_loss += loss_u.item()
+            num_batches += 1
+            
+            # 混合精度反向传播
+            scaler.scale(loss_u).backward()
+            
+            # 混合精度下的梯度处理（正确顺序）
+            scaler.unscale_(optimizer)  # 先unscale梯度
+            grad_norm = torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
+            
+            if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                print(f"警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
+                # 如果梯度异常，需要重置scaler状态
+                optimizer.zero_grad()
+                scaler.update()
+                continue
+            
+            # 收集梯度范数用于监控
+            grad_norms.append(grad_norm.item())
+                
+            # 混合精度优化器步骤
+            scaler.step(optimizer)
+            scaler.update()
+            
+        except RuntimeError as e:
+            if "unscale_" in str(e):
+                print(f"警告：第{epoch}轮第{iteration}批次混合精度scaler错误，重置并继续: {e}")
+                optimizer.zero_grad()
+                scaler = torch.cuda.amp.GradScaler(enabled=True)  # 重新初始化scaler
+                continue
+            else:
+                print(f"警告：第{epoch}轮第{iteration}批次训练错误: {e}")
+                continue
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
@@ -911,7 +918,7 @@ optimizer = torch.optim.Adam(netx.parameters(), lr=INIT_LR)
 loss_f = nn.MSELoss()
 
 # 启用混合精度训练（与Transformer统一）
-scaler2 = torch.cuda.amp.GradScaler()
+scaler2 = torch.cuda.amp.GradScaler(enabled=True)
 
 avg_loss_list_x = []
 for epoch in range(EPOCH):
@@ -926,63 +933,70 @@ for epoch in range(EPOCH):
         param_group['lr'] = current_lr
     
     for iteration, (x, y, z, q) in enumerate(train_loader_soc):
-        x = x.to(device)
-        y = y.to(device)
-        z = z.to(device)
-        q = q.to(device)
-        
-        # MC-AE2输入数据检查（更严格）
-        if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
-            print(f"MC-AE2警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
-            continue
-        
-        # 检查输入数据范围是否合理（更严格的限制）
-        if x.abs().max() > 100 or y.abs().max() > 100:
-            print(f"MC-AE2警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
-            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-            continue
-        
-        # 使用混合精度训练（与Transformer统一）
-        optimizer.zero_grad()
-        
-        with torch.cuda.amp.autocast():
-            netx = netx.float()  # 确保模型使用float32
-            recon_im, z = netx(x, z, q)
-            loss_x = loss_f(y, recon_im)
+        try:
+            x = x.to(device)
+            y = y.to(device)
+            z = z.to(device)
+            q = q.to(device)
             
-        # 简化损失检查（参考源代码）
-        if torch.isnan(loss_x) or torch.isinf(loss_x):
-            print(f"MC-AE2警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
-            continue
-        
-        # 检查输入数据范围是否合理
-        if x.abs().max() > 1000 or y.abs().max() > 1000:
-            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
-            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-            continue
-        
-        total_loss += loss_x.item()
-        num_batches += 1
-        
-        # 混合精度反向传播
-        scaler2.scale(loss_x).backward()
-        
-        # 混合精度下的梯度处理（正确顺序）
-        scaler2.unscale_(optimizer)  # 先unscale梯度
-        grad_norm = torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
-        
-        if torch.isnan(grad_norm) or torch.isinf(grad_norm):
-            print(f"MC-AE2警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
-            continue
-        
-        # 收集梯度范数用于监控
-        grad_norms_x.append(grad_norm.item())
+            # MC-AE2输入数据检查（更严格）
+            if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
+                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
+                continue
             
-        # 混合精度优化器步骤
-        scaler2.step(optimizer)
-        scaler2.update()
+            # 检查输入数据范围是否合理（更严格的限制）
+            if x.abs().max() > 100 or y.abs().max() > 100:
+                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+                print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+                print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
+                continue
+            
+            # 使用混合精度训练（与Transformer统一）
+            optimizer.zero_grad()
+            
+            with torch.cuda.amp.autocast():
+                netx = netx.float()  # 确保模型使用float32
+                recon_im, z = netx(x, z, q)
+                loss_x = loss_f(y, recon_im)
+                
+            # 简化损失检查（参考源代码）
+            if torch.isnan(loss_x) or torch.isinf(loss_x):
+                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
+                continue
+            
+            total_loss += loss_x.item()
+            num_batches += 1
+            
+            # 混合精度反向传播
+            scaler2.scale(loss_x).backward()
+            
+            # 混合精度下的梯度处理（正确顺序）
+            scaler2.unscale_(optimizer)  # 先unscale梯度
+            grad_norm = torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
+            
+            if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
+                # 如果梯度异常，需要重置scaler状态
+                optimizer.zero_grad()
+                scaler2.update()
+                continue
+            
+            # 收集梯度范数用于监控
+            grad_norms_x.append(grad_norm.item())
+                
+            # 混合精度优化器步骤
+            scaler2.step(optimizer)
+            scaler2.update()
+            
+        except RuntimeError as e:
+            if "unscale_" in str(e):
+                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次混合精度scaler错误，重置并继续: {e}")
+                optimizer.zero_grad()
+                scaler2 = torch.cuda.amp.GradScaler(enabled=True)  # 重新初始化scaler
+                continue
+            else:
+                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次训练错误: {e}")
+                continue
     
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
