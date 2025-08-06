@@ -1673,29 +1673,25 @@ def create_fault_detection_timeline(test_results, save_path):
     
     ax3.plot(time_axis, fai_values, 'b-', alpha=0.5, label='φ指标值')
     
-    # 标记候选点
-    if detection_info['candidate_points']:
-        ax3.scatter(detection_info['candidate_points'], 
-                   [fai_values[i] for i in detection_info['candidate_points']],
-                   color='orange', s=30, label='候选点', alpha=0.8)
-    
-    # 标记验证通过的点
-    if detection_info['verified_points']:
-        verified_indices = [v['point'] for v in detection_info['verified_points']]
-        ax3.scatter(verified_indices,
-                   [fai_values[i] for i in verified_indices],
-                   color='red', s=50, label='验证点', marker='^')
+    # 🔧 修复：三点检测模式的可视化
+    # 标记触发点（对应原来的候选点）
+    if detection_info.get('trigger_points'):
+        ax3.scatter(detection_info['trigger_points'], 
+                   [fai_values[i] for i in detection_info['trigger_points']],
+                   color='orange', s=30, label='触发点', alpha=0.8)
     
     # 标记故障区域
-    for region in detection_info['marked_regions']:
+    marked_regions = detection_info.get('marked_regions', [])
+    for i, region in enumerate(marked_regions):
         start, end = region['range']
-        ax3.axvspan(start, end, alpha=0.2, color='red', label='标记故障区域')
+        label = '故障区域' if i == 0 else ""
+        ax3.axvspan(start, end, alpha=0.2, color='red', label=label)
     
-    ax3.set_ylabel('三窗口\n检测过程')
+    ax3.set_ylabel('三点检测\n过程')
     ax3.set_xlabel('时间步长')
     ax3.legend()
     ax3.grid(True, alpha=0.3)
-    ax3.set_title('三窗口检测过程 (Transformer)')
+    ax3.set_title('三点检测过程 (Transformer)')
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
@@ -1778,8 +1774,8 @@ def create_performance_radar(performance_metrics, save_path):
 
 #----------------------------------------三窗口过程可视化------------------------------
 def create_three_window_visualization(test_results, save_path):
-    """生成Transformer三窗口检测过程可视化"""
-    print("   🔍 生成Transformer三窗口过程可视化...")
+    """生成Transformer三点检测过程可视化"""
+    print("   🔍 生成Transformer三点检测过程可视化...")
     
     # 选择一个故障样本进行详细分析
     fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'
@@ -1789,7 +1785,7 @@ def create_three_window_visualization(test_results, save_path):
     # 使用GridSpec进行复杂布局
     gs = fig.add_gridspec(3, 4, height_ratios=[2, 1, 1], width_ratios=[1, 1, 1, 1])
     
-    # === 主图：三窗口检测过程时序图 ===
+    # === 主图：三点检测过程时序图 ===
     ax_main = fig.add_subplot(gs[0, :])
     
     # 选择Transformer结果进行可视化
@@ -1842,7 +1838,7 @@ def create_three_window_visualization(test_results, save_path):
     
     ax_main.set_xlabel('时间步长')
     ax_main.set_ylabel('综合诊断指标 φ')
-    ax_main.set_title(f'Transformer三窗口故障检测过程 - 样本 {fault_sample_id}', 
+    ax_main.set_title(f'Transformer三点检测故障检测过程 - 样本 {fault_sample_id}', 
                      fontsize=14, fontweight='bold')
     ax_main.legend(loc='upper left')
     ax_main.grid(True, alpha=0.3)
@@ -1850,11 +1846,12 @@ def create_three_window_visualization(test_results, save_path):
     # === 子图1：检测窗口统计 ===
     ax1 = fig.add_subplot(gs[1, 0])
     
-    window_stats = detection_info['window_stats']
+    # 🔧 修复：三点检测模式没有window_stats，使用detection_stats
+    detection_stats = detection_info.get('detection_stats', {})
     detection_data = [
-        window_stats['total_candidates'],
-        window_stats['verified_candidates'], 
-        window_stats['total_fault_points']
+        detection_stats.get('total_trigger_points', 0),    # 触发点数（对应候选点）
+        detection_stats.get('total_marked_regions', 0),    # 标记区域数（对应验证点）
+        detection_stats.get('total_fault_points', 0)       # 故障点数
     ]
     detection_labels = ['候选点', '验证点', '故障点']
     colors1 = ['orange', 'red', 'darkred']
@@ -1868,41 +1865,59 @@ def create_three_window_visualization(test_results, save_path):
         ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
                 str(value), ha='center', va='bottom')
     
-    # === 子图2：窗口参数配置 ===
+    # === 子图2：三点检测参数 ===
     ax2 = fig.add_subplot(gs[1, 1])
     
-    window_params = [
-        WINDOW_CONFIG['detection_window'],
-        WINDOW_CONFIG['verification_window'],
-        WINDOW_CONFIG['marking_window']
+    # 显示三点检测的阈值参数
+    thresholds = transformer_result.get('thresholds', {})
+    threshold_names = ['3σ阈值', '4.5σ阈值', '6σ阈值']
+    threshold_values = [
+        thresholds.get('threshold1', 0),
+        thresholds.get('threshold2', 0),
+        thresholds.get('threshold3', 0)
     ]
-    window_labels = ['检测窗口\n(25)', '验证窗口\n(15)', '标记窗口\n(10)']
-    colors2 = ['lightblue', 'lightgreen', 'lightcoral']
+    colors2 = ['lightblue', 'orange', 'red']
     
-    wedges, texts, autotexts = ax2.pie(window_params, labels=window_labels, colors=colors2,
-                                      autopct='%1.0f', startangle=90)
-    ax2.set_title('窗口大小\n(采样点数)')
+    bars2 = ax2.bar(threshold_names, threshold_values, color=colors2, alpha=0.7)
+    ax2.set_title('检测阈值\n(三级分层)')
+    ax2.set_ylabel('阈值')
+    ax2.tick_params(axis='x', rotation=45)
     
-    # === 子图3：验证窗口详情 ===
+    # 添加数值标签
+    for bar, value in zip(bars2, threshold_values):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{value:.2f}', ha='center', va='bottom')
+    
+    # === 子图3：触发级别分布 ===
     ax3 = fig.add_subplot(gs[1, 2])
     
-    if detection_info['verified_points']:
-        continuous_ratios = [v['continuous_ratio'] for v in detection_info['verified_points']]
-        verify_points = [v['point'] for v in detection_info['verified_points']]
+    # 统计各级别触发次数
+    detection_stats = detection_info.get('detection_stats', {})
+    level_stats = detection_stats.get('level_statistics', {})
+    
+    if level_stats:
+        levels = ['Level 1', 'Level 2', 'Level 3']
+        trigger_counts = [
+            level_stats.get('level_1_triggers', 0),
+            level_stats.get('level_2_triggers', 0), 
+            level_stats.get('level_3_triggers', 0)
+        ]
+        colors = ['lightblue', 'orange', 'red']
         
-        bars3 = ax3.bar(range(len(continuous_ratios)), continuous_ratios, 
-                       color='green', alpha=0.7)
-        ax3.axhline(y=0.3, color='red', linestyle='--', alpha=0.7, label='阈值 (30%)')
-        ax3.set_title('验证比率')
-        ax3.set_xlabel('验证点')
-        ax3.set_ylabel('连续比率')
-        ax3.set_xticks(range(len(continuous_ratios)))
-        ax3.set_xticklabels([f'P{i+1}' for i in range(len(continuous_ratios))])
-        ax3.legend()
+        bars3 = ax3.bar(levels, trigger_counts, color=colors, alpha=0.7)
+        ax3.set_title('触发级别分布')
+        ax3.set_xlabel('检测级别')
+        ax3.set_ylabel('触发次数')
+        
+        # 添加数值标签
+        for bar, count in zip(bars3, trigger_counts):
+            if count > 0:
+                ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
+                        str(count), ha='center', va='bottom')
     else:
-        ax3.text(0.5, 0.5, '无验证点', ha='center', va='center', 
+        ax3.text(0.5, 0.5, '无触发数据', ha='center', va='center', 
                 transform=ax3.transAxes, fontsize=12)
-        ax3.set_title('验证比率')
+        ax3.set_title('触发级别分布')
     
     # === 子图4：Transformer性能 ===
     ax4 = fig.add_subplot(gs[1, 3])
@@ -1915,8 +1930,9 @@ def create_three_window_visualization(test_results, save_path):
         fault_ratio = 0.0
     else:
         detection_info = sample_result.get('detection_info', {})
-        window_stats = detection_info.get('window_stats', {})
-        fault_ratio = window_stats.get('fault_ratio', 0.0)
+            # 🔧 修复：使用detection_stats替代window_stats
+    detection_stats = detection_info.get('detection_stats', {})
+    fault_ratio = detection_stats.get('fault_ratio', 0.0)
     
     bars4 = ax4.bar(['Transformer'], [fault_ratio], color='blue', alpha=0.7)
     ax4.set_title('Transformer\n(故障检测比率)')
@@ -1928,13 +1944,13 @@ def create_three_window_visualization(test_results, save_path):
     
     # === 底部：过程说明 ===
     process_text = """
-    Transformer三窗口检测过程:
+    Transformer三点检测过程:
     
-    1. 检测窗口 (25点): 扫描候选故障点，条件：φ(FAI) > 阈值
-    2. 验证窗口 (15点): 验证候选点，检查连续性 (≥60% 超阈值)
-    3. 标记窗口 (±10点): 标记确认的故障区域
+    1. Level 3 (6σ): 中心点超6σ阈值，无邻域要求，直接标记3点
+    2. Level 2 (4.5σ): 中心点超4.5σ + 至少1个邻居超3σ，标记3点
+    3. Level 1 (3σ): 中心点超3σ + 至少1个邻居超2σ，标记3点
     
-    优势: 在保持高敏感性的同时减少误报
+    优势: 分级检测 + 邻域验证，有效降噪并保持敏感性
     """
     
     fig.text(0.02, 0.02, process_text, fontsize=10, 
@@ -1944,7 +1960,7 @@ def create_three_window_visualization(test_results, save_path):
     plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
     plt.close()
     
-    print(f"   ✅ Transformer三窗口过程图保存至: {save_path}")
+    print(f"   ✅ Transformer三点检测过程图保存至: {save_path}")
 
 #----------------------------------------结果保存函数------------------------------
 def save_test_results(test_results, performance_metrics):
@@ -2012,9 +2028,9 @@ def save_test_results(test_results, performance_metrics):
         # 样本详情表
         sample_details = []
         for result in test_results["TRANSFORMER"]:
-            # 安全获取detection_info和window_stats
+            # 安全获取detection_info和detection_stats
             detection_info = result.get('detection_info', {})
-            window_stats = detection_info.get('window_stats', {})
+            detection_stats = detection_info.get('detection_stats', {})
             performance_metrics = result.get('performance_metrics', {})
             
             sample_details.append({
@@ -2024,9 +2040,9 @@ def save_test_results(test_results, performance_metrics):
                 'FAI_Std': performance_metrics.get('fai_std', 0.0),
                 'FAI_Max': performance_metrics.get('fai_max', 0.0),
                 'Anomaly_Ratio': performance_metrics.get('anomaly_ratio', 0.0),
-                'Fault_Detection_Ratio': window_stats.get('fault_ratio', 0.0),
-                'Candidates_Found': window_stats.get('total_candidates', 0),
-                'Verified_Points': window_stats.get('verified_candidates', 0)
+                'Fault_Detection_Ratio': detection_stats.get('fault_ratio', 0.0),
+                'Candidates_Found': detection_stats.get('total_trigger_points', 0),
+                'Verified_Points': detection_stats.get('total_marked_regions', 0)
             })
         
         sample_df = pd.DataFrame(sample_details)
