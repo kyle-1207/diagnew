@@ -96,8 +96,8 @@ MAX_LR = 5e-4   # 保持与源代码一致
 BATCHSIZE = 100  # 恢复源代码的100批次大小
 WARMUP_EPOCHS = 5  # 预热轮数
 
-# 梯度裁剪参数优化（更保守的设置）
-MAX_GRAD_NORM = 1.0  # 降低最大梯度阈值，防止梯度爆炸
+# 梯度裁剪参数优化（混合精度下更保守的设置）
+MAX_GRAD_NORM = 0.5  # 混合精度下使用更小的梯度阈值
 MIN_GRAD_NORM = 0.001  # 降低最小梯度阈值，减少梯度过小警告
 
 # 学习率调度函数（参考源代码，使用固定学习率）
@@ -858,8 +858,10 @@ for epoch in range(EPOCH):
         # 混合精度反向传播
         scaler.scale(loss_u).backward()
         
-        # 简化的梯度处理（参考源代码）
+        # 混合精度下的梯度处理（正确顺序）
+        scaler.unscale_(optimizer)  # 先unscale梯度
         grad_norm = torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
+        
         if torch.isnan(grad_norm) or torch.isinf(grad_norm):
             print(f"警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
             continue
@@ -967,8 +969,10 @@ for epoch in range(EPOCH):
         # 混合精度反向传播
         scaler2.scale(loss_x).backward()
         
-        # 简化的梯度处理（参考源代码）
+        # 混合精度下的梯度处理（正确顺序）
+        scaler2.unscale_(optimizer)  # 先unscale梯度
         grad_norm = torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
+        
         if torch.isnan(grad_norm) or torch.isinf(grad_norm):
             print(f"MC-AE2警告：第{epoch}轮第{iteration}批次梯度异常，跳过此批次")
             continue
