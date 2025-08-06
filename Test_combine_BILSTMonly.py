@@ -1597,19 +1597,19 @@ def create_three_window_visualization(test_results, save_path):
     # 根据检测模式显示不同的检测过程
     if CURRENT_DETECTION_MODE == "three_window":
         # 三窗口检测模式
-    # 阶段1：检测窗口 - 标记候选点
+        # 阶段1：检测窗口 - 标记候选点
         if detection_info.get('candidate_points'):
-        candidate_points = detection_info['candidate_points']
-        ax_main.scatter(candidate_points, [fai_values[i] for i in candidate_points],
-                       color='orange', s=40, alpha=0.8, label=f'检测: {len(candidate_points)} 个候选点',
-                       marker='o', zorder=5)
-    
-    # 阶段2：验证窗口 - 标记验证通过的点
+            candidate_points = detection_info['candidate_points']
+            ax_main.scatter(candidate_points, [fai_values[i] for i in candidate_points],
+                           color='orange', s=40, alpha=0.8, label=f'检测: {len(candidate_points)} 个候选点',
+                           marker='o', zorder=5)
+        
+        # 阶段2：验证窗口 - 标记验证通过的点
         if detection_info.get('verified_points'):
-        verified_indices = [v['point'] for v in detection_info['verified_points']]
-        ax_main.scatter(verified_indices, [fai_values[i] for i in verified_indices],
-                       color='red', s=60, alpha=0.9, label=f'验证: {len(verified_indices)} 个确认点',
-                       marker='^', zorder=6)
+            verified_indices = [v['point'] for v in detection_info['verified_points']]
+            ax_main.scatter(verified_indices, [fai_values[i] for i in verified_indices],
+                           color='red', s=60, alpha=0.9, label=f'验证: {len(verified_indices)} 个确认点',
+                           marker='^', zorder=6)
         
         # 显示验证窗口范围
         for v_point in detection_info['verified_points']:
@@ -1670,17 +1670,17 @@ def create_three_window_visualization(test_results, save_path):
     
     if CURRENT_DETECTION_MODE == "three_window":
         # 三窗口检测模式
-    window_params = [
-        WINDOW_CONFIG['detection_window'],
-        WINDOW_CONFIG['verification_window'],
-        WINDOW_CONFIG['marking_window']
-    ]
-    window_labels = ['检测窗口\n(25)', '验证窗口\n(15)', '标记窗口\n(10)']
-    colors2 = ['lightblue', 'lightgreen', 'lightcoral']
-    
-    wedges, texts, autotexts = ax2.pie(window_params, labels=window_labels, colors=colors2,
-                                      autopct='%1.0f', startangle=90)
-    ax2.set_title('窗口大小\n(采样点数)')
+        window_params = [
+            WINDOW_CONFIG['detection_window'],
+            WINDOW_CONFIG['verification_window'],
+            WINDOW_CONFIG['marking_window']
+        ]
+        window_labels = ['检测窗口\n(25)', '验证窗口\n(15)', '标记窗口\n(10)']
+        colors2 = ['lightblue', 'lightgreen', 'lightcoral']
+        
+        wedges, texts, autotexts = ax2.pie(window_params, labels=window_labels, colors=colors2,
+                                          autopct='%1.0f', startangle=90)
+        ax2.set_title('窗口大小\n(采样点数)')
     else:
         # 5点检测模式
         mode_params = [5, 3, 1]  # 5点区域, 3点触发条件, 1个中心点
@@ -1697,23 +1697,23 @@ def create_three_window_visualization(test_results, save_path):
     if CURRENT_DETECTION_MODE == "three_window":
         # 三窗口检测模式：显示验证比率
         if detection_info.get('verified_points'):
-        continuous_ratios = [v['continuous_ratio'] for v in detection_info['verified_points']]
-        verify_points = [v['point'] for v in detection_info['verified_points']]
-        
-        bars3 = ax3.bar(range(len(continuous_ratios)), continuous_ratios, 
-                       color='green', alpha=0.7)
+            continuous_ratios = [v['continuous_ratio'] for v in detection_info['verified_points']]
+            verify_points = [v['point'] for v in detection_info['verified_points']]
+            
+            bars3 = ax3.bar(range(len(continuous_ratios)), continuous_ratios, 
+                           color='green', alpha=0.7)
             ax3.axhline(y=WINDOW_CONFIG['verification_threshold'], color='red', linestyle='--', 
                        alpha=0.7, label=f'阈值 ({WINDOW_CONFIG["verification_threshold"]*100:.0f}%)')
-        ax3.set_title('验证比率')
-        ax3.set_xlabel('验证点')
-        ax3.set_ylabel('连续比率')
-        ax3.set_xticks(range(len(continuous_ratios)))
-        ax3.set_xticklabels([f'P{i+1}' for i in range(len(continuous_ratios))])
-        ax3.legend()
-    else:
-        ax3.text(0.5, 0.5, '无验证点', ha='center', va='center', 
-                transform=ax3.transAxes, fontsize=12)
-        ax3.set_title('验证比率')
+            ax3.set_title('验证比率')
+            ax3.set_xlabel('验证点')
+            ax3.set_ylabel('连续比率')
+            ax3.set_xticks(range(len(continuous_ratios)))
+            ax3.set_xticklabels([f'P{i+1}' for i in range(len(continuous_ratios))])
+            ax3.legend()
+        else:
+            ax3.text(0.5, 0.5, '无验证点', ha='center', va='center', 
+                    transform=ax3.transAxes, fontsize=12)
+            ax3.set_title('验证比率')
     else:
         # 5点检测模式：显示触发点的FAI值分布
         if detection_info.get('trigger_points'):
@@ -1759,7 +1759,7 @@ def create_three_window_visualization(test_results, save_path):
     
     # === 底部：过程说明 ===
     if CURRENT_DETECTION_MODE == "three_window":
-    process_text = """
+        process_text = """
     BiLSTM三窗口检测过程:
     
     1. 检测窗口 (25点): 扫描候选故障点，条件：φ(FAI) > 阈值
