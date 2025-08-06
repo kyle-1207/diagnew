@@ -493,7 +493,7 @@ def load_fault_samples(fault_sample_ids, device):
     fault_data = []
     
     for sample_id in fault_sample_ids:
-        base_path = f'./project/data/QAS/{sample_id}'
+        base_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}'  # 使用绝对路径与脚本其他部分一致
         
         try:
             with open(f'{base_path}/vin_2.pkl', 'rb') as f:
