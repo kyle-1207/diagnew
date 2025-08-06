@@ -39,38 +39,38 @@ from data_loader_transformer import TransformerBatteryDataset, create_transforme
 
 # 激进反馈策略配置 - 专注降低假阳率
 HYBRID_FEEDBACK_CONFIG = {
-    # 数据分组配置（大规模训练版本）
-    'train_samples': list(range(101)),      # QAS 0-100 (101个正常样本)
-    'feedback_samples': list(range(101, 131)),  # QAS 101-130 (30个正常反馈样本)
+    # 数据分组配置（小样本测试版本）
+    'train_samples': list(range(6)),        # QAS 0-5 (6个正常样本)
+    'feedback_samples': [6, 7],             # QAS 6-7 (2个正常反馈样本)
     
-    # 优化反馈机制配置（适应大数据量）
-    'feedback_frequency': 5,                # 每5个epoch检查一次（数据多，降低频率）
+    # 小样本反馈机制配置（密切监控）
+    'feedback_frequency': 3,                # 每3个epoch检查一次（小样本，提高频率）
     'use_feedback': True,                   # 启用反馈机制
-    'feedback_start_epoch': 50,             # 第50轮开始启用反馈（充分预训练）
+    'feedback_start_epoch': 20,             # 第20轮开始启用反馈（小样本，提前介入）
     
-    # 适中的反馈触发阈值（适应大数据量的多样性）
+    # 严格的反馈触发阈值（小样本需要精确控制）
     'false_positive_thresholds': {
-        'warning': 0.002,       # 0.2%预警
-        'standard': 0.005,      # 0.5%标准反馈
-        'enhanced': 0.01,       # 1%强化反馈
-        'emergency': 0.02       # 2%紧急反馈
+        'warning': 0.001,       # 0.1%预警（更严格）
+        'standard': 0.002,      # 0.2%标准反馈（更严格）
+        'enhanced': 0.005,      # 0.5%强化反馈（更严格）
+        'emergency': 0.01       # 1%紧急反馈（更严格）
     },
     
-    # 平衡的混合权重配置（大数据量下更稳定）
-    'mcae_weight': 0.5,                     # 平衡MC-AE权重
-    'transformer_weight': 0.5,             # 平衡Transformer权重
+    # 小样本混合权重配置（更激进调整）
+    'mcae_weight': 0.6,                     # 稍微提高MC-AE权重
+    'transformer_weight': 0.4,             # 降低Transformer权重
     
-    # 温和的自适应学习率配置（避免大数据量下过度调整）
+    # 激进的自适应学习率配置（小样本需要快速响应）
     'adaptive_lr_factors': {
-        'standard': 0.7,        # 标准反馈：LR * 0.7（温和调整）
-        'enhanced': 0.5,        # 强化反馈：LR * 0.5（中等调整）
-        'emergency': 0.3        # 紧急反馈：LR * 0.3（较强调整）
+        'standard': 0.5,        # 标准反馈：LR * 0.5（激进调整）
+        'enhanced': 0.3,        # 强化反馈：LR * 0.3（激进调整）
+        'emergency': 0.1        # 紧急反馈：LR * 0.1（极激进调整）
     },
     
-    # 保守的动态反馈强度配置（大数据量下更稳定）
+    # 激进的动态反馈强度配置（小样本需要强化反馈）
     'dynamic_feedback_weights': {
-        'min_feedback_weight': 0.2,        # 最小反馈权重（提高下限）
-        'max_feedback_weight': 1.5,        # 最大反馈权重（降低上限）
+        'min_feedback_weight': 0.1,        # 最小反馈权重（降低下限）
+        'max_feedback_weight': 2.0,        # 最大反馈权重（提高上限）
         'weight_increment': 0.2,           # 每次反馈增强幅度
         'consecutive_trigger_boost': 1.5   # 连续触发时的权重提升倍数
     },
@@ -1113,13 +1113,13 @@ def main():
     print("="*60)
     config = HYBRID_FEEDBACK_CONFIG
     print(f"📊 数据分组:")
-    print(f"   训练样本: QAS 0-100 (共{len(config['train_samples'])}个正常样本)")
-    print(f"   反馈样本: QAS 101-130 (共{len(config['feedback_samples'])}个正常样本)")
-    print(f"🔧 优化反馈机制（适应大数据量）:")
-    print(f"   反馈频率: 每{config['feedback_frequency']}个epoch （降低频率）")
-    print(f"   反馈启动轮数: 第{config['feedback_start_epoch']}轮 （充分预训练）")
-    print(f"   假阳性阈值（适中）: {config['false_positive_thresholds']}")
-    print(f"   自适应学习率因子（温和）: {config['adaptive_lr_factors']}")
+    print(f"   训练样本: QAS 0-5 (共{len(config['train_samples'])}个正常样本)")
+    print(f"   反馈样本: QAS 6-7 (共{len(config['feedback_samples'])}个正常样本)")
+    print(f"🔧 小样本反馈机制（密切监控）:")
+    print(f"   反馈频率: 每{config['feedback_frequency']}个epoch （提高频率）")
+    print(f"   反馈启动轮数: 第{config['feedback_start_epoch']}轮 （提前介入）")
+    print(f"   假阳性阈值（严格）: {config['false_positive_thresholds']}")
+    print(f"   自适应学习率因子（激进）: {config['adaptive_lr_factors']}")
     print(f"   MC-AE权重: {config['mcae_weight']}, Transformer权重: {config['transformer_weight']}")
     print(f"   动态反馈权重: {config['dynamic_feedback_weights']}")
     print(f"   正常样本特化训练: 目标FAI < threshold1 * {config['normal_sample_focus']['threshold_margin']}")
@@ -1205,11 +1205,11 @@ def main():
     print(f"🧠 Transformer模型初始化完成")
     print(f"📈 模型参数量: {sum(p.numel() for p in transformer.parameters()):,}")
     
-    # 训练参数设置（适应大数据量）
-    LR = 2e-3              # 大数据量下适当提高学习率
+    # 训练参数设置（小样本快速测试）
+    LR = 1.5e-3            # 小样本使用适中学习率
     EPOCH_PHASE1 = config['feedback_start_epoch']  # 阶段1训练轮数
-    EPOCH_PHASE2 = 150     # 大数据量需要更多训练轮数
-    lr_decay_freq = 20     # 大数据量下延长衰减频率
+    EPOCH_PHASE2 = 80      # 小样本减少训练轮数
+    lr_decay_freq = 10     # 小样本更频繁衰减
     
     # 优化器和损失函数
     optimizer = torch.optim.Adam(transformer.parameters(), lr=LR)
@@ -1471,12 +1471,12 @@ def main():
     
     # MC-AE训练参数（与源代码Train_.py完全一致）
     EPOCH_MCAE = 300       # 恢复源代码的300轮训练
-    LR_MCAE = 8e-4         # 大数据量下适当提高MC-AE学习率
+    LR_MCAE = 5e-4         # 小样本使用标准MC-AE学习率
     BATCHSIZE_MCAE = 100   # 恢复源代码的100批次大小
     
     print(f"\n🔧 MC-AE训练参数（与源代码Train_.py完全对齐）:")
     print(f"   训练轮数: {EPOCH_MCAE} (源代码: 300)")
-    print(f"   学习率: {LR_MCAE} (适应大数据量调整)")
+    print(f"   学习率: {LR_MCAE} (小样本标准设置)")
     print(f"   批次大小: {BATCHSIZE_MCAE} (源代码: 100)")
     print(f"   优化器: Adam")
     print(f"   损失函数: MSELoss")
@@ -1813,8 +1813,7 @@ def main():
     ]
     
     pca_save_paths = [
-        f'/mnt/bz25t/bzhy/datasave/Transformer/models/',  # 统一保存到models目录下
-        f'/mnt/bz25t/bzhy/datasave/',  # 备选路径
+        f'/mnt/bz25t/bzhy/datasave/',  # 用户指定路径
         f'/tmp/',
         f'./',
         f'/mnt/bz25t/bzhy/zhanglikang/project/',

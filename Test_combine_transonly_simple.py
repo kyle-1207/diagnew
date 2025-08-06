@@ -146,7 +146,7 @@ def load_test_samples():
     """从Labels.xls加载测试样本"""
     try:
         import pandas as pd
-        labels_path = '../QAS/Labels.xls'
+        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
         df = pd.read_excel(labels_path)
         
         # 提取测试样本
@@ -177,20 +177,27 @@ def load_test_samples():
 TEST_SAMPLES = load_test_samples()
 ALL_TEST_SAMPLES = TEST_SAMPLES['normal'] + TEST_SAMPLES['fault']
 
-# 模型路径配置
+# 模型路径配置 - 统一使用固定路径
 MODEL_PATHS = {
     "TRANSFORMER": {
-        "transformer_model": "./models/transformer_model.pth",
-        "net_model": "./models/net_model_transformer.pth", 
-        "netx_model": "./models/netx_model_transformer.pth",
-        "pca_files": ["./models/v_I_transformer.npy", "./models/v_transformer.npy",
-                     "./models/v_ratio_transformer.npy", "./models/p_k_transformer.npy",
-                     "./models/data_mean_transformer.npy", "./models/data_std_transformer.npy",
-                     "./models/T_95_limit_transformer.npy", "./models/T_99_limit_transformer.npy",
-                     "./models/SPE_95_limit_transformer.npy", "./models/SPE_99_limit_transformer.npy",
-                     "./models/P_transformer.npy", "./models/k_transformer.npy",
-                     "./models/P_t_transformer.npy", "./models/X_transformer.npy",
-                     "./models/data_nor_transformer.npy"]
+        "transformer_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/transformer_model_hybrid_feedback.pth",
+        "net_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/net_model_hybrid_feedback.pth", 
+        "netx_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/netx_model_hybrid_feedback.pth",
+        "pca_files": ["/mnt/bz25t/bzhy/datasave/Transformer/models/v_I_hybrid_feedback.npy", 
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/v_hybrid_feedback.npy",
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/v_ratio_hybrid_feedback.npy", 
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/p_k_hybrid_feedback.npy",
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/data_mean_hybrid_feedback.npy", 
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/data_std_hybrid_feedback.npy",
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/T_95_limit_hybrid_feedback.npy", 
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/T_99_limit_hybrid_feedback.npy",
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/SPE_95_limit_hybrid_feedback.npy", 
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/SPE_99_limit_hybrid_feedback.npy",
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/P_hybrid_feedback.npy", 
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/k_hybrid_feedback.npy",
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/P_t_hybrid_feedback.npy", 
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/X_hybrid_feedback.npy",
+                     "/mnt/bz25t/bzhy/datasave/Transformer/models/data_nor_hybrid_feedback.npy"]
     }
 }
 
@@ -350,7 +357,7 @@ def three_window_fault_detection(fai_values, threshold1, sample_id):
 #----------------------------------------数据加载函数------------------------------
 def load_test_sample(sample_id):
     """加载测试样本"""
-    base_path = f'../QAS/{sample_id}'
+    base_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}'
     
     # 检查样本目录是否存在
     if not os.path.exists(base_path):
@@ -376,7 +383,7 @@ def load_models():
     print("🔧 开始加载Transformer模型...")
     
     # 加载Transformer模型
-    from Train_Transformer import TransformerPredictor
+    from Train_Transformer_HybridFeedback import TransformerPredictor
     models['transformer'] = TransformerPredictor().to(device)
     
     # 使用安全加载函数
@@ -1167,9 +1174,9 @@ def save_test_results(test_results, performance_metrics):
     """保存Transformer测试结果"""
     print("\n💾 保存Transformer测试结果...")
     
-    # 创建结果目录
+    # 创建结果目录 - 统一保存到models目录下
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_dir = f"transformer_test_results_{timestamp}"
+    result_dir = f"/mnt/bz25t/bzhy/datasave/Transformer/models/test_results_{timestamp}"
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(f"{result_dir}/visualizations", exist_ok=True)
     os.makedirs(f"{result_dir}/detailed_results", exist_ok=True)

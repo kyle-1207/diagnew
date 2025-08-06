@@ -323,8 +323,30 @@ def check_model_files():
     # 检查PCA参数文件 (从混合反馈训练结果加载)
     pca_params_path = "/mnt/bz25t/bzhy/datasave/Transformer/models/pca_params_hybrid_feedback.pkl"
     if not os.path.exists(pca_params_path):
-        missing_files.append(f"PCA_PARAMS: {pca_params_path}")
-        print(f"   ❌ 缺失: {pca_params_path}")
+        print(f"   ⚠️  PCA参数pickle文件不存在: {pca_params_path}")
+        print(f"   🔍 检查备选的npy文件...")
+        
+        # 检查备选的npy文件
+        pca_npy_files = [
+            "/mnt/bz25t/bzhy/datasave/Transformer/models/v_I_hybrid_feedback.npy",
+            "/mnt/bz25t/bzhy/datasave/Transformer/models/data_mean_hybrid_feedback.npy",
+            "/mnt/bz25t/bzhy/datasave/Transformer/models/data_std_hybrid_feedback.npy",
+            "/mnt/bz25t/bzhy/datasave/Transformer/models/T_99_limit_hybrid_feedback.npy"
+        ]
+        
+        npy_files_exist = 0
+        for npy_file in pca_npy_files:
+            if os.path.exists(npy_file):
+                npy_files_exist += 1
+                file_size = os.path.getsize(npy_file) / (1024 * 1024)
+                print(f"   ✅ 存在: {npy_file} ({file_size:.1f}MB)")
+            else:
+                print(f"   ❌ 缺失: {npy_file}")
+        
+        if npy_files_exist >= 3:
+            print(f"   ✅ 发现{npy_files_exist}个npy文件，可以重建PCA参数")
+        else:
+            missing_files.append(f"PCA_PARAMS: 缺少足够的npy文件")
     else:
         file_size = os.path.getsize(pca_params_path) / (1024 * 1024)  # MB
         print(f"   ✅ 存在: {pca_params_path} ({file_size:.1f}MB)")
@@ -906,7 +928,31 @@ def load_models():
         print(f"✅ PCA参数已加载: {pca_params_path}")
     except Exception as e:
         print(f"❌ 加载PCA参数失败: {e}")
-        raise RuntimeError("PCA参数加载失败")
+        print("🔄 尝试从单独的npy文件重建PCA参数...")
+        try:
+            # 从训练脚本保存的npy文件重建PCA参数
+            pca_base_path = "/mnt/bz25t/bzhy/datasave/Transformer/models/"
+            models['pca_params'] = {
+                'v_I': np.load(f"{pca_base_path}v_I_hybrid_feedback.npy"),
+                'v': np.load(f"{pca_base_path}v_hybrid_feedback.npy"),
+                'v_ratio': np.load(f"{pca_base_path}v_ratio_hybrid_feedback.npy"),
+                'p_k': np.load(f"{pca_base_path}p_k_hybrid_feedback.npy"),
+                'data_mean': np.load(f"{pca_base_path}data_mean_hybrid_feedback.npy"),
+                'data_std': np.load(f"{pca_base_path}data_std_hybrid_feedback.npy"),
+                'T_95_limit': np.load(f"{pca_base_path}T_95_limit_hybrid_feedback.npy"),
+                'T_99_limit': np.load(f"{pca_base_path}T_99_limit_hybrid_feedback.npy"),
+                'SPE_95_limit': np.load(f"{pca_base_path}SPE_95_limit_hybrid_feedback.npy"),
+                'SPE_99_limit': np.load(f"{pca_base_path}SPE_99_limit_hybrid_feedback.npy"),
+                'P': np.load(f"{pca_base_path}P_hybrid_feedback.npy"),
+                'k': np.load(f"{pca_base_path}k_hybrid_feedback.npy"),
+                'P_t': np.load(f"{pca_base_path}P_t_hybrid_feedback.npy"),
+                'X': np.load(f"{pca_base_path}X_hybrid_feedback.npy"),
+                'data_nor': np.load(f"{pca_base_path}data_nor_hybrid_feedback.npy")
+            }
+            print(f"✅ PCA参数从npy文件重建成功")
+        except Exception as e2:
+            print(f"❌ PCA参数重建也失败: {e2}")
+            raise RuntimeError("PCA参数加载失败")
     
     return models
 
