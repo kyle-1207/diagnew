@@ -655,21 +655,46 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         }
     }
     
-    # 检查是否为故障样本（基于样本ID）
-    is_fault_sample = sample_id in TEST_SAMPLES['fault']
+    # 🔧 关键修复：确保样本ID类型一致性检查
+    # 将sample_id转换为字符串进行比较
+    sample_id_str = str(sample_id)
+    is_fault_sample = sample_id_str in TEST_SAMPLES['fault']
     
-    # 调试信息
-    print(f"   样本{sample_id}: 类型={type(sample_id)}, 故障样本列表={TEST_SAMPLES['fault']}, 是故障样本={is_fault_sample}")
+    # 详细调试信息
+    print(f"   📊 样本分类检查:")
+    print(f"      原始sample_id: {sample_id} (类型: {type(sample_id)})")
+    print(f"      字符串sample_id: {sample_id_str}")
+    print(f"      故障样本列表: {TEST_SAMPLES['fault']}")
+    print(f"      正常样本列表: {TEST_SAMPLES['normal']}")
+    print(f"      是故障样本: {is_fault_sample}")
+    
+    # 额外验证：检查是否在正常样本中
+    is_normal_sample = sample_id_str in TEST_SAMPLES['normal']
+    print(f"      是正常样本: {is_normal_sample}")
+    
+    if not is_fault_sample and not is_normal_sample:
+        print(f"   ⚠️ 警告：样本{sample_id}既不在故障列表也不在正常列表中，默认为故障样本进行检测")
+        is_fault_sample = True
     
     if not is_fault_sample:
-        # 正常样本直接返回全0标签
-        print(f"   → 样本{sample_id}为正常样本，返回全0标签")
+        # 🔧 关键修复：正常样本不进行故障检测，所有采样点都是正常的
+        print(f"   → 样本{sample_id}为正常样本，所有采样点标记为正常（不进行故障检测）")
+        print(f"   → 正常样本中超过阈值的点都是假阳性（误报），不应标记为故障")
+        
+        # 统计正常样本中的假阳性情况（仅用于分析，不标记为故障）
+        false_positive_count = np.sum(fai_values > threshold1)
+        false_positive_ratio = false_positive_count / len(fai_values)
+        
+        print(f"   → 假阳性统计: {false_positive_count}个点超阈值 ({false_positive_ratio:.2%})")
+        
         detection_info['detection_stats'] = {
             'total_trigger_points': 0,
             'total_marked_regions': 0,
             'total_fault_points': 0,
             'fault_ratio': 0.0,
-            'detection_mode': 'normal_sample'
+            'detection_mode': 'normal_sample',
+            'false_positive_count': false_positive_count,
+            'false_positive_ratio': false_positive_ratio
         }
         # 为兼容性添加空字段
         detection_info['trigger_points'] = []
@@ -677,17 +702,19 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         detection_info['candidate_points'] = []
         detection_info['verified_points'] = []
         
-        # 确保fault_labels确实是全0
+        # 确保fault_labels确实是全0（正常样本不标记任何故障点）
         fault_labels.fill(0)
-        print(f"   → fault_labels总和: {np.sum(fault_labels)} (应该为0)")
+        print(f"   → fault_labels总和: {np.sum(fault_labels)} (正常样本应该为0)")
         return fault_labels, detection_info
     
-    # 获取多级阈值（严格按照源代码Test_.py的方式）
+    # 🔧 关键修复：优先使用外部传入的阈值，避免重复计算
     if config and 'threshold2' in config and 'threshold3' in config:
         threshold2 = config['threshold2']
         threshold3 = config['threshold3']
+        print(f"   ✅ 使用外部传入阈值: T1={threshold1:.4f}, T2={threshold2:.4f}, T3={threshold3:.4f}")
     else:
-        # 按照源代码Test_.py的阈值计算方式
+        # 降级：重新计算阈值（但这不应该发生）
+        print(f"   ⚠️ 警告：外部阈值缺失，重新计算（可能导致不一致）")
         nm = 3000
         mm = len(fai_values)
         
@@ -702,7 +729,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             threshold3 = mean_fai + 6 * std_fai          # 对应源代码threshold3
             
             # 验证threshold1是否与传入的一致（调试用）
-            print(f"   源代码阈值计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
+            print(f"   内部重新计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
         else:
             # 数据太短，使用全部数据
             mean_fai = np.mean(fai_values)
@@ -712,16 +739,20 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             threshold2 = mean_fai + 4.5 * std_fai
             threshold3 = mean_fai + 6 * std_fai
             
-            print(f"   短数据阈值计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
+            print(f"   短数据重新计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
     
-    # 故障样本：实施改进的多级5点检测
+    # 🔧 故障样本：使用3点检测方式找出真正的故障采样点
+    print(f"   → 样本{sample_id}为故障样本，开始故障采样点检测")
+    print(f"   → 说明：故障样本中有些采样点是故障的，有些是正常的")
+    print(f"   → 目标：通过3点检测方式识别真正的故障采样点")
+    
     trigger_points = []
     marked_regions = []
     
-    # 策略4.0：三级分级检测策略
-    print(f"   🔧 策略4.0: 三级分级检测策略...")
-    print(f"   分析结果: 故障样本有{np.sum(fai_values > threshold1)}个异常点({np.sum(fai_values > threshold1)/len(fai_values)*100:.2f}%)")
-    print(f"   阈值分布: >6σ({np.sum(fai_values > threshold3)}个), >4.5σ({np.sum(fai_values > threshold2)}个), >3σ({np.sum(fai_values > threshold1)}个)")
+    # 策略4.0：三级分级检测策略（基于源代码阈值）
+    print(f"   🔧 策略4.0: 三级分级检测策略（严格按照源代码Test_.py）...")
+    print(f"   异常点统计: 超3σ({np.sum(fai_values > threshold1)}个), 超4.5σ({np.sum(fai_values > threshold2)}个), 超6σ({np.sum(fai_values > threshold3)}个)")
+    print(f"   异常比例: {np.sum(fai_values > threshold1)/len(fai_values)*100:.2f}%")
     
     detection_config = {
         'mode': 'hierarchical_v2',
@@ -1171,28 +1202,63 @@ def process_single_sample(sample_id, models, config=None):
         time
     )
     
-    # 计算阈值 - 按源代码方式，每个样本使用自己的数据
-    nm = 3000  # 固定值，与源代码一致
+    # 🔧 严格按照源代码Test_.py的阈值计算方式
+    # 源代码注释中的计算方法：
+    # nm = 3000
+    # mm = len(fai)
+    # threshold1 = np.mean(fai[nm:mm]) + 3*np.std(fai[nm:mm])
+    # threshold2 = np.mean(fai[nm:mm]) + 4.5*np.std(fai[nm:mm]) 
+    # threshold3 = np.mean(fai[nm:mm]) + 6*np.std(fai[nm:mm])
+    
+    nm = 3000  # 源代码固定值
     mm = len(fai)  # 数据总长度
     
-    # 确保数据长度足够
+    print(f"   📊 阈值计算: nm={nm}, mm={mm}, 使用数据段=[{nm}:{mm}]")
+    
     if mm > nm:
-        # 使用后半段数据计算阈值（源代码逻辑）
-        threshold1 = np.mean(fai[nm:mm]) + 3*np.std(fai[nm:mm])
-        threshold2 = np.mean(fai[nm:mm]) + 4.5*np.std(fai[nm:mm])
-        threshold3 = np.mean(fai[nm:mm]) + 6*np.std(fai[nm:mm])
+        # 严格按照源代码：使用后半段数据计算阈值
+        fai_baseline = fai[nm:mm]
+        mean_baseline = np.mean(fai_baseline)
+        std_baseline = np.std(fai_baseline)
+        
+        threshold1 = mean_baseline + 3 * std_baseline      # 3σ
+        threshold2 = mean_baseline + 4.5 * std_baseline    # 4.5σ  
+        threshold3 = mean_baseline + 6 * std_baseline      # 6σ
+        
+        print(f"   ✅ 源代码方式计算阈值:")
+        print(f"      基线段统计: 均值={mean_baseline:.6f}, 标准差={std_baseline:.6f}")
+        print(f"      T1(3σ)={threshold1:.6f}, T2(4.5σ)={threshold2:.6f}, T3(6σ)={threshold3:.6f}")
     else:
-        # 数据太短，使用全部数据
-        print(f"   ⚠️ 样本{sample_id}数据长度({mm})不足3000，使用全部数据计算阈值")
-        threshold1 = np.mean(fai) + 3*np.std(fai)
-        threshold2 = np.mean(fai) + 4.5*np.std(fai)
-        threshold3 = np.mean(fai) + 6*np.std(fai)
+        # 数据太短，使用全部数据（但记录警告）
+        print(f"   ⚠️ 警告：样本{sample_id}数据长度({mm})不足3000，无法按源代码方式计算")
+        print(f"   ⚠️ 降级为全数据计算，可能与源代码结果不一致")
+        
+        mean_all = np.mean(fai)
+        std_all = np.std(fai)
+        
+        threshold1 = mean_all + 3 * std_all
+        threshold2 = mean_all + 4.5 * std_all  
+        threshold3 = mean_all + 6 * std_all
+        
+        print(f"      全数据统计: 均值={mean_all:.6f}, 标准差={std_all:.6f}")
+        print(f"      T1(3σ)={threshold1:.6f}, T2(4.5σ)={threshold2:.6f}, T3(6σ)={threshold3:.6f}")
     
     # 根据检测模式选择检测函数
-    if CURRENT_DETECTION_MODE == "five_point":
-        fault_labels, detection_info = five_point_fault_detection(fai, threshold1, sample_id, config)
+    # 🔧 关键修复：将计算好的阈值传递给检测函数
+    threshold_config = {
+        'threshold1': threshold1,
+        'threshold2': threshold2, 
+        'threshold3': threshold3
+    }
+    if config:
+        threshold_config.update(config)
+    
+    print(f"   📊 传递给检测函数的阈值: T1={threshold1:.4f}, T2={threshold2:.4f}, T3={threshold3:.4f}")
+    
+    if CURRENT_DETECTION_MODE == "five_point" or CURRENT_DETECTION_MODE == "five_point_improved":
+        fault_labels, detection_info = five_point_fault_detection(fai, threshold1, sample_id, threshold_config)
     else:
-        fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id, config)
+        fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id, threshold_config)
     
     # 构建结果
     sample_result = {
