@@ -644,8 +644,12 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     # 🔧 关键修改：符合源代码设计，前3000点不检测
     STARTUP_PERIOD = 3000  # 源代码中的nm值，启动/不稳定期
     
+    # 提前定义有效区域变量，避免作用域问题
+    effective_fai = fai_values[STARTUP_PERIOD:] if len(fai_values) > STARTUP_PERIOD else fai_values
+    
     # 初始化输出
     fault_labels = np.zeros(len(fai_values), dtype=int)
+    effective_labels = fault_labels[STARTUP_PERIOD:] if len(fault_labels) > STARTUP_PERIOD else fault_labels
     detection_info = {
         'trigger_points': [],      # 触发5点检测的点
         'marked_regions': [],      # 标记的5点区域
@@ -951,6 +955,8 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     
     # 🔧 修改：统计信息（分级检测，基于有效区域）
     fault_count = np.sum(fault_labels > 0)  # 任何级别都算故障（全序列）
+    # 更新effective_labels为最新的fault_labels切片
+    effective_labels = fault_labels[STARTUP_PERIOD:] if len(fault_labels) > STARTUP_PERIOD else fault_labels
     effective_fault_count = np.sum(effective_labels > 0) if len(effective_labels) > 0 else 0  # 有效区域故障
     level1_count = np.sum(fault_labels == 1)
     level2_count = np.sum(fault_labels == 2)
@@ -984,9 +990,8 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     print(f"   → 分级统计: L1={level1_count}点, L2={level2_count}点, L3={level3_count}点")
     print(f"   → 触发点数: {len(triggers)}个, 标记区域: {len(marked_regions)}个")
     
-    # 🔧 修改：添加改进效果对比（只计算有效检测区域）
-    effective_fai = fai_values[STARTUP_PERIOD:] if len(fai_values) > STARTUP_PERIOD else []
-    effective_labels = fault_labels[STARTUP_PERIOD:] if len(fault_labels) > STARTUP_PERIOD else []
+    # 🔧 修改：更新有效区域变量（fault_labels已经被修改）
+    effective_labels = fault_labels[STARTUP_PERIOD:] if len(fault_labels) > STARTUP_PERIOD else fault_labels
     
     original_anomaly_count_total = np.sum(fai_values > threshold1)  # 全序列异常点
     original_anomaly_count_effective = np.sum(effective_fai > threshold1) if len(effective_fai) > 0 else 0  # 有效区域异常点
