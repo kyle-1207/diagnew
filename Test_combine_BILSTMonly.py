@@ -588,58 +588,129 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     trigger_points = []
     marked_regions = []
     
-    # 策略1：基于连续性的优化5点检测（单级检测，保持3σ阈值）
-    print(f"   🔧 策略1: 基于连续性的优化5点检测...")
+    # 策略4.0：三级分级检测策略
+    print(f"   🔧 策略4.0: 三级分级检测策略...")
     print(f"   分析结果: 故障样本有{np.sum(fai_values > threshold1)}个异常点({np.sum(fai_values > threshold1)/len(fai_values)*100:.2f}%)")
+    print(f"   阈值分布: >6σ({np.sum(fai_values > threshold3)}个), >4.5σ({np.sum(fai_values > threshold2)}个), >3σ({np.sum(fai_values > threshold1)}个)")
     
     detection_config = {
-        'center_threshold': threshold1,           # 保持3σ阈值不变
-        'neighbor_threshold': threshold1 * 0.7,  # 邻域阈值降低到70%
-        'min_neighbors': 1,                      # 只需1个邻居超过阈值
-        'marking_range': 2,                      # 标记±2个点（共5个点）
-        'condition': 'optimized_fault'
+        'mode': 'hierarchical_v2',
+        'level_3': {
+            'center_threshold': threshold3,      # 6σ
+            'neighbor_threshold': None,          # 无邻域要求
+            'min_neighbors': 0,
+            'marking_range': [-1, 0, 1],        # 标记i-1, i, i+1
+            'condition': 'level3_high_confidence'
+        },
+        'level_2': {
+            'center_threshold': threshold2,      # 4.5σ  
+            'neighbor_threshold': threshold1,    # 3σ
+            'min_neighbors': 1,
+            'marking_range': [-1, 0, 1],        # 标记i-1, i, i+1
+            'condition': 'level2_medium_confidence'
+        },
+        'level_1': {
+            'center_threshold': threshold1,      # 3σ
+            'neighbor_threshold': threshold1 * 0.67,  # 2σ
+            'min_neighbors': 1,
+            'marking_range': [0],                # 只标记i
+            'condition': 'level1_basic_confidence'
+        }
     }
     
-    print(f"   检测参数: 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.7:.4f}, 最少邻居=1个")
+    print(f"   检测参数:")
+    print(f"   Level 3 (6σ): 中心阈值={threshold3:.4f}, 无邻域要求, 标记3点")
+    print(f"   Level 2 (4.5σ): 中心阈值={threshold2:.4f}, 邻域阈值={threshold1:.4f}, 最少邻居=1个, 标记3点")
+    print(f"   Level 1 (3σ): 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.67:.4f}, 最少邻居=1个, 标记1点")
     
-    # 单级5点检测（策略1实现）
+    # 三级分级检测实现
     triggers = []
     for i in range(2, len(fai_values) - 2):
         neighborhood = fai_values[i-2:i+3]  # 5个点的邻域
+        neighbors = [fai_values[i-2], fai_values[i-1], fai_values[i+1], fai_values[i+2]]  # 4个邻居
         center = fai_values[i]
         
-        # 检查触发条件
-        center_condition = center > detection_config['center_threshold']
-        neighbor_condition = np.sum(neighborhood > detection_config['neighbor_threshold']) >= detection_config['min_neighbors']
+        triggered = False
+        trigger_level = None
+        trigger_condition = None
+        detection_details = {}
         
-        if center_condition and neighbor_condition:
+        # Level 3: 最严格阈值，最宽松条件 (6σ)
+        if center > detection_config['level_3']['center_threshold']:
+            triggered = True
+            trigger_level = 3
+            trigger_condition = detection_config['level_3']['condition']
+            marking_range = detection_config['level_3']['marking_range']
+            detection_details = {
+                'center_value': center,
+                'center_threshold': detection_config['level_3']['center_threshold'],
+                'neighbors_above_threshold': 'N/A (no requirement)',
+                'required_neighbors': 0,
+                'neighborhood_values': neighborhood.tolist(),
+                'trigger_reason': '6σ high confidence detection'
+            }
+            
+        # Level 2: 中等阈值，中等条件 (4.5σ) 
+        elif center > detection_config['level_2']['center_threshold']:
+            neighbors_above_t1 = np.sum(np.array(neighbors) > detection_config['level_2']['neighbor_threshold'])
+            if neighbors_above_t1 >= detection_config['level_2']['min_neighbors']:
+                triggered = True
+                trigger_level = 2
+                trigger_condition = detection_config['level_2']['condition']
+                marking_range = detection_config['level_2']['marking_range']
+                detection_details = {
+                    'center_value': center,
+                    'center_threshold': detection_config['level_2']['center_threshold'],
+                    'neighbors_above_threshold': neighbors_above_t1,
+                    'required_neighbors': detection_config['level_2']['min_neighbors'],
+                    'neighborhood_values': neighborhood.tolist(),
+                    'trigger_reason': '4.5σ medium confidence detection'
+                }
+                
+        # Level 1: 最低阈值，相对严格条件 (3σ)
+        elif center > detection_config['level_1']['center_threshold']:
+            neighbors_above_2sigma = np.sum(np.array(neighbors) > detection_config['level_1']['neighbor_threshold'])
+            if neighbors_above_2sigma >= detection_config['level_1']['min_neighbors']:
+                triggered = True
+                trigger_level = 1
+                trigger_condition = detection_config['level_1']['condition']
+                marking_range = detection_config['level_1']['marking_range']
+                detection_details = {
+                    'center_value': center,
+                    'center_threshold': detection_config['level_1']['center_threshold'],
+                    'neighbors_above_threshold': neighbors_above_2sigma,
+                    'required_neighbors': detection_config['level_1']['min_neighbors'],
+                    'neighborhood_values': neighborhood.tolist(),
+                    'trigger_reason': '3σ basic confidence detection'
+                }
+        
+        if triggered:
             # 计算标记范围
-            mark_range = detection_config['marking_range']
-            start_mark = max(0, i - mark_range)
-            end_mark = min(len(fai_values), i + mark_range + 1)
+            start_mark = max(0, i + min(marking_range))
+            end_mark = min(len(fai_values), i + max(marking_range) + 1)
             
             triggers.append({
                 'center': i,
-                'level': 1,  # 单级检测
+                'level': trigger_level,
                 'range': (start_mark, end_mark),
-                'trigger_condition': detection_config['condition'],
-                'detection_details': {
-                    'center_value': center,
-                    'center_threshold': detection_config['center_threshold'],
-                    'neighbors_above_threshold': np.sum(neighborhood > detection_config['neighbor_threshold']),
-                    'required_neighbors': detection_config['min_neighbors'],
-                    'neighborhood_values': neighborhood.tolist()
-                }
+                'trigger_condition': trigger_condition,
+                'detection_details': detection_details
             })
     
-    # 第二轮：处理所有触发点（单级处理）
+    # 第二轮：处理所有触发点（分级处理）
     processed_triggers = []
+    level_counts = {1: 0, 2: 0, 3: 0}
+    
     for trigger in triggers:
         start, end = trigger['range']
         center = trigger['center']
+        level = trigger['level']
+        
+        # 统计各级别触发次数
+        level_counts[level] += 1
         
         # 标记故障区域
-        fault_labels[start:end] = 1  # 单级标记
+        fault_labels[start:end] = level  # 使用级别作为标记值
         trigger_points.append(center)
         
         # 记录区域信息
@@ -654,18 +725,21 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         
         marked_regions.append({
             'trigger_point': center,
-            'level': 1,  # 单级
+            'level': level,  # 分级标记
             'range': (start, end),
             'length': end - start,
             'region_stats': region_stats,
             'trigger_condition': trigger['trigger_condition'],
             'trigger_values': {
                 'center': fai_values[center],
-                'neighborhood_above_threshold': np.sum(fai_values[max(0, center-2):min(len(fai_values), center+3)] > detection_config['neighbor_threshold'])
+                'detection_level': f"Level {level}",
+                'trigger_reason': trigger['detection_details']['trigger_reason']
             }
         })
         
         processed_triggers.append(trigger)
+    
+    print(f"   触发统计: Level 3({level_counts[3]}次), Level 2({level_counts[2]}次), Level 1({level_counts[1]}次)")
     
     detection_info['trigger_points'] = trigger_points
     detection_info['marked_regions'] = marked_regions
@@ -675,29 +749,35 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     detection_info['candidate_points'] = []  # 5点检测模式中不使用，但为兼容性保留
     detection_info['verified_points'] = []   # 5点检测模式中不使用，但为兼容性保留
     
-    # 统计信息（单级检测）
-    fault_count = np.sum(fault_labels == 1)
+    # 统计信息（分级检测）
+    fault_count = np.sum(fault_labels > 0)  # 任何级别都算故障
+    level1_count = np.sum(fault_labels == 1)
+    level2_count = np.sum(fault_labels == 2)
+    level3_count = np.sum(fault_labels == 3)
     
     detection_info['detection_stats'] = {
         'total_trigger_points': len(trigger_points),
         'total_marked_regions': len(marked_regions),
         'total_fault_points': fault_count,
         'fault_ratio': fault_count / len(fault_labels),
-        'detection_mode': 'optimized_five_point',
+        'detection_mode': 'hierarchical_three_level',
+        'level_statistics': {
+            'level_1_points': level1_count,
+            'level_2_points': level2_count,
+            'level_3_points': level3_count,
+            'level_1_triggers': level_counts[1],
+            'level_2_triggers': level_counts[2],
+            'level_3_triggers': level_counts[3]
+        },
         'mean_region_length': np.mean([m['length'] for m in marked_regions]) if marked_regions else 0,
         'mean_trigger_fai': np.mean([m['trigger_values']['center'] for m in marked_regions]) if marked_regions else 0,
-        'strategy_used': 'strategy_1_neighbor_relaxed',
-        'parameters': {
-            'center_threshold': detection_config['center_threshold'],
-            'neighbor_threshold': detection_config['neighbor_threshold'],
-            'min_neighbors': detection_config['min_neighbors'],
-            'marking_range': detection_config['marking_range']
-        }
+        'strategy_used': 'strategy_4_hierarchical_detection',
+        'parameters': detection_config
     }
     
-    print(f"   → 策略1检测结果: 检测到故障点={fault_count}个 ({fault_count/len(fault_labels)*100:.2f}%)")
+    print(f"   → 策略4.0检测结果: 检测到故障点={fault_count}个 ({fault_count/len(fault_labels)*100:.2f}%)")
+    print(f"   → 分级统计: L1={level1_count}点, L2={level2_count}点, L3={level3_count}点")
     print(f"   → 触发点数: {len(triggers)}个, 标记区域: {len(marked_regions)}个")
-    print(f"   → 检测参数: 中心阈值=3σ, 邻域阈值=0.7×3σ, 最少邻居=1个")
     
     # 添加改进效果对比
     original_anomaly_count = np.sum(fai_values > threshold1)
