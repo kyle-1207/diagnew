@@ -842,25 +842,25 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         # 标记故障区域
         fault_labels[start:end] = level  # 使用级别作为标记值
         trigger_points.append(center)
-            
-            # 记录区域信息
+        
+        # 记录区域信息
         region_data = fai_values[start:end]
-            region_stats = {
-                'mean_fai': np.mean(region_data),
-                'max_fai': np.max(region_data),
-                'min_fai': np.min(region_data),
-                'std_fai': np.std(region_data),
+        region_stats = {
+            'mean_fai': np.mean(region_data),
+            'max_fai': np.max(region_data),
+            'min_fai': np.min(region_data),
+            'std_fai': np.std(region_data),
             'length': end - start
-            }
-            
-            marked_regions.append({
+        }
+        
+        marked_regions.append({
             'trigger_point': center,
             'level': level,  # 分级标记
             'range': (start, end),
             'length': end - start,
-                'region_stats': region_stats,
+            'region_stats': region_stats,
             'trigger_condition': trigger['trigger_condition'],
-                'trigger_values': {
+            'trigger_values': {
                 'center': fai_values[center],
                 'detection_level': f"Level {level}",
                 'trigger_reason': trigger['detection_details']['trigger_reason']
