@@ -708,9 +708,9 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             'level': level,  # 分级标记
             'range': (start, end),
             'length': end - start,
-            'region_stats': region_stats,
+                'region_stats': region_stats,
             'trigger_condition': trigger['trigger_condition'],
-            'trigger_values': {
+                'trigger_values': {
                 'center': fai_values[center],
                 'detection_level': f"Level {level}",
                 'trigger_reason': trigger['detection_details']['trigger_reason']
@@ -1075,58 +1075,50 @@ def main_test_process():
         }
     }
     
+    # Transformer单模型测试
+    total_operations = len(ALL_TEST_SAMPLES)
+    
     print(f"\n🚀 开始Transformer模型测试...")
     print(f"检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
     print(f"检测描述: {DETECTION_MODES[CURRENT_DETECTION_MODE]['description']}")
-    print(f"总共需要处理: {len(ALL_TEST_SAMPLES)} 个样本")
+    print(f"总共需要处理: {total_operations} 个样本")
     
-    # 加载模型
-    print(f"\n{'='*20} 加载模型 {'='*20}")
-    models = load_models()
-    print(f"✅ Transformer 模型加载完成")
-    
-    # 单配置测试 (与BiLSTM保持一致)
-    print(f"\n{'='*20} 测试 Transformer 模型 {'='*20}")
-        if CURRENT_DETECTION_MODE == "three_window":
-        print(f"   检测窗口: {WINDOW_CONFIG['detection_window']}")
-        print(f"   验证窗口: {WINDOW_CONFIG['verification_window']}")
-        print(f"   标记窗口: {WINDOW_CONFIG['marking_window']}")
-        print(f"   验证阈值: {WINDOW_CONFIG['verification_threshold']}")
-        else:
-            print(f"   5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
+    with tqdm(total=total_operations, desc="Transformer测试进度",
+              bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]') as pbar:
         
-    with tqdm(total=len(ALL_TEST_SAMPLES), desc="Transformer测试进度",
-                  bar_format='{desc}: {percentage:3.0f}%|{bar}| {n}/{total} [{elapsed}<{remaining}]') as pbar:
-            
-            for sample_id in ALL_TEST_SAMPLES:
+        print(f"\n{'='*20} 测试 Transformer 模型 {'='*20}")
+        
+        # 加载模型
+        pbar.set_description(f"加载Transformer模型")
+        models = load_models()
+        print(f"✅ Transformer 模型加载完成")
+        
+        for sample_id in ALL_TEST_SAMPLES:
             pbar.set_description(f"Transformer-样本{sample_id}")
             
             try:
-                # 使用窗口配置处理样本
+                # 处理单个样本
                 sample_result = process_single_sample(sample_id, models, WINDOW_CONFIG)
                 test_results["TRANSFORMER"].append(sample_result)
-                    
-                    # 输出简要结果
-                    metrics = sample_result.get('performance_metrics', {})
-                    detection_info = sample_result.get('detection_info', {})
-                    
-                    if CURRENT_DETECTION_MODE == "three_window":
-                        window_stats = detection_info.get('window_stats', {})
-                        detection_ratio = window_stats.get('fault_ratio', 0.0)
-                    else:
-                        detection_stats = detection_info.get('detection_stats', {})
-                        detection_ratio = detection_stats.get('fault_ratio', 0.0)
-                    
-                    print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
-                          f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
-                          f"检测率={detection_ratio:.2%}")
-                    
-                except Exception as e:
-                    print(f"❌ 样本 {sample_id} 处理失败: {e}")
-                    continue
                 
-                pbar.update(1)
-                time.sleep(0.1)  # 避免进度条更新过快
+                # 输出简要结果
+                metrics = sample_result.get('performance_metrics', {})
+                detection_info = sample_result.get('detection_info', {})
+                
+                # 5点检测模式 - 安全获取检测统计
+                detection_stats = detection_info.get('detection_stats', {})
+                detection_ratio = detection_stats.get('fault_ratio', 0.0)
+                
+                print(f"   样本{sample_id}: fai均值={metrics.get('fai_mean', 0.0):.6f}, "
+                      f"异常率={metrics.get('anomaly_ratio', 0.0):.2%}, "
+                      f"检测率={detection_ratio:.2%}")
+                
+            except Exception as e:
+                print(f"❌ 样本 {sample_id} 处理失败: {e}")
+                continue
+            
+            pbar.update(1)
+            time.sleep(0.1)  # 避免进度条更新过快
     
     print(f"\n✅ Transformer测试完成!")
     print(f"   Transformer: 成功处理 {len(test_results['TRANSFORMER'])} 个样本")
@@ -1852,7 +1844,7 @@ print(f"   • 检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
 print(f"\n🔬 Transformer性能:")
 if CURRENT_DETECTION_MODE == "three_window":
     print(f"   • 窗口配置: 检测({WINDOW_CONFIG['detection_window']}) → 验证({WINDOW_CONFIG['verification_window']}) → 标记({WINDOW_CONFIG['marking_window']})")
-    else:
+else:
     print(f"   • 5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
 
 metrics = performance_metrics["TRANSFORMER"]['classification_metrics']
@@ -1876,7 +1868,7 @@ print(f"   • Excel报告: transformer_summary.xlsx")
 transformer_score = np.mean(list(performance_metrics["TRANSFORMER"]['classification_metrics'].values()))
 
 print(f"\n🏆 Transformer综合性能评估:")
-    print(f"   综合得分: {transformer_score:.3f}")
+print(f"   综合得分: {transformer_score:.3f}")
 
 print("\n" + "="*80)
 print("Transformer测试完成！请查看生成的可视化图表和分析报告。")
