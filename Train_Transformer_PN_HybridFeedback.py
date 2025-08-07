@@ -1138,55 +1138,64 @@ def main():
         train_targets = train_targets[indices]
         print(f"   ✅ 采样后形状: vin1 {train_vin1.shape}, targets {train_targets.shape}")
     
-    # 确认最终的输入输出维度
-    actual_input_size = train_vin1.shape[1]  # 特征数
-    actual_output_size = train_targets.shape[1]  # 输出维度
+    # 根据参考代码，使用固定的模型维度配置
+    # Transformer期望: input_size=7, output_size=2
+    model_input_size = 7
+    model_output_size = 2
     
-    print(f"   📊 最终数据维度:")
-    print(f"      样本数: {train_vin1.shape[0]}")
-    print(f"      输入特征数(input_size): {actual_input_size}")
-    print(f"      输出维度(output_size): {actual_output_size}")
+    print(f"   📊 数据维度分析:")
+    print(f"      train_vin1原始形状: {train_vin1.shape}")
+    print(f"      train_targets原始形状: {train_targets.shape}")
+    print(f"      模型期望: input_size={model_input_size}, output_size={model_output_size}")
     
-    # 验证数据合理性
-    if actual_input_size <= 0 or actual_output_size <= 0:
-        raise ValueError(f"数据维度无效: input_size={actual_input_size}, output_size={actual_output_size}")
+    # 调整数据以匹配模型期望
+    if train_vin1.shape[1] != model_input_size:
+        if train_vin1.shape[1] > model_input_size:
+            # 截取前7个特征
+            train_vin1 = train_vin1[:, :model_input_size]
+            print(f"   🔧 截取vin1前{model_input_size}个特征: {train_vin1.shape}")
+        else:
+            # 补零到7个特征
+            padding = np.zeros((train_vin1.shape[0], model_input_size - train_vin1.shape[1]))
+            train_vin1 = np.concatenate([train_vin1, padding], axis=1)
+            print(f"   🔧 补零vin1到{model_input_size}个特征: {train_vin1.shape}")
     
-    if train_vin1.shape[0] != train_targets.shape[0]:
-        raise ValueError(f"样本数量不匹配: vin1={train_vin1.shape[0]}, targets={train_targets.shape[0]}")
+    if train_targets.shape[1] != model_output_size:
+        if train_targets.shape[1] > model_output_size:
+            # 截取前2个输出
+            train_targets = train_targets[:, :model_output_size]
+            print(f"   🔧 截取targets前{model_output_size}个输出: {train_targets.shape}")
+        else:
+            # 补零到2个输出
+            padding = np.zeros((train_targets.shape[0], model_output_size - train_targets.shape[1]))
+            train_targets = np.concatenate([train_targets, padding], axis=1)
+            print(f"   🔧 补零targets到{model_output_size}个输出: {train_targets.shape}")
     
-    print(f"   📊 验证后数据维度: input_size={actual_input_size}, output_size={actual_output_size}")
+    print(f"   📊 最终数据形状: vin1 {train_vin1.shape}, targets {train_targets.shape}")
     print(f"   📊 样本数量: {train_vin1.shape[0]}")
     
-    # 数据质量检查
-    vin1_has_nan = np.isnan(train_vin1).any()
-    vin1_has_inf = np.isinf(train_vin1).any()
-    targets_has_nan = np.isnan(train_targets).any()
-    targets_has_inf = np.isinf(train_targets).any()
-    
-    print(f"   🔍 数据质量检查:")
-    print(f"      vin1 - NaN: {vin1_has_nan}, Inf: {vin1_has_inf}")
-    print(f"      targets - NaN: {targets_has_nan}, Inf: {targets_has_inf}")
-    
-    if vin1_has_nan or vin1_has_inf or targets_has_nan or targets_has_inf:
-        print(f"   ⚠️ 检测到异常值，进行清理...")
+    # 数据质量检查和清理
+    if np.isnan(train_vin1).any() or np.isinf(train_vin1).any():
+        print(f"   ⚠️ 清理vin1异常值...")
         train_vin1 = np.nan_to_num(train_vin1, nan=0.0, posinf=1.0, neginf=0.0)
-        train_targets = np.nan_to_num(train_targets, nan=0.0, posinf=1.0, neginf=0.0)
-        print(f"   ✅ 数据清理完成")
     
-    # 显示数据范围
+    if np.isnan(train_targets).any() or np.isinf(train_targets).any():
+        print(f"   ⚠️ 清理targets异常值...")
+        train_targets = np.nan_to_num(train_targets, nan=0.0, posinf=1.0, neginf=0.0)
+    
     print(f"   📈 vin1范围: [{train_vin1.min():.6f}, {train_vin1.max():.6f}]")
     print(f"   📈 targets范围: [{train_targets.min():.6f}, {train_targets.max():.6f}]")
     
-    # 创建Transformer模型
+    # 创建Transformer模型 - 使用固定维度
     transformer = TransformerPredictor(
-        input_size=actual_input_size, 
+        input_size=model_input_size, 
         d_model=128, 
         nhead=8, 
         num_layers=3, 
-        output_size=actual_output_size
+        output_size=model_output_size
     ).to(device)
     
-    print(f"   ✅ Transformer模型创建完成: input_size={actual_input_size}, output_size={actual_output_size}")
+    print(f"   ✅ Transformer模型创建完成: input_size={model_input_size}, output_size={model_output_size}")
     
     # 创建数据加载器
     train_dataset = TransformerDataset(train_vin1, train_targets)
