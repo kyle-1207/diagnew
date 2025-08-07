@@ -742,8 +742,25 @@ class TransformerDataset(Dataset):
     """Transformer训练数据集"""
     
     def __init__(self, vin1_data, targets_data):
+        # 确保输入数据是2D的
+        if isinstance(vin1_data, np.ndarray):
+            if vin1_data.ndim == 1:
+                vin1_data = vin1_data.reshape(1, -1)  # [features] -> [1, features]
+            elif vin1_data.ndim > 2:
+                vin1_data = vin1_data.reshape(vin1_data.shape[0], -1)  # 展平到2D
+        
+        if isinstance(targets_data, np.ndarray):
+            if targets_data.ndim == 1:
+                targets_data = targets_data.reshape(1, -1)  # [features] -> [1, features]
+            elif targets_data.ndim > 2:
+                targets_data = targets_data.reshape(targets_data.shape[0], -1)  # 展平到2D
+        
+        print(f"   📊 Dataset输入形状: vin1 {np.array(vin1_data).shape}, targets {np.array(targets_data).shape}")
+        
         self.vin1_data = torch.FloatTensor(vin1_data)
         self.targets_data = torch.FloatTensor(targets_data)
+        
+        print(f"   📊 Dataset tensor形状: vin1 {self.vin1_data.shape}, targets {self.targets_data.shape}")
         
         # 数据处理
         self.vin1_data = physics_based_data_processing_silent(self.vin1_data, 'general')
@@ -1091,14 +1108,62 @@ def main():
     print("🤖 第2阶段: Transformer基础训练")
     print("="*50)
     
+    # 数据维度验证和修正
+    print(f"   📊 原始数据形状: train_vin1 {train_vin1.shape}, train_targets {train_targets.shape}")
+    
+    # 确保数据至少是2D
+    if train_vin1.ndim == 1:
+        train_vin1 = train_vin1.reshape(1, -1)
+        print(f"   🔄 修正vin1形状为: {train_vin1.shape}")
+    
+    if train_targets.ndim == 1:
+        train_targets = train_targets.reshape(1, -1)
+        print(f"   🔄 修正targets形状为: {train_targets.shape}")
+    
+    # 获取实际输入数据维度
+    actual_input_size = train_vin1.shape[1]
+    actual_output_size = train_targets.shape[1]
+    
+    # 验证数据合理性
+    if actual_input_size <= 0 or actual_output_size <= 0:
+        raise ValueError(f"数据维度无效: input_size={actual_input_size}, output_size={actual_output_size}")
+    
+    if train_vin1.shape[0] != train_targets.shape[0]:
+        raise ValueError(f"样本数量不匹配: vin1={train_vin1.shape[0]}, targets={train_targets.shape[0]}")
+    
+    print(f"   📊 验证后数据维度: input_size={actual_input_size}, output_size={actual_output_size}")
+    print(f"   📊 样本数量: {train_vin1.shape[0]}")
+    
+    # 数据质量检查
+    vin1_has_nan = np.isnan(train_vin1).any()
+    vin1_has_inf = np.isinf(train_vin1).any()
+    targets_has_nan = np.isnan(train_targets).any()
+    targets_has_inf = np.isinf(train_targets).any()
+    
+    print(f"   🔍 数据质量检查:")
+    print(f"      vin1 - NaN: {vin1_has_nan}, Inf: {vin1_has_inf}")
+    print(f"      targets - NaN: {targets_has_nan}, Inf: {targets_has_inf}")
+    
+    if vin1_has_nan or vin1_has_inf or targets_has_nan or targets_has_inf:
+        print(f"   ⚠️ 检测到异常值，进行清理...")
+        train_vin1 = np.nan_to_num(train_vin1, nan=0.0, posinf=1.0, neginf=0.0)
+        train_targets = np.nan_to_num(train_targets, nan=0.0, posinf=1.0, neginf=0.0)
+        print(f"   ✅ 数据清理完成")
+    
+    # 显示数据范围
+    print(f"   📈 vin1范围: [{train_vin1.min():.6f}, {train_vin1.max():.6f}]")
+    print(f"   📈 targets范围: [{train_targets.min():.6f}, {train_targets.max():.6f}]")
+    
     # 创建Transformer模型
     transformer = TransformerPredictor(
-        input_size=7, 
+        input_size=actual_input_size, 
         d_model=128, 
         nhead=8, 
         num_layers=3, 
-        output_size=2
+        output_size=actual_output_size
     ).to(device)
+    
+    print(f"   ✅ Transformer模型创建完成: input_size={actual_input_size}, output_size={actual_output_size}")
     
     # 创建数据加载器
     train_dataset = TransformerDataset(train_vin1, train_targets)
@@ -1129,6 +1194,22 @@ def main():
         for batch_vin1, batch_targets in pbar:
             batch_vin1 = batch_vin1.to(device)
             batch_targets = batch_targets.to(device)
+            
+            # 检查并修复tensor维度
+            if batch_vin1.dim() == 1:
+                batch_vin1 = batch_vin1.unsqueeze(0)  # [features] -> [1, features]
+            elif batch_vin1.dim() > 2:
+                # 如果维度超过2，展平到2D
+                batch_size = batch_vin1.size(0)
+                batch_vin1 = batch_vin1.view(batch_size, -1)
+            
+            if batch_targets.dim() == 1:
+                batch_targets = batch_targets.unsqueeze(0)  # [features] -> [1, features]
+            elif batch_targets.dim() > 2:
+                batch_size = batch_targets.size(0)
+                batch_targets = batch_targets.view(batch_size, -1)
+            
+            print(f"   📊 输入形状: batch_vin1 {batch_vin1.shape}, batch_targets {batch_targets.shape}")
             
             # 前向传播
             transformer_optimizer.zero_grad()
@@ -1171,6 +1252,15 @@ def main():
     with torch.no_grad():
         for batch_vin1, _ in tqdm(train_loader, desc="生成增强数据"):
             batch_vin1 = batch_vin1.to(device)
+            
+            # 检查并修复tensor维度
+            if batch_vin1.dim() == 1:
+                batch_vin1 = batch_vin1.unsqueeze(0)  # [features] -> [1, features]
+            elif batch_vin1.dim() > 2:
+                # 如果维度超过2，展平到2D
+                batch_size = batch_vin1.size(0)
+                batch_vin1 = batch_vin1.view(batch_size, -1)
+            
             predictions = transformer(batch_vin1)
             
             # 分离电压和SOC预测
