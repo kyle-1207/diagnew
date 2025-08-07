@@ -1260,6 +1260,26 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     all_labels = np.array(all_labels)
     all_fault_labels = np.array(all_fault_labels)
     
+    # 检查数据是否为空
+    if len(all_fai) == 0:
+        print("   ⚠️ 警告: 没有可用的FAI数据，跳过ROC曲线生成")
+        # 创建一个空的ROC图
+        ax1.text(0.5, 0.5, '无数据', ha='center', va='center', 
+                transform=ax1.transAxes, fontsize=12)
+        ax1.set_title('(a) BiLSTM ROC Curve\n(无数据)')
+        ax1.set_xlabel('False Positive Rate')
+        ax1.set_ylabel('True Positive Rate')
+        ax1.grid(True, alpha=0.3)
+        return
+    
+    # 🔧 添加数据统计分析
+    print(f"   📊 BiLSTM ROC曲线数据统计:")
+    print(f"      总数据点: {len(all_fai)}")
+    print(f"      正常样本点: {np.sum(all_labels == 0)}")
+    print(f"      故障样本点: {np.sum(all_labels == 1)}")
+    print(f"      故障标记点: {np.sum(all_fault_labels == 1)}")
+    print(f"      FAI范围: [{np.min(all_fai):.6f}, {np.max(all_fai):.6f}]")
+    
     # 生成连续阈值范围
     thresholds = np.linspace(np.min(all_fai), np.max(all_fai), 100)
     
@@ -1270,24 +1290,24 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
         tp = fp = tn = fn = 0
         
         for i, (fai_val, sample_label, fault_pred) in enumerate(zip(all_fai, all_labels, all_fault_labels)):
-            # 正确的ROC逻辑：确定每个点的真实标签
-            if sample_label == 0:  # 正常样本
-                point_true_label = 0  # 正常样本的所有点都是正常的
-            else:  # 故障样本
-                point_true_label = fault_pred  # 故障样本使用5点检测的伪标签
+            # 🔧 修复ROC曲线逻辑：使用点级别的真实标签
+            if sample_label == 0:  # 正常样本的所有点都是正常的
+                point_true_label = 0
+            else:  # 故障样本：使用故障检测算法的结果作为点级别真实标签
+                point_true_label = fault_pred
             
-            # 基于fai阈值的预测
-            point_prediction = 1 if fai_val > threshold else 0
+            # 预测标签：简单基于FAI阈值
+            predicted_label = 1 if fai_val > threshold else 0
             
-            # 计算混淆矩阵
-            if point_true_label == 0 and point_prediction == 0:
-                tn += 1  # 真阴性
-            elif point_true_label == 0 and point_prediction == 1:
-                fp += 1  # 假阳性
-            elif point_true_label == 1 and point_prediction == 0:
-                fn += 1  # 假阴性
-            elif point_true_label == 1 and point_prediction == 1:
-                tp += 1  # 真阳性
+            # 统计混淆矩阵
+            if point_true_label == 0 and predicted_label == 0:
+                tn += 1
+            elif point_true_label == 0 and predicted_label == 1:
+                fp += 1
+            elif point_true_label == 1 and predicted_label == 0:
+                fn += 1
+            elif point_true_label == 1 and predicted_label == 1:
+                tp += 1
         
         tpr = tp / (tp + fn) if (tp + fn) > 0 else 0
         fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
@@ -1295,12 +1315,24 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
         tpr_list.append(tpr)
         fpr_list.append(fpr)
     
-    # 计算AUC
+    # 计算AUC - 需要确保fpr_list是单调递增的
     from sklearn.metrics import auc
-    auc_score = auc(fpr_list, tpr_list)
     
-    # 绘制ROC曲线
-    ax1.plot(fpr_list, tpr_list, color='blue', linewidth=2,
+    # 🔧 修复AUC计算：确保FPR单调递增
+    combined = list(zip(fpr_list, tpr_list))
+    combined.sort(key=lambda x: x[0])  # 按FPR排序
+    fpr_sorted, tpr_sorted = zip(*combined)
+    
+    auc_score = auc(fpr_sorted, tpr_sorted)
+    
+    print(f"   📊 BiLSTM ROC曲线计算结果:")
+    print(f"      阈值数量: {len(thresholds)}")
+    print(f"      FPR范围: [{min(fpr_sorted):.3f}, {max(fpr_sorted):.3f}]")
+    print(f"      TPR范围: [{min(tpr_sorted):.3f}, {max(tpr_sorted):.3f}]")
+    print(f"      AUC得分: {auc_score:.6f}")
+    
+    # 绘制ROC曲线 - 使用排序后的数据
+    ax1.plot(fpr_sorted, tpr_sorted, color='blue', linewidth=2,
             label=f'BiLSTM (AUC={auc_score:.3f})')
     
     ax1.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='Random Classifier')
