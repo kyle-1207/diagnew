@@ -203,9 +203,9 @@ def load_test_samples():
         all_samples = df['Num'].tolist()
         all_labels = df['Label'].tolist()
         
-        # 指定测试样本：正常样本和多个故障样本
-        test_normal_samples = ['10', '11']  # 正常样本
-        test_fault_samples = ['335', '336', '337', '338', '339', '340']  # 故障样本
+        # 指定测试样本：正常样本10-20 和故障样本340-350
+        test_normal_samples = [str(i) for i in range(10, 21)]  # 正常样本：10-20
+        test_fault_samples = [str(i) for i in range(340, 351)]  # 故障样本：340-350
         
         print(f"📋 从Labels.xls加载测试样本:")
         print(f"   测试正常样本: {test_normal_samples}")
@@ -219,8 +219,8 @@ def load_test_samples():
         print(f"❌ 加载Labels.xls失败: {e}")
         print("⚠️  使用默认测试样本")
         return {
-            'normal': ['10', '11'],
-            'fault': ['335', '336', '337', '338', '339', '340']
+            'normal': [str(i) for i in range(10, 21)],  # 正常样本：10-20
+            'fault': [str(i) for i in range(340, 351)]  # 故障样本：340-350
         }
 
 TEST_SAMPLES = load_test_samples()
@@ -1090,7 +1090,7 @@ def main_test_process():
     }
     
     # BiLSTM单模型测试
-    total_operations = len(ALL_TEST_SAMPLES)  # 4个样本 (2正常+2故障)
+    total_operations = len(ALL_TEST_SAMPLES)  # 22个样本 (11正常+11故障)
     
     print(f"\n🚀 开始BiLSTM模型测试...")
     print(f"检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
