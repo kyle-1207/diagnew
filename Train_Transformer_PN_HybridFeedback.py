@@ -124,8 +124,8 @@ PN_HYBRID_FEEDBACK_CONFIG = {
     # 模型保存路径
     'save_base_path': '/mnt/bz25t/bzhy/datasave/Transformer/models/PN_model/',
     
-    # 训练参数
-    'batch_size': 512,
+    # 4×A100训练参数优化
+    'batch_size': 4096,  # 多GPU环境，增大batch_size提高并行效率
     'learning_rate': 0.001,
     'device': 'cuda:0' if torch.cuda.is_available() else 'cpu'
 }
@@ -1129,14 +1129,24 @@ def main():
     # 错误显示: (512x7 and 1x128) - 说明输入是512个样本，每个样本7个特征
     # 但当前形状可能是 (3417341, 7) - 说明样本数过多，特征数是7
     
-    if train_vin1.shape[0] > 10000:  # 样本数过多，可能需要采样
-        print(f"   ⚠️ 检测到样本数过多: {train_vin1.shape[0]}，进行采样...")
-        sample_size = min(10000, train_vin1.shape[0])
-        np.random.seed(42)  # 设置随机种子保证可重复性
-        indices = np.random.choice(train_vin1.shape[0], sample_size, replace=False)
-        train_vin1 = train_vin1[indices]
-        train_targets = train_targets[indices]
-        print(f"   ✅ 采样后形状: vin1 {train_vin1.shape}, targets {train_targets.shape}")
+    # 4张A100 GPU集群 - 全数据集训练配置
+    print(f"   🚀 4×A100 GPU集群环境，使用全数据集训练")
+    print(f"   📊 原始样本数: {train_vin1.shape[0]:,}")
+    print(f"   💡 使用全部样本进行大规模训练，充分利用GPU集群性能")
+    print(f"   📈 预计批次数量: {train_vin1.shape[0] // config['batch_size']:,} batches/epoch")
+    
+    # 显示GPU集群配置
+    if torch.cuda.device_count() >= 2:
+        print(f"   🔥 检测到{torch.cuda.device_count()}张GPU，启用数据并行训练")
+        for i in range(min(torch.cuda.device_count(), 2)):  # 使用GPU0和GPU1
+            print(f"      GPU{i}: {torch.cuda.get_device_name(i)}")
+    else:
+        print(f"   ⚠️ 仅检测到{torch.cuda.device_count()}张GPU")
+    
+    # 显示内存预估
+    memory_per_sample_mb = 7 * 4 / (1024*1024)  # 7个float32特征
+    estimated_memory_mb = train_vin1.shape[0] * memory_per_sample_mb
+    print(f"   💾 预估数据内存使用: {estimated_memory_mb:.1f} MB")
     
     # 根据参考代码，使用固定的模型维度配置
     # Transformer期望: input_size=7, output_size=2
@@ -1210,17 +1220,31 @@ def main():
         output_size=model_output_size
     ).to(device)
     
-    print(f"   ✅ Transformer模型创建完成: input_size={model_input_size}, output_size={model_output_size}")
+    # 多GPU数据并行支持
+    if torch.cuda.device_count() >= 2:
+        print(f"   🔥 启用DataParallel，使用GPU: 0, 1")
+        transformer = nn.DataParallel(transformer, device_ids=[0, 1])
+        print(f"   ✅ 数据并行模型创建完成，将在2张GPU上分布式训练")
+    else:
+        print(f"   ✅ 单GPU模型创建完成: input_size={model_input_size}, output_size={model_output_size}")
     
-    # 创建数据加载器
+    # 显示模型参数量
+    total_params = sum(p.numel() for p in transformer.parameters())
+    trainable_params = sum(p.numel() for p in transformer.parameters() if p.requires_grad)
+    print(f"   📊 模型参数量: {total_params:,} (可训练: {trainable_params:,})")
+    
+    # 创建数据加载器 - 多GPU优化
     train_dataset = TransformerDataset(train_vin1, train_targets)
     train_loader = DataLoader(
         train_dataset, 
         batch_size=config['batch_size'], 
         shuffle=True,
-        num_workers=4,
-        pin_memory=True
+        num_workers=8,  # 多进程加载，充分利用CPU
+        pin_memory=True,  # 加速GPU传输
+        persistent_workers=True  # 保持worker进程，减少重启开销
     )
+    
+    print(f"   📊 数据加载器配置: batch_size={config['batch_size']}, num_workers=8")
     
     # 训练配置
     transformer_optimizer = optim.Adam(transformer.parameters(), lr=config['learning_rate'])
@@ -1446,6 +1470,19 @@ def main():
         activation_fn=torch.sigmoid,
         use_dx_in_forward=True
     ).to(device)
+    
+    # 多GPU数据并行支持 - MC-AE模型
+    if torch.cuda.device_count() >= 2:
+        print(f"   🔥 MC-AE模型启用DataParallel")
+        net_model = nn.DataParallel(net_model, device_ids=[0, 1])
+        netx_model = nn.DataParallel(netx_model, device_ids=[0, 1])
+        print(f"   ✅ MC-AE数据并行模型创建完成")
+    
+    # 显示MC-AE模型参数量
+    net_params = sum(p.numel() for p in net_model.parameters())
+    netx_params = sum(p.numel() for p in netx_model.parameters())
+    print(f"   📊 MC-AE1参数量: {net_params:,}")
+    print(f"   📊 MC-AE2参数量: {netx_params:,}")
     
     # MC-AE训练数据集
     mc_dataset = MCDataset(mc_x_data, mc_y_data, mc_z_data, mc_q_data)
