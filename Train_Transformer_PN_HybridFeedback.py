@@ -462,6 +462,89 @@ def load_sample_data(sample_id, data_type='train'):
                 print(f"   ❌ targets列表转换失败: {e}")
                 return None
         
+        # 最终数据类型转换和清理
+        def clean_data_for_torch(data, data_name):
+            """清理数据以适配PyTorch"""
+            if data is None:
+                return None
+            
+            # 转换为numpy
+            if hasattr(data, 'detach'):
+                data_np = data.detach().cpu().numpy()
+            else:
+                data_np = np.array(data)
+            
+            # 处理object类型
+            if data_np.dtype == np.object_:
+                print(f"   ⚠️ {data_name}包含object类型，进行清理...")
+                try:
+                    # 尝试转换为float32
+                    if data_np.ndim == 1:
+                        cleaned = []
+                        for item in data_np:
+                            try:
+                                if isinstance(item, (int, float, np.integer, np.floating)):
+                                    cleaned.append(float(item))
+                                elif hasattr(item, 'item'):
+                                    cleaned.append(float(item.item()))
+                                else:
+                                    cleaned.append(0.0)
+                            except:
+                                cleaned.append(0.0)
+                        data_np = np.array(cleaned, dtype=np.float32)
+                    else:
+                        # 多维数组展平处理
+                        original_shape = data_np.shape
+                        flat_cleaned = []
+                        for item in data_np.flat:
+                            try:
+                                if isinstance(item, (int, float, np.integer, np.floating)):
+                                    flat_cleaned.append(float(item))
+                                elif hasattr(item, 'item'):
+                                    flat_cleaned.append(float(item.item()))
+                                else:
+                                    flat_cleaned.append(0.0)
+                            except:
+                                flat_cleaned.append(0.0)
+                        data_np = np.array(flat_cleaned, dtype=np.float32).reshape(original_shape)
+                    
+                    print(f"   ✅ {data_name}清理完成: {data_np.shape}, dtype={data_np.dtype}")
+                
+                except Exception as e:
+                    print(f"   ❌ {data_name}清理失败: {e}")
+                    # 创建零数组作为备选
+                    if hasattr(data_np, 'shape'):
+                        data_np = np.zeros(data_np.shape, dtype=np.float32)
+                    else:
+                        data_np = np.array([0.0], dtype=np.float32)
+                    print(f"   🔄 {data_name}使用零数组替代")
+            
+            # 确保数据类型兼容PyTorch
+            if not data_np.dtype.kind in ['f', 'i', 'u', 'b']:  # float, int, uint, bool
+                try:
+                    data_np = data_np.astype(np.float32)
+                    print(f"   🔄 {data_name}转换为float32: {data_np.dtype}")
+                except Exception as e:
+                    print(f"   ❌ {data_name}类型转换失败: {e}")
+                    data_np = np.zeros_like(data_np, dtype=np.float32)
+            
+            return data_np
+        
+        # 清理所有数据
+        vin_1 = clean_data_for_torch(vin_1, "vin_1")
+        vin_2 = clean_data_for_torch(vin_2, "vin_2")
+        vin_3 = clean_data_for_torch(vin_3, "vin_3")
+        
+        # targets特殊处理
+        if isinstance(targets, dict):
+            # 保持字典格式但清理内部数据
+            cleaned_targets = {}
+            for key, value in targets.items():
+                cleaned_targets[key] = clean_data_for_torch(value, f"targets['{key}']")
+            targets = cleaned_targets
+        else:
+            targets = clean_data_for_torch(targets, "targets")
+        
         return {
             'vin_1': vin_1,
             'vin_2': vin_2, 
@@ -525,23 +608,98 @@ def load_training_data(sample_ids):
     if not all_vin1:
         raise ValueError("没有成功加载任何训练样本！")
     
-    # 合并数据 - 处理tensor和numpy混合情况
+    # 合并数据 - 处理tensor、numpy和object类型混合情况
     processed_vin1 = []
     processed_targets = []
     
-    for vin1, targets in zip(all_vin1, all_targets):
+    def safe_convert_to_numpy(data, data_name):
+        """安全转换数据为numpy，处理各种类型问题"""
+        if data is None:
+            return None
+        
         # 转换tensor为numpy
-        if hasattr(vin1, 'detach'):
-            vin1 = vin1.detach().cpu().numpy()
-        if hasattr(targets, 'detach'):
-            targets = targets.detach().cpu().numpy()
+        if hasattr(data, 'detach'):
+            data = data.detach().cpu().numpy()
         
         # 确保是numpy数组
-        vin1 = np.array(vin1)
-        targets = np.array(targets)
+        if not isinstance(data, np.ndarray):
+            try:
+                data = np.array(data)
+            except Exception as e:
+                print(f"   ⚠️ {data_name}转换为数组失败: {e}")
+                return None
         
-        processed_vin1.append(vin1)
-        processed_targets.append(targets)
+        # 处理object类型
+        if data.dtype == np.object_:
+            print(f"   ⚠️ {data_name}包含object类型，进行修复...")
+            try:
+                # 展平并清理
+                flat_data = []
+                for item in data.flat:
+                    try:
+                        if isinstance(item, (int, float, np.integer, np.floating)):
+                            flat_data.append(float(item))
+                        elif hasattr(item, 'item'):
+                            flat_data.append(float(item.item()))
+                        else:
+                            flat_data.append(0.0)
+                    except:
+                        flat_data.append(0.0)
+                
+                # 重塑为原始形状
+                data = np.array(flat_data, dtype=np.float32).reshape(data.shape)
+                print(f"   ✅ {data_name}object类型修复完成")
+            
+            except Exception as e:
+                print(f"   ❌ {data_name}object修复失败: {e}")
+                # 创建零数组替代
+                data = np.zeros(data.shape, dtype=np.float32)
+                print(f"   🔄 {data_name}使用零数组替代")
+        
+        # 确保数据类型兼容
+        if data.dtype.kind not in ['f', 'i', 'u', 'b']:
+            try:
+                data = data.astype(np.float32)
+            except Exception as e:
+                print(f"   ❌ {data_name}类型转换失败: {e}")
+                data = np.zeros_like(data, dtype=np.float32)
+        
+        return data
+    
+    for i, (vin1, targets) in enumerate(zip(all_vin1, all_targets)):
+        # 安全转换数据
+        vin1_converted = safe_convert_to_numpy(vin1, f"样本{i}_vin1")
+        
+        # targets特殊处理
+        if isinstance(targets, dict):
+            # 如果是字典，需要提取或转换
+            if 'terminal_voltages' in targets and 'pack_socs' in targets:
+                # 标准格式，合并电压和SOC
+                try:
+                    voltages = safe_convert_to_numpy(targets['terminal_voltages'], f"样本{i}_voltages")
+                    socs = safe_convert_to_numpy(targets['pack_socs'], f"样本{i}_socs")
+                    
+                    if voltages is not None and socs is not None:
+                        # 合并为2列：[电压, SOC]
+                        min_len = min(len(voltages), len(socs))
+                        targets_converted = np.column_stack([voltages[:min_len], socs[:min_len]])
+                    else:
+                        print(f"   ⚠️ 样本{i}的targets字典数据无效，跳过")
+                        continue
+                except Exception as e:
+                    print(f"   ❌ 样本{i}的targets字典处理失败: {e}")
+                    continue
+            else:
+                print(f"   ⚠️ 样本{i}的targets字典格式未知，跳过")
+                continue
+        else:
+            targets_converted = safe_convert_to_numpy(targets, f"样本{i}_targets")
+        
+        if vin1_converted is not None and targets_converted is not None:
+            processed_vin1.append(vin1_converted)
+            processed_targets.append(targets_converted)
+        else:
+            print(f"   ⚠️ 样本{i}数据转换失败，跳过")
     
     try:
         vin1_combined = np.vstack(processed_vin1)
