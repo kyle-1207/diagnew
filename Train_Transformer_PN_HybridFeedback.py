@@ -1120,9 +1120,32 @@ def main():
         train_targets = train_targets.reshape(1, -1)
         print(f"   🔄 修正targets形状为: {train_targets.shape}")
     
-    # 获取实际输入数据维度
-    actual_input_size = train_vin1.shape[1]
-    actual_output_size = train_targets.shape[1]
+    # 数据维度问题诊断和修正
+    print(f"   🔍 详细分析数据维度:")
+    print(f"      train_vin1.shape = {train_vin1.shape}")
+    print(f"      train_targets.shape = {train_targets.shape}")
+    
+    # 从错误信息看，数据维度需要重新理解
+    # 错误显示: (512x7 and 1x128) - 说明输入是512个样本，每个样本7个特征
+    # 但当前形状可能是 (3417341, 7) - 说明样本数过多，特征数是7
+    
+    if train_vin1.shape[0] > 10000:  # 样本数过多，可能需要采样
+        print(f"   ⚠️ 检测到样本数过多: {train_vin1.shape[0]}，进行采样...")
+        sample_size = min(10000, train_vin1.shape[0])
+        np.random.seed(42)  # 设置随机种子保证可重复性
+        indices = np.random.choice(train_vin1.shape[0], sample_size, replace=False)
+        train_vin1 = train_vin1[indices]
+        train_targets = train_targets[indices]
+        print(f"   ✅ 采样后形状: vin1 {train_vin1.shape}, targets {train_targets.shape}")
+    
+    # 确认最终的输入输出维度
+    actual_input_size = train_vin1.shape[1]  # 特征数
+    actual_output_size = train_targets.shape[1]  # 输出维度
+    
+    print(f"   📊 最终数据维度:")
+    print(f"      样本数: {train_vin1.shape[0]}")
+    print(f"      输入特征数(input_size): {actual_input_size}")
+    print(f"      输出维度(output_size): {actual_output_size}")
     
     # 验证数据合理性
     if actual_input_size <= 0 or actual_output_size <= 0:
@@ -1209,7 +1232,9 @@ def main():
                 batch_size = batch_targets.size(0)
                 batch_targets = batch_targets.view(batch_size, -1)
             
-            print(f"   📊 输入形状: batch_vin1 {batch_vin1.shape}, batch_targets {batch_targets.shape}")
+            # 只在第一个batch时打印调试信息
+            if epoch == 0 and hasattr(pbar, 'n') and pbar.n == 0:
+                print(f"   📊 第一个batch形状: batch_vin1 {batch_vin1.shape}, batch_targets {batch_targets.shape}")
             
             # 前向传播
             transformer_optimizer.zero_grad()
