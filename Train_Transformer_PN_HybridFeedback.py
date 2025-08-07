@@ -186,6 +186,35 @@ def setup_chinese_fonts():
         except:
             continue
 
+def check_data_validity(data, data_name="数据"):
+    """检查数据有效性"""
+    if data is None:
+        print(f"   ❌ {data_name}为None")
+        return False
+    
+    if hasattr(data, 'shape'):
+        if len(data.shape) == 0 or data.shape[0] == 0:
+            print(f"   ❌ {data_name}为空: {data.shape}")
+            return False
+        
+        # 检查是否包含NaN或Inf
+        if hasattr(data, 'detach'):
+            data_np = data.detach().cpu().numpy()
+        else:
+            data_np = np.array(data)
+        
+        if np.isnan(data_np).any():
+            print(f"   ⚠️ {data_name}包含NaN值")
+        
+        if np.isinf(data_np).any():
+            print(f"   ⚠️ {data_name}包含Inf值")
+        
+        print(f"   ✅ {data_name}有效: {data.shape}")
+        return True
+    else:
+        print(f"   ❌ {data_name}不是数组格式")
+        return False
+
 def physics_based_data_processing_silent(data, feature_type='general'):
     """静默的基于物理约束的数据处理"""
     if isinstance(data, torch.Tensor):
@@ -409,16 +438,48 @@ def load_training_data(sample_ids):
     for sample_id in tqdm(sample_ids, desc="加载训练样本"):
         data = load_sample_data(sample_id, 'train')
         if data is not None:
-            all_vin1.append(data['vin_1'])
-            all_targets.append(data['targets'])
-            successful_samples.append(sample_id)
+            # 检查数据有效性
+            if (check_data_validity(data['vin_1'], f"样本{sample_id}_vin1") and 
+                check_data_validity(data['targets'], f"样本{sample_id}_targets")):
+                all_vin1.append(data['vin_1'])
+                all_targets.append(data['targets'])
+                successful_samples.append(sample_id)
+            else:
+                print(f"   ⚠️ 样本{sample_id}数据无效，跳过")
     
     if not all_vin1:
         raise ValueError("没有成功加载任何训练样本！")
     
-    # 合并数据
-    vin1_combined = np.vstack(all_vin1)
-    targets_combined = np.vstack(all_targets)
+    # 合并数据 - 处理tensor和numpy混合情况
+    processed_vin1 = []
+    processed_targets = []
+    
+    for vin1, targets in zip(all_vin1, all_targets):
+        # 转换tensor为numpy
+        if hasattr(vin1, 'detach'):
+            vin1 = vin1.detach().cpu().numpy()
+        if hasattr(targets, 'detach'):
+            targets = targets.detach().cpu().numpy()
+        
+        # 确保是numpy数组
+        vin1 = np.array(vin1)
+        targets = np.array(targets)
+        
+        processed_vin1.append(vin1)
+        processed_targets.append(targets)
+    
+    try:
+        vin1_combined = np.vstack(processed_vin1)
+        targets_combined = np.vstack(processed_targets)
+    except ValueError as e:
+        print(f"   ⚠️ 数据形状不匹配，尝试逐一检查...")
+        # 检查每个数据的形状
+        for i, (vin1, targets) in enumerate(zip(processed_vin1, processed_targets)):
+            print(f"   样本{i}: vin1 {vin1.shape}, targets {targets.shape}")
+        
+        # 尝试使用concatenate
+        vin1_combined = np.concatenate(processed_vin1, axis=0)
+        targets_combined = np.concatenate(processed_targets, axis=0)
     
     print(f"   ✅ 成功加载 {len(successful_samples)} 个样本")
     print(f"   数据形状: vin1 {vin1_combined.shape}, targets {targets_combined.shape}")
@@ -911,21 +972,61 @@ def main():
     # 转换为numpy格式
     if hasattr(vin_2_sample, 'detach'):
         vin_2_sample = vin_2_sample.detach().cpu().numpy()
+    else:
+        vin_2_sample = np.array(vin_2_sample)
+    
     if hasattr(vin_3_sample, 'detach'):
         vin_3_sample = vin_3_sample.detach().cpu().numpy()
+    else:
+        vin_3_sample = np.array(vin_3_sample)
+    
+    # 检查数据维度是否符合预期
+    print(f"   检查数据维度兼容性...")
+    if vin_2_sample.shape[1] < (dim_x + dim_y + dim_z + dim_q):
+        print(f"   ⚠️ vin_2维度不足: 期望{dim_x + dim_y + dim_z + dim_q}, 实际{vin_2_sample.shape[1]}")
+        # 调整维度设置
+        available_dims = vin_2_sample.shape[1]
+        if available_dims >= dim_x + dim_y:
+            dim_z = min(dim_z, available_dims - dim_x - dim_y - 1)
+            dim_q = max(1, available_dims - dim_x - dim_y - dim_z)
+        print(f"   🔄 调整vin_2维度: x={dim_x}, y={dim_y}, z={dim_z}, q={dim_q}")
+    
+    if vin_3_sample.shape[1] < (dim_x2 + dim_y2 + dim_z2 + dim_q2):
+        print(f"   ⚠️ vin_3维度不足: 期望{dim_x2 + dim_y2 + dim_z2 + dim_q2}, 实际{vin_3_sample.shape[1]}")
+        # 调整维度设置
+        available_dims = vin_3_sample.shape[1]
+        if available_dims >= dim_x2 + dim_y2:
+            dim_z2 = min(dim_z2, available_dims - dim_x2 - dim_y2 - 1)
+            dim_q2 = max(1, available_dims - dim_x2 - dim_y2 - dim_z2)
+        print(f"   🔄 调整vin_3维度: x={dim_x2}, y={dim_y2}, z={dim_z2}, q={dim_q2}")
     
     # 正确的数据切片（基于源代码逻辑）
-    # vin_2切片: [x_recovered, y_recovered, z_recovered, q_recovered]
-    x_recovered = vin_2_sample[:, :dim_x]                                    # 前2维
-    y_recovered = vin_2_sample[:, dim_x:dim_x + dim_y]                      # 110维真实单体电压
-    z_recovered = vin_2_sample[:, dim_x + dim_y: dim_x + dim_y + dim_z]     # 110维特征
-    q_recovered = vin_2_sample[:, dim_x + dim_y + dim_z:]                   # 3维特征
-    
-    # vin_3切片: [x_recovered2, y_recovered2, z_recovered2, q_recovered2]
-    x_recovered2 = vin_3_sample[:, :dim_x2]                                # 前2维
-    y_recovered2 = vin_3_sample[:, dim_x2:dim_x2 + dim_y2]                # 110维真实单体SOC
-    z_recovered2 = vin_3_sample[:, dim_x2 + dim_y2: dim_x2 + dim_y2 + dim_z2]  # 110维特征
-    q_recovered2 = vin_3_sample[:, dim_x2 + dim_y2 + dim_z2:]             # 4维特征
+    try:
+        # vin_2切片: [x_recovered, y_recovered, z_recovered, q_recovered]
+        x_recovered = vin_2_sample[:, :dim_x]                                    # 前2维
+        y_recovered = vin_2_sample[:, dim_x:dim_x + dim_y]                      # 110维真实单体电压
+        z_recovered = vin_2_sample[:, dim_x + dim_y: dim_x + dim_y + dim_z]     # 110维特征
+        q_recovered = vin_2_sample[:, dim_x + dim_y + dim_z:dim_x + dim_y + dim_z + dim_q]  # 3维特征
+        
+        # vin_3切片: [x_recovered2, y_recovered2, z_recovered2, q_recovered2]
+        x_recovered2 = vin_3_sample[:, :dim_x2]                                # 前2维
+        y_recovered2 = vin_3_sample[:, dim_x2:dim_x2 + dim_y2]                # 110维真实单体SOC
+        z_recovered2 = vin_3_sample[:, dim_x2 + dim_y2: dim_x2 + dim_y2 + dim_z2]  # 110维特征
+        q_recovered2 = vin_3_sample[:, dim_x2 + dim_y2 + dim_z2:dim_x2 + dim_y2 + dim_z2 + dim_q2]  # 4维特征
+        
+    except Exception as e:
+        print(f"   ❌ 数据切片失败: {e}")
+        print(f"   使用简化切片策略...")
+        # 简化切片策略
+        x_recovered = vin_2_sample[:, :2]
+        y_recovered = vin_2_sample[:, 2:112] if vin_2_sample.shape[1] >= 112 else vin_2_sample[:, 2:]
+        z_recovered = np.zeros((vin_2_sample.shape[0], 110))  # 填充零
+        q_recovered = np.ones((vin_2_sample.shape[0], 3))     # 填充一
+        
+        x_recovered2 = vin_3_sample[:, :2]
+        y_recovered2 = vin_3_sample[:, 2:112] if vin_3_sample.shape[1] >= 112 else vin_3_sample[:, 2:]
+        z_recovered2 = np.zeros((vin_3_sample.shape[0], 110)) # 填充零
+        q_recovered2 = np.ones((vin_3_sample.shape[0], 4))    # 填充一
     
     print(f"切片后数据形状:")
     print(f"   x_recovered: {x_recovered.shape}, y_recovered: {y_recovered.shape}")
@@ -937,10 +1038,17 @@ def main():
     x_recovered2_modified = x_recovered2.copy()
     
     # 替换BiLSTM预测（索引0）为Transformer预测
-    if enhanced_vin2.shape[0] == x_recovered.shape[0]:
-        x_recovered_modified[:, 0] = enhanced_vin2[:, 0]  # 替换电压预测
-    if enhanced_vin3.shape[0] == x_recovered2.shape[0]:
-        x_recovered2_modified[:, 0] = enhanced_vin3[:, 0]  # 替换SOC预测
+    # 需要确保数据长度匹配
+    min_len_v = min(enhanced_vin2.shape[0], x_recovered.shape[0])
+    min_len_s = min(enhanced_vin3.shape[0], x_recovered2.shape[0])
+    
+    if min_len_v > 0:
+        x_recovered_modified[:min_len_v, 0] = enhanced_vin2[:min_len_v, 0]  # 替换电压预测
+        print(f"   ✅ 替换电压预测: {min_len_v} 个时间步")
+    
+    if min_len_s > 0:
+        x_recovered2_modified[:min_len_s, 0] = enhanced_vin3[:min_len_s, 0]  # 替换SOC预测
+        print(f"   ✅ 替换SOC预测: {min_len_s} 个时间步")
     
     print("✅ 完成混合反馈数据增强：Transformer预测替换BiLSTM预测")
     
