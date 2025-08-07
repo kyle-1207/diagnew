@@ -1609,8 +1609,45 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     print(f"      故障标记点: {np.sum(all_fault_labels == 1)}")
     print(f"      FAI范围: [{np.min(all_fai):.6f}, {np.max(all_fai):.6f}]")
     
-    # 生成连续阈值范围
-    thresholds = np.linspace(np.min(all_fai), np.max(all_fai), 100)
+    # 🔧 改进阈值扫描策略：使用更合理的范围
+    # 方法1：使用分位数范围避免极端值影响
+    fai_p1 = np.percentile(all_fai, 1)   # 1%分位数
+    fai_p99 = np.percentile(all_fai, 99) # 99%分位数
+    fai_median = np.median(all_fai)
+    fai_mean = np.mean(all_fai)
+    
+    print(f"   📊 FAI分布分析:")
+    print(f"      1%分位数: {fai_p1:.6f}")
+    print(f"      50%分位数(中位数): {fai_median:.6f}")
+    print(f"      均值: {fai_mean:.6f}")
+    print(f"      99%分位数: {fai_p99:.6f}")
+    print(f"      最大值: {np.max(all_fai):.6f}")
+    
+    # 使用更智能的阈值范围：从最小值到99%分位数，避免极端值
+    threshold_min = np.min(all_fai)
+    threshold_max = fai_p99  # 使用99%分位数而不是最大值
+    
+    # 🔧 使用混合扫描策略：线性+对数尺度
+    if threshold_max > threshold_min * 10:  # 如果范围较大，使用对数尺度
+        # 方法1：对数尺度扫描（处理大范围的数据）
+        log_min = np.log10(max(threshold_min, 1e-10))  # 避免log(0)
+        log_max = np.log10(threshold_max)
+        log_thresholds = np.logspace(log_min, log_max, 50)
+        
+        # 方法2：线性扫描（处理小范围的数据）
+        linear_thresholds = np.linspace(threshold_min, min(threshold_max, fai_median*3), 50)
+        
+        # 合并并去重
+        thresholds = np.unique(np.concatenate([linear_thresholds, log_thresholds]))
+        thresholds = np.sort(thresholds)
+        
+        print(f"   📊 使用混合扫描策略 (线性+对数): {len(thresholds)}个阈值点")
+    else:
+        # 范围较小时使用线性扫描
+        thresholds = np.linspace(threshold_min, threshold_max, 100)
+        print(f"   📊 使用线性扫描策略: {len(thresholds)}个阈值点")
+    
+    print(f"   📊 阈值扫描范围: [{threshold_min:.6f}, {threshold_max:.6f}]")
     
     tpr_list = []
     fpr_list = []
