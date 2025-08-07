@@ -1149,6 +1149,18 @@ def main():
     print(f"      模型期望: input_size={model_input_size}, output_size={model_output_size}")
     
     # 调整数据以匹配模型期望
+    # 首先确保数据是2D的
+    if train_vin1.ndim > 2:
+        print(f"   🔧 展平vin1从{train_vin1.shape}到2D")
+        train_vin1 = train_vin1.reshape(train_vin1.shape[0], -1)
+    
+    if train_targets.ndim > 2:
+        print(f"   🔧 展平targets从{train_targets.shape}到2D")
+        train_targets = train_targets.reshape(train_targets.shape[0], -1)
+    
+    print(f"   📊 展平后形状: vin1 {train_vin1.shape}, targets {train_targets.shape}")
+    
+    # 调整vin1特征维度
     if train_vin1.shape[1] != model_input_size:
         if train_vin1.shape[1] > model_input_size:
             # 截取前7个特征
@@ -1156,10 +1168,12 @@ def main():
             print(f"   🔧 截取vin1前{model_input_size}个特征: {train_vin1.shape}")
         else:
             # 补零到7个特征
-            padding = np.zeros((train_vin1.shape[0], model_input_size - train_vin1.shape[1]))
+            padding_shape = (train_vin1.shape[0], model_input_size - train_vin1.shape[1])
+            padding = np.zeros(padding_shape, dtype=train_vin1.dtype)
             train_vin1 = np.concatenate([train_vin1, padding], axis=1)
             print(f"   🔧 补零vin1到{model_input_size}个特征: {train_vin1.shape}")
     
+    # 调整targets输出维度
     if train_targets.shape[1] != model_output_size:
         if train_targets.shape[1] > model_output_size:
             # 截取前2个输出
@@ -1167,7 +1181,8 @@ def main():
             print(f"   🔧 截取targets前{model_output_size}个输出: {train_targets.shape}")
         else:
             # 补零到2个输出
-            padding = np.zeros((train_targets.shape[0], model_output_size - train_targets.shape[1]))
+            padding_shape = (train_targets.shape[0], model_output_size - train_targets.shape[1])
+            padding = np.zeros(padding_shape, dtype=train_targets.dtype)
             train_targets = np.concatenate([train_targets, padding], axis=1)
             print(f"   🔧 补零targets到{model_output_size}个输出: {train_targets.shape}")
     
