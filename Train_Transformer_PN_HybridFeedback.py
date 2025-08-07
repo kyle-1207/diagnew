@@ -192,6 +192,41 @@ def check_data_validity(data, data_name="数据"):
         print(f"   ❌ {data_name}为None")
         return False
     
+    # 首先检查数据类型
+    print(f"   🔍 {data_name}类型: {type(data)}")
+    
+    # 如果是列表，尝试转换为numpy数组
+    if isinstance(data, list):
+        try:
+            data = np.array(data)
+            print(f"   🔄 {data_name}从列表转换为数组: {data.shape}")
+        except Exception as e:
+            print(f"   ❌ {data_name}列表转换失败: {e}")
+            return False
+    
+    # 如果是字典或其他复杂结构
+    if isinstance(data, dict):
+        print(f"   📋 {data_name}是字典，键: {list(data.keys())}")
+        
+        # 特殊处理targets字典格式（包含terminal_voltages和pack_socs）
+        if 'terminal_voltages' in data and 'pack_socs' in data:
+            print(f"   ✅ {data_name}是标准targets格式")
+            # 检查两个关键数据的有效性
+            voltage_valid = check_data_validity(data['terminal_voltages'], f"{data_name}['terminal_voltages']")
+            soc_valid = check_data_validity(data['pack_socs'], f"{data_name}['pack_socs']")
+            return voltage_valid and soc_valid
+        
+        # 尝试提取主要数据
+        elif 'data' in data:
+            return check_data_validity(data['data'], f"{data_name}['data']")
+        elif len(data) == 1:
+            key = list(data.keys())[0]
+            return check_data_validity(data[key], f"{data_name}['{key}']")
+        else:
+            print(f"   ❌ {data_name}字典结构复杂，无法自动处理")
+            return False
+    
+    # 检查是否有shape属性
     if hasattr(data, 'shape'):
         if len(data.shape) == 0 or data.shape[0] == 0:
             print(f"   ❌ {data_name}为空: {data.shape}")
@@ -212,8 +247,14 @@ def check_data_validity(data, data_name="数据"):
         print(f"   ✅ {data_name}有效: {data.shape}")
         return True
     else:
-        print(f"   ❌ {data_name}不是数组格式")
-        return False
+        # 尝试转换为numpy数组
+        try:
+            data_array = np.array(data)
+            print(f"   🔄 {data_name}转换为数组: {data_array.shape}")
+            return True
+        except Exception as e:
+            print(f"   ❌ {data_name}无法转换为数组: {e}")
+            return False
 
 def physics_based_data_processing_silent(data, feature_type='general'):
     """静默的基于物理约束的数据处理"""
@@ -386,6 +427,40 @@ def load_sample_data(sample_id, data_type='train'):
         vin_2 = pickle.load(open(f"{sample_path}/vin_2.pkl", 'rb'))
         vin_3 = pickle.load(open(f"{sample_path}/vin_3.pkl", 'rb'))
         targets = pickle.load(open(f"{sample_path}/targets.pkl", 'rb'))
+        
+        # 调试：检查原始数据类型和结构
+        print(f"   🔍 原始数据类型:")
+        print(f"      vin_1: {type(vin_1)}")
+        print(f"      vin_2: {type(vin_2)}")
+        print(f"      vin_3: {type(vin_3)}")
+        print(f"      targets: {type(targets)}")
+        
+        # 处理targets数据的特殊情况（根据Train_Transformer.py的处理方式）
+        if isinstance(targets, dict):
+            print(f"   📋 targets是字典，键: {list(targets.keys())}")
+            # 根据Train_Transformer.py的逻辑，targets应该包含terminal_voltages和pack_socs
+            if 'terminal_voltages' in targets and 'pack_socs' in targets:
+                print(f"   ✅ 找到标准targets格式：terminal_voltages和pack_socs")
+                # 保持字典格式，后续使用时再提取
+                pass
+            elif 'data' in targets:
+                targets = targets['data']
+                print(f"   🔄 使用targets['data']")
+            elif len(targets) == 1:
+                key = list(targets.keys())[0]
+                targets = targets[key]
+                print(f"   🔄 使用targets['{key}']")
+            else:
+                print(f"   ⚠️ 未知的targets字典格式")
+        
+        if isinstance(targets, list):
+            print(f"   📋 targets是列表，长度: {len(targets)}")
+            try:
+                targets = np.array(targets)
+                print(f"   🔄 targets转换为数组: {targets.shape}")
+            except Exception as e:
+                print(f"   ❌ targets列表转换失败: {e}")
+                return None
         
         return {
             'vin_1': vin_1,
