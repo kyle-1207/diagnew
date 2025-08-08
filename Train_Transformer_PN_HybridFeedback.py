@@ -1449,10 +1449,17 @@ def main():
     print("✅ 完成混合反馈数据增强：Transformer预测替换BiLSTM预测")
     
     # 准备MC-AE训练数据
+    # 路1（vin_2 → net_model）：输入x、增量dx、辅助q，目标为y
     mc_x_data = x_recovered_modified
     mc_y_data = y_recovered
-    mc_z_data = x_recovered2_modified
-    mc_q_data = y_recovered2
+    mc_z_data = z_recovered
+    mc_q_data = q_recovered
+
+    # 路2（vin_3 → netx_model）：输入x2、增量dx2、辅助q2，目标为y2
+    mc2_x_data = x_recovered2_modified
+    mc2_y_data = y_recovered2
+    mc2_z_data = z_recovered2
+    mc2_q_data = q_recovered2
     
     # 创建MC-AE模型
     net_model = CombinedAE(
@@ -1490,8 +1497,20 @@ def main():
         mc_dataset,
         batch_size=config['batch_size'],
         shuffle=True,
-        num_workers=4,
-        pin_memory=True
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True
+    )
+
+    # 第二路数据加载器（vin_3 → netx_model）
+    mc_dataset2 = MCDataset(mc2_x_data, mc2_y_data, mc2_z_data, mc2_q_data)
+    mc_loader2 = DataLoader(
+        mc_dataset2,
+        batch_size=config['batch_size'],
+        shuffle=True,
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True
     )
     
     # MC-AE训练配置
@@ -1517,15 +1536,21 @@ def main():
         epoch_net_losses, epoch_netx_losses = [], []
         
         pbar = tqdm(mc_loader, desc=f"MC-AE Epoch {epoch+1}/{phase2_epochs}")
+        mc_iter2 = iter(mc_loader2)
         for batch_x, batch_y, batch_z, batch_q in pbar:
+            batch_x2, batch_y2, batch_z2, batch_q2 = next(mc_iter2)
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device) 
             batch_z = batch_z.to(device)
             batch_q = batch_q.to(device)
+            batch_x2 = batch_x2.to(device)
+            batch_y2 = batch_y2.to(device)
+            batch_z2 = batch_z2.to(device)
+            batch_q2 = batch_q2.to(device)
             
             # 训练net_model (MC-AE1)
             net_optimizer.zero_grad()
-            recon_x, recon_y = net_model(batch_x, batch_y)
+            recon_y_pred, _ = net_model(batch_x, batch_z, batch_q)
             
             # 使用负反馈损失
             if (epoch >= config['negative_feedback']['start_epoch'] and 
@@ -1534,12 +1559,11 @@ def main():
                 
                 # 这里应该加载负反馈样本数据，暂时使用简化版本
                 net_loss, pos_loss, neg_loss = contrastive_loss(
-                    torch.cat([recon_x, recon_y], dim=1),
-                    torch.cat([batch_x, batch_y], dim=1)
+                    recon_y_pred,
+                    batch_y
                 )
             else:
-                net_loss = F.mse_loss(torch.cat([recon_x, recon_y], dim=1),
-                                     torch.cat([batch_x, batch_y], dim=1))
+                net_loss = F.mse_loss(recon_y_pred, batch_y)
             
             net_loss.backward()
             net_optimizer.step()
@@ -1547,19 +1571,18 @@ def main():
             
             # 训练netx_model (MC-AE2)
             netx_optimizer.zero_grad()
-            recon_z, recon_q = netx_model(batch_z, batch_q)
+            recon_y2_pred, _ = netx_model(batch_x2, batch_z2, batch_q2)
             
             if (epoch >= config['negative_feedback']['start_epoch'] and 
                 config['negative_feedback']['enable'] and
                 len(negative_data) > 0):
                 
                 netx_loss, pos_loss, neg_loss = contrastive_loss(
-                    torch.cat([recon_z, recon_q], dim=1),
-                    torch.cat([batch_z, batch_q], dim=1)
+                    recon_y2_pred,
+                    batch_y2
                 )
             else:
-                netx_loss = F.mse_loss(torch.cat([recon_z, recon_q], dim=1),
-                                      torch.cat([batch_z, batch_q], dim=1))
+                netx_loss = F.mse_loss(recon_y2_pred, batch_y2)
             
             netx_loss.backward()
             netx_optimizer.step()
@@ -1585,8 +1608,11 @@ def main():
     net_save_path = os.path.join(config['save_base_path'], 'net_model_pn.pth')
     netx_save_path = os.path.join(config['save_base_path'], 'netx_model_pn.pth')
     
-    torch.save(net_model.state_dict(), net_save_path)
-    torch.save(netx_model.state_dict(), netx_save_path)
+    # 兼容DataParallel保存
+    net_to_save = net_model.module if isinstance(net_model, nn.DataParallel) else net_model
+    netx_to_save = netx_model.module if isinstance(netx_model, nn.DataParallel) else netx_model
+    torch.save(net_to_save.state_dict(), net_save_path)
+    torch.save(netx_to_save.state_dict(), netx_save_path)
     
     print(f"   MC-AE1模型已保存: {net_save_path}")
     print(f"   MC-AE2模型已保存: {netx_save_path}")
@@ -1603,23 +1629,25 @@ def main():
     
     all_features = []
     with torch.no_grad():
+        mc_iter2 = iter(mc_loader2)
         for batch_x, batch_y, batch_z, batch_q in tqdm(mc_loader, desc="计算特征"):
+            batch_x2, batch_y2, batch_z2, batch_q2 = next(mc_iter2)
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
             batch_z = batch_z.to(device) 
             batch_q = batch_q.to(device)
+            batch_x2 = batch_x2.to(device)
+            batch_y2 = batch_y2.to(device)
+            batch_z2 = batch_z2.to(device)
+            batch_q2 = batch_q2.to(device)
             
             # MC-AE1重构误差
-            recon_x, recon_y = net_model(batch_x, batch_y)
-            error1 = F.mse_loss(torch.cat([recon_x, recon_y], dim=1),
-                               torch.cat([batch_x, batch_y], dim=1), 
-                               reduction='none').mean(dim=1)
+            recon_y_pred, _ = net_model(batch_x, batch_z, batch_q)
+            error1 = F.mse_loss(recon_y_pred, batch_y, reduction='none').mean(dim=1)
             
             # MC-AE2重构误差
-            recon_z, recon_q = netx_model(batch_z, batch_q)
-            error2 = F.mse_loss(torch.cat([recon_z, recon_q], dim=1),
-                               torch.cat([batch_z, batch_q], dim=1),
-                               reduction='none').mean(dim=1)
+            recon_y2_pred, _ = netx_model(batch_x2, batch_z2, batch_q2)
+            error2 = F.mse_loss(recon_y2_pred, batch_y2, reduction='none').mean(dim=1)
             
             # 合并特征
             features = torch.stack([error1, error2], dim=1)
