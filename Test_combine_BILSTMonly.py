@@ -1545,16 +1545,16 @@ def create_fault_detection_timeline(test_results, save_path):
     ax1.plot(time_axis, fai_values, color='blue', linewidth=1, alpha=0.8,
            label='BiLSTM FAI')
     ax1.axhline(y=thresholds['threshold1'], color='orange', linestyle='--', alpha=0.7,
-              label='一级阈值')
+              label='Level 1 Threshold')
     ax1.axhline(y=thresholds['threshold2'], color='red', linestyle='--', alpha=0.7,
-              label='二级阈值')
+              label='Level 2 Threshold')
     ax1.axhline(y=thresholds['threshold3'], color='darkred', linestyle='--', alpha=0.7,
-              label='三级阈值')
+              label='Level 3 Threshold')
     
-    ax1.set_ylabel('BiLSTM\n综合诊断指标φ')
+    ax1.set_ylabel('BiLSTM\nComprehensive Diagnostic Index φ')
     ax1.legend(loc='upper right')
     ax1.grid(True, alpha=0.3)
-    ax1.set_title(f'BiLSTM - 样本 {fault_sample_id} (故障样本)')
+    ax1.set_title(f'BiLSTM - Sample {fault_sample_id} (Fault Sample)')
     
     # 子图2: 故障检测结果
     ax2 = axes[1]
@@ -1565,17 +1565,17 @@ def create_fault_detection_timeline(test_results, save_path):
                     alpha=0.6, color='blue',
                     label='BiLSTM Fault Detection')
     
-    ax2.set_ylabel('故障检测结果')
+    ax2.set_ylabel('Fault Detection Result')
     ax2.set_ylim(0, 1)
     ax2.legend()
     ax2.grid(True, alpha=0.3)
-    ax2.set_title('BiLSTM故障检测结果')
+    ax2.set_title('BiLSTM Fault Detection Result')
     
     # 子图3: 检测过程（兼容两种模式）
     ax3 = axes[2]
     detection_info = sample_result['detection_info']
     
-    ax3.plot(time_axis, fai_values, 'b-', alpha=0.5, label='φ指标值')
+    ax3.plot(time_axis, fai_values, 'b-', alpha=0.5, label='φ Index Value')
     
     # 根据检测模式显示不同的检测过程
     if CURRENT_DETECTION_MODE == "three_window":
@@ -1602,19 +1602,19 @@ def create_fault_detection_timeline(test_results, save_path):
         if detection_info.get('trigger_points'):
             ax3.scatter(detection_info['trigger_points'], 
                        [fai_values[i] for i in detection_info['trigger_points']],
-                       color='orange', s=30, label='触发点', alpha=0.8)
+                       color='orange', s=30, label='Trigger Points', alpha=0.8)
         
-        ax3.set_ylabel('5点检测\n过程')
-        ax3.set_title('5点检测过程 (BiLSTM)')
+        ax3.set_ylabel('5-Point Detection\nProcess')
+        ax3.set_title('5-Point Detection Process (BiLSTM)')
     
     # 标记故障区域（两种模式都有）
     if detection_info.get('marked_regions'):
         for i, region in enumerate(detection_info['marked_regions']):
             start, end = region['range']
-            label = '标记故障区域' if i == 0 else ""
+            label = 'Marked Fault Region' if i == 0 else ""
             ax3.axvspan(start, end, alpha=0.2, color='red', label=label)
     
-    ax3.set_xlabel('时间步长')
+    ax3.set_xlabel('Time Step')
     ax3.legend()
     ax3.grid(True, alpha=0.3)
     
@@ -1727,8 +1727,8 @@ def create_three_window_visualization(test_results, save_path):
     time_axis = np.arange(len(fai_values))
     
     # 绘制FAI时序
-    ax_main.plot(time_axis, fai_values, 'b-', linewidth=1.5, alpha=0.8, label='综合诊断指标 φ(FAI)')
-    ax_main.axhline(y=threshold1, color='red', linestyle='--', alpha=0.7, label='一级阈值')
+    ax_main.plot(time_axis, fai_values, 'b-', linewidth=1.5, alpha=0.8, label='Comprehensive Diagnostic Index φ(FAI)')
+    ax_main.axhline(y=threshold1, color='red', linestyle='--', alpha=0.7, label='Level 1 Threshold')
     
     # 根据检测模式显示不同的检测过程
     if CURRENT_DETECTION_MODE == "three_window":
@@ -1757,24 +1757,24 @@ def create_three_window_visualization(test_results, save_path):
         if detection_info.get('trigger_points'):
             trigger_points = detection_info['trigger_points']
             ax_main.scatter(trigger_points, [fai_values[i] for i in trigger_points],
-                           color='orange', s=40, alpha=0.8, label=f'触发: {len(trigger_points)} 个触发点',
+                           color='orange', s=40, alpha=0.8, label=f'Trigger: {len(trigger_points)} Points',
                            marker='o', zorder=5)
     
     # 阶段3：标记窗口 - 故障区域
     fault_regions_plotted = set()  # 避免重复绘制图例
     for i, region in enumerate(detection_info['marked_regions']):
         start, end = region['range']
-        label = '标记: 故障区域' if i == 0 else ""
+        label = 'Marked: Fault Region' if i == 0 else ""
         ax_main.axvspan(start, end, alpha=0.2, color='red', label=label)
     
-    ax_main.set_xlabel('时间步长')
-    ax_main.set_ylabel('综合诊断指标 φ')
+    ax_main.set_xlabel('Time Step')
+    ax_main.set_ylabel('Comprehensive Diagnostic Index φ')
     
     # 根据检测模式设置标题
     if CURRENT_DETECTION_MODE == "three_window":
-        title = f'BiLSTM三窗口故障检测过程 - 样本 {fault_sample_id}'
+        title = f'BiLSTM Three-Window Fault Detection Process - Sample {fault_sample_id}'
     else:
-        title = f'BiLSTM五点故障检测过程 - 样本 {fault_sample_id}'
+        title = f'BiLSTM Five-Point Fault Detection Process - Sample {fault_sample_id}'
     
     ax_main.set_title(title, fontsize=14, fontweight='bold')
     ax_main.legend(loc='upper left')
@@ -1789,12 +1789,12 @@ def create_three_window_visualization(test_results, save_path):
         detection_stats.get('total_marked_regions', 0), 
         detection_stats.get('total_fault_points', 0)
     ]
-    detection_labels = ['触发点', '标记区域', '故障点']
+    detection_labels = ['Trigger Points', 'Marked Regions', 'Fault Points']
     colors1 = ['orange', 'red', 'darkred']
     
     bars1 = ax1.bar(detection_labels, detection_data, color=colors1, alpha=0.7)
-    ax1.set_title('检测统计')
-    ax1.set_ylabel('数量')
+    ax1.set_title('Detection Statistics')
+    ax1.set_ylabel('Count')
     
     # 添加数值标签
     for bar, value in zip(bars1, detection_data):
@@ -1859,17 +1859,17 @@ def create_three_window_visualization(test_results, save_path):
             bars3 = ax3.bar(range(len(trigger_fai_values)), trigger_fai_values, 
                            color='orange', alpha=0.7)
             ax3.axhline(y=threshold1, color='red', linestyle='--', 
-                       alpha=0.7, label='一级阈值')
-            ax3.set_title('触发点FAI值')
-            ax3.set_xlabel('触发点')
-            ax3.set_ylabel('FAI值')
+                       alpha=0.7, label='Level 1 Threshold')
+            ax3.set_title('Trigger Point FAI Values')
+            ax3.set_xlabel('Trigger Point')
+            ax3.set_ylabel('FAI Value')
             ax3.set_xticks(range(len(trigger_fai_values)))
             ax3.set_xticklabels([f'T{i+1}' for i in range(len(trigger_fai_values))])
             ax3.legend()
         else:
-            ax3.text(0.5, 0.5, '无触发点', ha='center', va='center', 
+            ax3.text(0.5, 0.5, 'No Trigger Points', ha='center', va='center', 
                     transform=ax3.transAxes, fontsize=12)
-            ax3.set_title('触发点FAI值')
+            ax3.set_title('Trigger Point FAI Values')
     
     # === 子图4：BiLSTM性能 ===
     ax4 = fig.add_subplot(gs[1, 3])

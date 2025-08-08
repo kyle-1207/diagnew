@@ -1873,16 +1873,16 @@ def create_fault_detection_timeline(test_results, save_path):
     ax1.plot(time_axis, fai_values, color='blue', linewidth=1, alpha=0.8,
            label='Transformer FAI')
     ax1.axhline(y=thresholds['threshold1'], color='orange', linestyle='--', alpha=0.7,
-              label='一级阈值')
+              label='Level 1 Threshold')
     ax1.axhline(y=thresholds['threshold2'], color='red', linestyle='--', alpha=0.7,
-              label='二级阈值')
+              label='Level 2 Threshold')
     ax1.axhline(y=thresholds['threshold3'], color='darkred', linestyle='--', alpha=0.7,
-              label='三级阈值')
+              label='Level 3 Threshold')
     
-    ax1.set_ylabel('Transformer\n综合诊断指标φ')
+    ax1.set_ylabel('Transformer\nComprehensive Diagnostic Index φ')
     ax1.legend(loc='upper right')
     ax1.grid(True, alpha=0.3)
-    ax1.set_title(f'Transformer - 样本 {fault_sample_id} (故障样本)')
+    ax1.set_title(f'Transformer - Sample {fault_sample_id} (Fault Sample)')
     
     # 子图2: 故障检测结果
     ax2 = axes[1]
@@ -1893,11 +1893,11 @@ def create_fault_detection_timeline(test_results, save_path):
                     alpha=0.6, color='blue',
                     label='Transformer Fault Detection')
     
-    ax2.set_ylabel('故障检测结果')
+    ax2.set_ylabel('Fault Detection Result')
     ax2.set_ylim(0, 1)
     ax2.legend()
     ax2.grid(True, alpha=0.3)
-    ax2.set_title('Transformer故障检测结果')
+    ax2.set_title('Transformer Fault Detection Result')
     
     # 子图3: 三窗口检测过程
     ax3 = axes[2]
@@ -1916,14 +1916,14 @@ def create_fault_detection_timeline(test_results, save_path):
     marked_regions = detection_info.get('marked_regions', [])
     for i, region in enumerate(marked_regions):
         start, end = region['range']
-        label = '故障区域' if i == 0 else ""
+        label = 'Fault Region' if i == 0 else ""
         ax3.axvspan(start, end, alpha=0.2, color='red', label=label)
     
-    ax3.set_ylabel('三点检测\n过程')
-    ax3.set_xlabel('时间步长')
+    ax3.set_ylabel('Three-Point Detection\nProcess')
+    ax3.set_xlabel('Time Step')
     ax3.legend()
     ax3.grid(True, alpha=0.3)
-    ax3.set_title('三点检测过程 (Transformer)')
+    ax3.set_title('Three-Point Detection Process (Transformer)')
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
@@ -2039,8 +2039,8 @@ def create_three_window_visualization(test_results, save_path):
     time_axis = np.arange(len(fai_values))
     
     # 绘制FAI时序
-    ax_main.plot(time_axis, fai_values, 'b-', linewidth=1.5, alpha=0.8, label='综合诊断指标 φ(FAI)')
-    ax_main.axhline(y=threshold1, color='red', linestyle='--', alpha=0.7, label='一级阈值')
+    ax_main.plot(time_axis, fai_values, 'b-', linewidth=1.5, alpha=0.8, label='Comprehensive Diagnostic Index φ(FAI)')
+    ax_main.axhline(y=threshold1, color='red', linestyle='--', alpha=0.7, label='Level 1 Threshold')
     
     # 阶段1：检测窗口 - 标记候选点
     if detection_info['candidate_points']:
@@ -2065,12 +2065,12 @@ def create_three_window_visualization(test_results, save_path):
     fault_regions_plotted = set()  # 避免重复绘制图例
     for i, region in enumerate(detection_info['marked_regions']):
         start, end = region['range']
-        label = '标记: 故障区域' if i == 0 else ""
+        label = 'Marked: Fault Region' if i == 0 else ""
         ax_main.axvspan(start, end, alpha=0.2, color='red', label=label)
     
-    ax_main.set_xlabel('时间步长')
-    ax_main.set_ylabel('综合诊断指标 φ')
-    ax_main.set_title(f'Transformer三点检测故障检测过程 - 样本 {fault_sample_id}', 
+    ax_main.set_xlabel('Time Step')
+    ax_main.set_ylabel('Comprehensive Diagnostic Index φ')
+    ax_main.set_title(f'Transformer Three-Point Fault Detection Process - Sample {fault_sample_id}', 
                      fontsize=14, fontweight='bold')
     ax_main.legend(loc='upper left')
     ax_main.grid(True, alpha=0.3)
@@ -2167,8 +2167,8 @@ def create_three_window_visualization(test_results, save_path):
     fault_ratio = detection_stats.get('fault_ratio', 0.0)
     
     bars4 = ax4.bar(['Transformer'], [fault_ratio], color='blue', alpha=0.7)
-    ax4.set_title('Transformer\n(故障检测比率)')
-    ax4.set_ylabel('故障比率')
+    ax4.set_title('Transformer\n(Fault Detection Ratio)')
+    ax4.set_ylabel('Fault Ratio')
     
     for bar, value in zip(bars4, [fault_ratio]):
         ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
