@@ -1631,14 +1631,14 @@ def create_performance_radar(performance_metrics, save_path):
     
     # 定义雷达图指标
     radar_metrics = {
-        '准确率': 'accuracy',
-        '精确率': 'precision', 
-        '召回率': 'recall',
-        'F1分数': 'f1_score',
-        '特异性': 'specificity',
-        '早期预警': 'tpr',  # 早期预警能力 (TPR)
-        '误报控制': 'fpr',  # 误报控制 (1-FPR)
-        '检测稳定性': 'accuracy'  # 检测稳定性 (用准确率代表)
+        'Accuracy': 'accuracy',
+        'Precision': 'precision', 
+        'Recall': 'recall',
+        'F1-Score': 'f1_score',
+        'Specificity': 'specificity',
+        'Early Warning': 'tpr',  # 早期预警能力 (TPR)
+        'False Alarm Control': 'fpr',  # 误报控制 (1-FPR)
+        'Detection Stability': 'accuracy'  # 检测稳定性 (用准确率代表)
     }
     
     # 数据预处理：FPR需要转换为控制能力 (1-FPR)
@@ -1648,7 +1648,7 @@ def create_performance_radar(performance_metrics, save_path):
         bilstm_val = performance_metrics['BILSTM']['classification_metrics'][metric_key]
         
         # 特殊处理：误报控制 = 1 - FPR
-        if metric_name == '误报控制':
+        if metric_name == 'False Alarm Control':
             bilstm_val = 1 - bilstm_val
             
         bilstm_values.append(bilstm_val)
@@ -1676,14 +1676,14 @@ def create_performance_radar(performance_metrics, save_path):
     ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'])
     
     # 添加标题和图例
-    plt.title('BiLSTM性能指标雷达图', 
+    plt.title('BiLSTM Performance Metrics Radar Chart', 
               pad=20, fontsize=14, fontweight='bold')
     plt.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0))
     
     # 添加性能总结
     bilstm_avg = np.mean(bilstm_values[:-1])
     
-    plt.figtext(0.02, 0.02, f'BiLSTM综合性能: {bilstm_avg:.3f}', 
+    plt.figtext(0.02, 0.02, f'BiLSTM Overall Performance: {bilstm_avg:.3f}', 
                 fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
     
     plt.tight_layout()
