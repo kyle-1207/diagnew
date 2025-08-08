@@ -445,18 +445,18 @@ MODEL_PATHS = {
 # 检测模式配置
 DETECTION_MODES = {
     "three_window": {
-        "name": "三窗口检测模式",
-        "description": "基于FAI的三窗口故障检测机制（检测->验证->标记）",
+        "name": "Three-Window Detection Mode",
+        "description": "Three-window fault detection mechanism based on FAI (Detection->Verification->Marking)",
         "function": "three_window_fault_detection"
     },
     "five_point": {
-        "name": "5点检测模式（原版）", 
-        "description": "对于故障样本，如果某点高于阈值且前后相邻点也高于阈值，则标记该点及前后2个点（共5个点）",
+        "name": "5-Point Detection Mode (Original)", 
+        "description": "For fault samples, if a point exceeds threshold and adjacent points also exceed threshold, mark that point and 2 points before/after (total 5 points)",
         "function": "five_point_fault_detection"
     },
     "five_point_improved": {
-        "name": "5点检测模式（改进版）",
-        "description": "改进的5点检测：严格的触发条件 + 分级标记范围 + 有效降噪机制",
+        "name": "5-Point Detection Mode (Improved)",
+        "description": "Improved 5-point detection: Strict trigger conditions + Graded marking range + Effective noise reduction",
         "function": "five_point_fault_detection"
     }
 }
@@ -2046,7 +2046,7 @@ def create_three_window_visualization(test_results, save_path):
     if detection_info['candidate_points']:
         candidate_points = detection_info['candidate_points']
         ax_main.scatter(candidate_points, [fai_values[i] for i in candidate_points],
-                       color='orange', s=40, alpha=0.8, label=f'检测: {len(candidate_points)} 个候选点',
+                       color='orange', s=40, alpha=0.8, label=f'Detection: {len(candidate_points)} Candidate Points',
                        marker='o', zorder=5)
     
     # 阶段2：验证窗口 - 标记验证通过的点
@@ -2085,24 +2085,24 @@ def create_three_window_visualization(test_results, save_path):
         detection_stats.get('total_marked_regions', 0),    # 标记区域数（对应验证点）
         detection_stats.get('total_fault_points', 0)       # 故障点数
     ]
-    detection_labels = ['候选点', '验证点', '故障点']
+    detection_labels = ['Candidate Points', 'Verified Points', 'Fault Points']
     colors1 = ['orange', 'red', 'darkred']
     
     bars1 = ax1.bar(detection_labels, detection_data, color=colors1, alpha=0.7)
-    ax1.set_title('检测统计')
-    ax1.set_ylabel('数量')
+    ax1.set_title('Detection Statistics')
+    ax1.set_ylabel('Count')
     
     # 添加数值标签
     for bar, value in zip(bars1, detection_data):
         ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
                 str(value), ha='center', va='bottom')
     
-    # === 子图2：三点检测参数 ===
+    # === 子图2：Three-Point Detection Parameters ===
     ax2 = fig.add_subplot(gs[1, 1])
     
     # 显示三点检测的阈值参数
     thresholds = transformer_result.get('thresholds', {})
-    threshold_names = ['3σ阈值', '4.5σ阈值', '6σ阈值']
+    threshold_names = ['3σ Threshold', '4.5σ Threshold', '6σ Threshold']
     threshold_values = [
         thresholds.get('threshold1', 0),
         thresholds.get('threshold2', 0),
@@ -2111,8 +2111,8 @@ def create_three_window_visualization(test_results, save_path):
     colors2 = ['lightblue', 'orange', 'red']
     
     bars2 = ax2.bar(threshold_names, threshold_values, color=colors2, alpha=0.7)
-    ax2.set_title('检测阈值\n(三级分层)')
-    ax2.set_ylabel('阈值')
+    ax2.set_title('Detection Thresholds\n(Three-Level Hierarchy)')
+    ax2.set_ylabel('Threshold Value')
     ax2.tick_params(axis='x', rotation=45)
     
     # 添加数值标签
@@ -2137,9 +2137,9 @@ def create_three_window_visualization(test_results, save_path):
         colors = ['lightblue', 'orange', 'red']
         
         bars3 = ax3.bar(levels, trigger_counts, color=colors, alpha=0.7)
-        ax3.set_title('触发级别分布')
-        ax3.set_xlabel('检测级别')
-        ax3.set_ylabel('触发次数')
+        ax3.set_title('Trigger Level Distribution')
+        ax3.set_xlabel('Detection Level')
+        ax3.set_ylabel('Trigger Count')
         
         # 添加数值标签
         for bar, count in zip(bars3, trigger_counts):
@@ -2147,11 +2147,11 @@ def create_three_window_visualization(test_results, save_path):
                 ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
                         str(count), ha='center', va='bottom')
     else:
-        ax3.text(0.5, 0.5, '无触发数据', ha='center', va='center', 
+        ax3.text(0.5, 0.5, 'No Trigger Data', ha='center', va='center', 
                 transform=ax3.transAxes, fontsize=12)
-        ax3.set_title('触发级别分布')
+        ax3.set_title('Trigger Level Distribution')
     
-    # === 子图4：Transformer性能 ===
+    # === 子图4：Transformer Performance ===
     ax4 = fig.add_subplot(gs[1, 3])
     
     sample_result = next((r for r in test_results['TRANSFORMER'] if r.get('sample_id') == fault_sample_id), None)
@@ -2176,13 +2176,13 @@ def create_three_window_visualization(test_results, save_path):
     
     # === 底部：过程说明 ===
     process_text = """
-    Transformer三点检测过程:
+    Transformer Three-Point Detection Process:
     
-    1. Level 3 (6σ): 中心点超6σ阈值，无邻域要求，直接标记3点
-    2. Level 2 (4.5σ): 中心点超4.5σ + 至少1个邻居超3σ，标记3点
-    3. Level 1 (3σ): 中心点超3σ + 至少1个邻居超2σ，标记3点
+    1. Level 3 (6σ): Center point exceeds 6σ threshold, no neighborhood requirement, directly mark 3 points
+    2. Level 2 (4.5σ): Center point exceeds 4.5σ + at least 1 neighbor exceeds 3σ, mark 3 points
+    3. Level 1 (3σ): Center point exceeds 3σ + at least 1 neighbor exceeds 2σ, mark 3 points
     
-    优势: 分级检测 + 邻域验证，有效降噪并保持敏感性
+    Advantages: Hierarchical detection + neighborhood verification, effective noise reduction while maintaining sensitivity
     """
     
     fig.text(0.02, 0.02, process_text, fontsize=10, 
