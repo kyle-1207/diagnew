@@ -168,12 +168,40 @@ def load_saved_models():
     if os.path.exists(transformer_path):
         try:
             transformer = TransformerPredictor().to(device)
-            transformer.load_state_dict(torch.load(transformer_path, map_location=device))
+            
+            # Load state dict and handle DataParallel wrapper
+            state_dict = torch.load(transformer_path, map_location=device)
+            
+            # Remove 'module.' prefix if present (from DataParallel)
+            if any(key.startswith('module.') for key in state_dict.keys()):
+                print("   Detected DataParallel model, removing 'module.' prefix...")
+                new_state_dict = {}
+                for key, value in state_dict.items():
+                    if key.startswith('module.'):
+                        new_key = key[7:]  # Remove 'module.' prefix
+                        new_state_dict[new_key] = value
+                    else:
+                        new_state_dict[key] = value
+                state_dict = new_state_dict
+            
+            transformer.load_state_dict(state_dict)
             transformer.eval()
             models['transformer'] = transformer
             print(f"SUCCESS: Loaded Transformer model from {transformer_path}")
         except Exception as e:
             print(f"ERROR: Failed to load Transformer model: {e}")
+            print(f"   Attempting alternative loading method...")
+            try:
+                # Alternative: Try to load as DataParallel directly
+                transformer_dp = nn.DataParallel(TransformerPredictor()).to(device)
+                transformer_dp.load_state_dict(torch.load(transformer_path, map_location=device))
+                transformer = transformer_dp.module  # Extract the actual model
+                transformer.eval()
+                models['transformer'] = transformer
+                print(f"SUCCESS: Loaded Transformer model using DataParallel wrapper")
+            except Exception as e2:
+                print(f"ERROR: Alternative loading also failed: {e2}")
+                print("WARNING: Continuing without Transformer model")
     
     # Load MC-AE models
     net_model_path = os.path.join(ANALYSIS_CONFIG['model_save_path'], 'net_model_pn.pth')
@@ -287,7 +315,9 @@ def analyze_transformer_performance(models, test_data):
     print("="*50)
     
     if 'transformer' not in models:
-        print("ERROR: Transformer model not available")
+        print("WARNING: Transformer model not available, skipping Transformer analysis")
+        print("   This is normal if model loading failed")
+        print("   Other analyses will continue...")
         return None
     
     transformer = models['transformer']
@@ -680,6 +710,126 @@ def generate_comprehensive_report(transformer_results, fault_detection_results, 
     
     return report_path
 
+def create_basic_data_visualization(test_data, labels):
+    """Create basic data visualization even without trained models"""
+    print("\n" + "="*50)
+    print("Basic Data Visualization")
+    print("="*50)
+    
+    if not test_data:
+        print("ERROR: No test data available")
+        return
+    
+    # Extract basic statistics from data
+    sample_shapes = []
+    vin1_stats = []
+    vin2_stats = []
+    vin3_stats = []
+    
+    for data in test_data:
+        try:
+            vin_1 = data['vin_1'].flatten()
+            vin_2 = data['vin_2'].flatten()
+            vin_3 = data['vin_3'].flatten()
+            
+            sample_shapes.append(len(vin_1))
+            vin1_stats.append([np.mean(vin_1), np.std(vin_1), np.min(vin_1), np.max(vin_1)])
+            vin2_stats.append([np.mean(vin_2), np.std(vin_2), np.min(vin_2), np.max(vin_2)])
+            vin3_stats.append([np.mean(vin_3), np.std(vin_3), np.min(vin_3), np.max(vin_3)])
+        except Exception as e:
+            print(f"WARNING: Failed to process sample: {e}")
+            continue
+    
+    if not vin1_stats:
+        print("ERROR: No valid data for visualization")
+        return
+    
+    vin1_stats = np.array(vin1_stats)
+    vin2_stats = np.array(vin2_stats)
+    vin3_stats = np.array(vin3_stats)
+    labels_array = np.array(labels[:len(vin1_stats)])
+    
+    # Create visualization
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Plot 1: Data distribution by class (VIN1 mean values)
+    normal_mask = labels_array == 0
+    fault_mask = labels_array == 1
+    
+    if np.any(normal_mask):
+        axes[0, 0].hist(vin1_stats[normal_mask, 0], bins=15, alpha=0.7, label='Normal', color='#2E86AB', density=True)
+    if np.any(fault_mask):
+        axes[0, 0].hist(vin1_stats[fault_mask, 0], bins=15, alpha=0.7, label='Fault', color='#A23B72', density=True)
+    
+    axes[0, 0].set_xlabel('VIN1 Mean Value')
+    axes[0, 0].set_ylabel('Density')
+    axes[0, 0].set_title('VIN1 Mean Value Distribution by Class')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # Plot 2: Standard deviation comparison
+    if np.any(normal_mask):
+        axes[0, 1].scatter(vin1_stats[normal_mask, 1], vin2_stats[normal_mask, 1], 
+                          alpha=0.6, label='Normal', color='#2E86AB', s=50)
+    if np.any(fault_mask):
+        axes[0, 1].scatter(vin1_stats[fault_mask, 1], vin2_stats[fault_mask, 1], 
+                          alpha=0.6, label='Fault', color='#A23B72', s=50)
+    
+    axes[0, 1].set_xlabel('VIN1 Standard Deviation')
+    axes[0, 1].set_ylabel('VIN2 Standard Deviation')
+    axes[0, 1].set_title('Data Variability Comparison')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # Plot 3: Sample distribution summary
+    class_counts = [np.sum(normal_mask), np.sum(fault_mask)]
+    class_labels = ['Normal', 'Fault']
+    colors = ['#2E86AB', '#A23B72']
+    
+    axes[1, 0].pie(class_counts, labels=class_labels, colors=colors, autopct='%1.1f%%', startangle=90)
+    axes[1, 0].set_title('Sample Class Distribution')
+    
+    # Plot 4: Data range analysis
+    features = ['Mean', 'Std', 'Min', 'Max']
+    normal_data = np.mean(vin1_stats[normal_mask], axis=0) if np.any(normal_mask) else np.zeros(4)
+    fault_data = np.mean(vin1_stats[fault_mask], axis=0) if np.any(fault_mask) else np.zeros(4)
+    
+    x = np.arange(len(features))
+    width = 0.35
+    
+    axes[1, 1].bar(x - width/2, normal_data, width, label='Normal', color='#2E86AB', alpha=0.7)
+    axes[1, 1].bar(x + width/2, fault_data, width, label='Fault', color='#A23B72', alpha=0.7)
+    
+    axes[1, 1].set_xlabel('Statistical Features')
+    axes[1, 1].set_ylabel('Values')
+    axes[1, 1].set_title('Statistical Feature Comparison (VIN1)')
+    axes[1, 1].set_xticks(x)
+    axes[1, 1].set_xticklabels(features)
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Save plot
+    plot_path = os.path.join(ANALYSIS_CONFIG['output_path'], 'basic_data_analysis.png')
+    plt.savefig(plot_path, dpi=ANALYSIS_CONFIG['dpi'], bbox_inches='tight')
+    plt.close()
+    
+    print(f"Basic data visualization saved: {plot_path}")
+    
+    # Print summary statistics
+    print(f"\nData Summary:")
+    print(f"  Total samples analyzed: {len(vin1_stats)}")
+    print(f"  Normal samples: {np.sum(normal_mask)}")
+    print(f"  Fault samples: {np.sum(fault_mask)}")
+    
+    if np.any(normal_mask):
+        print(f"  Normal VIN1 mean: {np.mean(vin1_stats[normal_mask, 0]):.4f} ± {np.std(vin1_stats[normal_mask, 0]):.4f}")
+    if np.any(fault_mask):
+        print(f"  Fault VIN1 mean: {np.mean(vin1_stats[fault_mask, 0]):.4f} ± {np.std(vin1_stats[fault_mask, 0]):.4f}")
+    
+    return True
+
 #=================================== Main Analysis Function ===================================
 
 def main():
@@ -690,46 +840,77 @@ def main():
     normal_samples, fault_samples, labels_df = load_sample_labels()
     
     if not normal_samples and not fault_samples:
-        print("ERROR: No samples loaded from labels file")
-        return
+        print("WARNING: No samples loaded from labels file, using default sample IDs")
+        # Use default sample IDs if labels file fails
+        normal_samples = [str(i) for i in range(0, 30)]
+        fault_samples = [str(i) for i in range(340, 370)]
     
     # Load saved models
     models = load_saved_models()
     
     if not models:
-        print("ERROR: No models loaded")
-        return
+        print("WARNING: No models loaded, will perform basic data analysis only")
     
     # Load test samples (mix of normal and fault)
     test_sample_ids = normal_samples[:25] + fault_samples[:25]  # 25 from each class
     test_data, labels, successful_samples = load_test_samples(test_sample_ids, max_samples=50)
     
     if not test_data:
-        print("ERROR: No test data loaded")
+        print("ERROR: No test data loaded, cannot proceed with analysis")
         return
     
-    # Analyze Transformer performance
+    print(f"\nProceeding with analysis of {len(test_data)} samples...")
+    
+    # Analyze Transformer performance (if model available)
     transformer_results = None
     if 'transformer' in models:
-        transformer_results = analyze_transformer_performance(models, test_data)
+        try:
+            transformer_results = analyze_transformer_performance(models, test_data)
+        except Exception as e:
+            print(f"WARNING: Transformer analysis failed: {e}")
+            transformer_results = None
+    else:
+        print("INFO: Skipping Transformer analysis (model not available)")
     
-    # Analyze fault detection performance
-    fault_detection_results = analyze_fault_detection_performance(test_data, labels)
+    # Analyze fault detection performance (basic reconstruction error analysis)
+    fault_detection_results = None
+    try:
+        fault_detection_results = analyze_fault_detection_performance(test_data, labels)
+    except Exception as e:
+        print(f"WARNING: Fault detection analysis failed: {e}")
+        fault_detection_results = None
     
-    # Generate comprehensive report
-    report_path = generate_comprehensive_report(transformer_results, fault_detection_results, test_data)
+    # Generate comprehensive report (even with partial results)
+    try:
+        report_path = generate_comprehensive_report(transformer_results, fault_detection_results, test_data)
+    except Exception as e:
+        print(f"WARNING: Report generation failed: {e}")
+        report_path = None
+    
+    # Generate basic data visualization even if models failed
+    try:
+        create_basic_data_visualization(test_data, labels)
+    except Exception as e:
+        print(f"WARNING: Basic visualization failed: {e}")
     
     print("\n" + "="*80)
     print("Analysis Complete!")
     print("="*80)
     print(f"Results saved in: {ANALYSIS_CONFIG['output_path']}")
-    print(f"Report file: {report_path}")
+    
+    if report_path:
+        print(f"Report file: {report_path}")
     
     # List all generated files
-    output_files = os.listdir(ANALYSIS_CONFIG['output_path'])
-    print(f"\nGenerated files:")
-    for file in output_files:
-        print(f"  - {file}")
+    try:
+        output_files = os.listdir(ANALYSIS_CONFIG['output_path'])
+        print(f"\nGenerated files:")
+        for file in output_files:
+            print(f"  - {file}")
+    except Exception as e:
+        print(f"WARNING: Could not list output files: {e}")
+    
+    print("\nAnalysis completed with available data and models.")
 
 if __name__ == "__main__":
     main()
