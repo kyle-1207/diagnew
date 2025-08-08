@@ -1,6 +1,6 @@
 # PN混合反馈Transformer模型测试脚本
 # 基于 Train_Transformer_PN_HybridFeedback_EN.py 训练的模型进行测试
-# 导入必要的库
+cl# 导入必要的库
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numpy as np
@@ -784,7 +784,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         print(f"     启动期({STARTUP_PERIOD}点): {startup_fp}个超阈值 ({startup_fp/len(startup_fai)*100:.1f}%)")
         if len(stable_fai) > 0:
             print(f"     稳定期({len(stable_fai)}点): {stable_fp}个超阈值 ({stable_fp/len(stable_fai)*100:.1f}%)")
-        print(f"     总计: {total_fp}个超阈值 ({total_fp/len(fai_values)*100:.1f}%)")
+        print(f"     总计: {total_fp}个超阈值 ({total_fp/len(fai_values)*100:.1f}% of {len(fai_values)} points)" if fai_values is not None and len(fai_values) > 0 else f"     总计: {total_fp}个超阈值 (无法计算比例)")
         
         detection_info['detection_stats'] = {
             'total_trigger_points': 0,
@@ -797,7 +797,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             'total_false_positives': total_fp,
             'startup_fp_ratio': startup_fp/len(startup_fai) if len(startup_fai) > 0 else 0,
             'stable_fp_ratio': stable_fp/len(stable_fai) if len(stable_fai) > 0 else 0,
-            'total_fp_ratio': total_fp/len(fai_values)
+            'total_fp_ratio': total_fp/len(fai_values) if fai_values is not None and len(fai_values) > 0 else 0
         }
         # 为兼容性添加空字段
         detection_info['trigger_points'] = []
@@ -856,7 +856,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     # 策略4.0：三级分级检测策略（基于源代码阈值）
     print(f"   🔧 策略4.0: 三级分级检测策略（严格按照源代码Test_.py）...")
     print(f"   异常点统计: 超3σ({np.sum(fai_values > threshold1)}个), 超4.5σ({np.sum(fai_values > threshold2)}个), 超6σ({np.sum(fai_values > threshold3)}个)")
-    print(f"   异常比例: {np.sum(fai_values > threshold1)/len(fai_values)*100:.2f}%")
+    print(f"   异常比例: {np.sum(fai_values > threshold1)/len(fai_values)*100:.2f}%" if fai_values is not None and len(fai_values) > 0 else "   异常比例: 无法计算")
     
     detection_config = {
         'mode': 'hierarchical_v2',
@@ -1577,10 +1577,22 @@ def process_single_sample(sample_id, models, config=None):
     
     print(f"   📊 传递给检测函数的阈值: T1={threshold1:.4f}, T2={threshold2:.4f}, T3={threshold3:.4f}")
     
-    if CURRENT_DETECTION_MODE == "five_point" or CURRENT_DETECTION_MODE == "five_point_improved":
-        fault_labels, detection_info = five_point_fault_detection(fault_indicator, threshold1, sample_id, threshold_config)
+    # 输入验证
+    if fault_indicator is None:
+        print(f"   ❌ 错误：样本{sample_id}的fault_indicator为None")
+        fault_labels = np.array([])
+        detection_info = {'error': 'fault_indicator_is_none'}
+    elif len(fault_indicator) == 0:
+        print(f"   ❌ 错误：样本{sample_id}的fault_indicator为空")
+        fault_labels = np.array([])
+        detection_info = {'error': 'fault_indicator_is_empty'}
     else:
-        fault_labels, detection_info = three_window_fault_detection(fault_indicator, threshold1, sample_id, threshold_config)
+        print(f"   ✅ 故障检测输入验证通过：fault_indicator长度={len(fault_indicator)}")
+        
+        if CURRENT_DETECTION_MODE == "five_point" or CURRENT_DETECTION_MODE == "five_point_improved":
+            fault_labels, detection_info = five_point_fault_detection(fault_indicator, threshold1, sample_id, threshold_config)
+        else:
+            fault_labels, detection_info = three_window_fault_detection(fault_indicator, threshold1, sample_id, threshold_config)
     
     # 构建结果
     sample_result = {
@@ -1588,9 +1600,9 @@ def process_single_sample(sample_id, models, config=None):
         'model_type': 'TRANSFORMER',
         'label': 1 if sample_id in TEST_SAMPLES['fault'] else 0,
         'df_data': df_data.values,
-        'fai': fai,
-        'T_squared': t_total,
-        'SPE': q_total,
+        'fai': fault_indicator if fault_indicator is not None else [],
+        'T_squared': t_total if t_total is not None else [],
+        'SPE': q_total if q_total is not None else [],
         'thresholds': {
             'threshold1': threshold1,
             'threshold2': threshold2, 
