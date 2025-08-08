@@ -1426,7 +1426,9 @@ def main():
     
     print(f"切片后数据形状:")
     print(f"   x_recovered: {x_recovered.shape}, y_recovered: {y_recovered.shape}")
+    print(f"   z_recovered: {z_recovered.shape}, q_recovered: {q_recovered.shape}")
     print(f"   x_recovered2: {x_recovered2.shape}, y_recovered2: {y_recovered2.shape}")
+    print(f"   z_recovered2: {z_recovered2.shape}, q_recovered2: {q_recovered2.shape}")
     
     # 使用真实数据进行MC-AE训练
     # 混合反馈：用Transformer预测替换BiLSTM预测部分
@@ -1448,7 +1450,8 @@ def main():
     
     print("✅ 完成混合反馈数据增强：Transformer预测替换BiLSTM预测")
     
-    # 准备MC-AE训练数据
+    print("准备MC-AE训练数据...")
+    
     # 路1（vin_2 → net_model）：输入x、增量dx、辅助q，目标为y
     mc_x_data = x_recovered_modified
     mc_y_data = y_recovered
@@ -1461,10 +1464,22 @@ def main():
     mc2_z_data = z_recovered2
     mc2_q_data = q_recovered2
     
+    print(f"第一路MC-AE数据形状 (net_model):")
+    print(f"   mc_x_data: {mc_x_data.shape} (输入x)")
+    print(f"   mc_y_data: {mc_y_data.shape} (目标y)")
+    print(f"   mc_z_data: {mc_z_data.shape} (增量dx)")
+    print(f"   mc_q_data: {mc_q_data.shape} (辅助q)")
+    
+    print(f"第二路MC-AE数据形状 (netx_model):")
+    print(f"   mc2_x_data: {mc2_x_data.shape} (输入x2)")
+    print(f"   mc2_y_data: {mc2_y_data.shape} (目标y2)")
+    print(f"   mc2_z_data: {mc2_z_data.shape} (增量dx2)")
+    print(f"   mc2_q_data: {mc2_q_data.shape} (辅助q2)")
+    
     # 创建MC-AE模型
     net_model = CombinedAE(
         input_size=dim_x, 
-        encode2_input_size=dim_y,
+        encode2_input_size=dim_q,  # 修正：使用q的维度(3)而不是y的维度(110)
         output_size=110,
         activation_fn=custom_activation,
         use_dx_in_forward=True
@@ -1472,7 +1487,7 @@ def main():
     
     netx_model = CombinedAE(
         input_size=dim_x2,
-        encode2_input_size=dim_y2, 
+        encode2_input_size=dim_q2,  # 修正：使用q2的维度(4)而不是y2的维度(110)
         output_size=110,
         activation_fn=torch.sigmoid,
         use_dx_in_forward=True
@@ -1537,6 +1552,7 @@ def main():
         
         pbar = tqdm(mc_loader, desc=f"MC-AE Epoch {epoch+1}/{phase2_epochs}")
         mc_iter2 = iter(mc_loader2)
+        batch_count = 0
         for batch_x, batch_y, batch_z, batch_q in pbar:
             batch_x2, batch_y2, batch_z2, batch_q2 = next(mc_iter2)
             batch_x = batch_x.to(device)
@@ -1547,6 +1563,22 @@ def main():
             batch_y2 = batch_y2.to(device)
             batch_z2 = batch_z2.to(device)
             batch_q2 = batch_q2.to(device)
+            
+            # 打印第一个batch的调试信息
+            if epoch == 0 and batch_count == 0:
+                print(f"\n🔍 第一个batch调试信息:")
+                print(f"   第一路batch形状和类型:")
+                print(f"      batch_x: {batch_x.shape}, dtype={batch_x.dtype}")
+                print(f"      batch_y: {batch_y.shape}, dtype={batch_y.dtype}")
+                print(f"      batch_z: {batch_z.shape}, dtype={batch_z.dtype}")
+                print(f"      batch_q: {batch_q.shape}, dtype={batch_q.dtype}")
+                print(f"   第二路batch形状和类型:")
+                print(f"      batch_x2: {batch_x2.shape}, dtype={batch_x2.dtype}")
+                print(f"      batch_y2: {batch_y2.shape}, dtype={batch_y2.dtype}")
+                print(f"      batch_z2: {batch_z2.shape}, dtype={batch_z2.dtype}")
+                print(f"      batch_q2: {batch_q2.shape}, dtype={batch_q2.dtype}")
+            
+            batch_count += 1
             
             # 训练net_model (MC-AE1)
             net_optimizer.zero_grad()
