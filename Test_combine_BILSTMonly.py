@@ -1584,17 +1584,17 @@ def create_fault_detection_timeline(test_results, save_path):
         if detection_info.get('candidate_points'):
             ax3.scatter(detection_info['candidate_points'], 
                        [fai_values[i] for i in detection_info['candidate_points']],
-                       color='orange', s=30, label='候选点', alpha=0.8)
+                       color='orange', s=30, label='Candidate Points', alpha=0.8)
         
         # 标记验证通过的点
         if detection_info.get('verified_points'):
             verified_indices = [v['point'] for v in detection_info['verified_points']]
             ax3.scatter(verified_indices,
                        [fai_values[i] for i in verified_indices],
-                       color='red', s=50, label='验证点', marker='^')
+                       color='red', s=50, label='Verified Points', marker='^')
     
-        ax3.set_ylabel('三窗口\n检测过程')
-        ax3.set_title('三窗口检测过程 (BiLSTM)')
+        ax3.set_ylabel('Three-Window\nDetection Process')
+        ax3.set_title('Three-Window Detection Process (BiLSTM)')
         
     else:
         # 5点检测模式
@@ -1737,7 +1737,7 @@ def create_three_window_visualization(test_results, save_path):
         if detection_info.get('candidate_points'):
             candidate_points = detection_info['candidate_points']
             ax_main.scatter(candidate_points, [fai_values[i] for i in candidate_points],
-                           color='orange', s=40, alpha=0.8, label=f'检测: {len(candidate_points)} 个候选点',
+                           color='orange', s=40, alpha=0.8, label=f'Detection: {len(candidate_points)} Candidate Points',
                            marker='o', zorder=5)
         
         # 阶段2：验证窗口 - 标记验证通过的点
@@ -1811,21 +1811,21 @@ def create_three_window_visualization(test_results, save_path):
             WINDOW_CONFIG['verification_window'],
             WINDOW_CONFIG['marking_window']
         ]
-        window_labels = ['检测窗口\n(25)', '验证窗口\n(15)', '标记窗口\n(10)']
+        window_labels = ['Detection Window\n(25)', 'Verification Window\n(15)', 'Marking Window\n(10)']
         colors2 = ['lightblue', 'lightgreen', 'lightcoral']
         
         wedges, texts, autotexts = ax2.pie(window_params, labels=window_labels, colors=colors2,
                                           autopct='%1.0f', startangle=90)
-        ax2.set_title('窗口大小\n(采样点数)')
+        ax2.set_title('Window Size\n(Sample Points)')
     else:
         # 5点检测模式
         mode_params = [5, 3, 1]  # 5点区域, 3点触发条件, 1个中心点
-        mode_labels = ['标记区域\n(5点)', '触发条件\n(3点)', '中心点\n(1点)']
+        mode_labels = ['Marked Region\n(5 Points)', 'Trigger Condition\n(3 Points)', 'Center Point\n(1 Point)']
         colors2 = ['lightblue', 'lightgreen', 'lightcoral']
         
         wedges, texts, autotexts = ax2.pie(mode_params, labels=mode_labels, colors=colors2,
                                           autopct='%1.0f', startangle=90)
-        ax2.set_title('5点检测\n参数配置')
+        ax2.set_title('5-Point Detection\nParameter Config')
     
     # === 子图3：检测详情 ===
     ax3 = fig.add_subplot(gs[1, 2])
@@ -1839,17 +1839,17 @@ def create_three_window_visualization(test_results, save_path):
             bars3 = ax3.bar(range(len(continuous_ratios)), continuous_ratios, 
                            color='green', alpha=0.7)
             ax3.axhline(y=WINDOW_CONFIG['verification_threshold'], color='red', linestyle='--', 
-                       alpha=0.7, label=f'阈值 ({WINDOW_CONFIG["verification_threshold"]*100:.0f}%)')
-            ax3.set_title('验证比率')
-            ax3.set_xlabel('验证点')
-            ax3.set_ylabel('连续比率')
+                       alpha=0.7, label=f'Threshold ({WINDOW_CONFIG["verification_threshold"]*100:.0f}%)')
+            ax3.set_title('Verification Ratio')
+            ax3.set_xlabel('Verification Point')
+            ax3.set_ylabel('Continuous Ratio')
             ax3.set_xticks(range(len(continuous_ratios)))
             ax3.set_xticklabels([f'P{i+1}' for i in range(len(continuous_ratios))])
             ax3.legend()
         else:
-            ax3.text(0.5, 0.5, '无验证点', ha='center', va='center', 
+            ax3.text(0.5, 0.5, 'No Verification Points', ha='center', va='center', 
                     transform=ax3.transAxes, fontsize=12)
-            ax3.set_title('验证比率')
+            ax3.set_title('Verification Ratio')
     else:
         # 5点检测模式：显示触发点的FAI值分布
         if detection_info.get('trigger_points'):
