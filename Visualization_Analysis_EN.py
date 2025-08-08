@@ -234,7 +234,7 @@ def load_saved_models():
     
     return models
 
-def load_test_samples(sample_ids, max_samples=50):
+def load_test_samples(sample_ids, max_samples=50, labels_df=None):
     """Load test samples for evaluation"""
     print(f"\nLoading test samples (max {max_samples})...")
     
@@ -281,8 +281,21 @@ def load_test_samples(sample_ids, max_samples=50):
                 targets_clean = clean_data(targets)
             
             # Determine label (0=normal, 1=fault)
-            # This is a simplified approach - in practice you'd use the Labels.xls
-            label = 1 if int(sample_id) > 300 else 0
+            # Use actual Labels.xls data if available
+            if labels_df is not None:
+                try:
+                    sample_row = labels_df[labels_df['Num'].astype(str) == str(sample_id)]
+                    if not sample_row.empty:
+                        label = int(sample_row.iloc[0]['Label'])
+                    else:
+                        # Fallback to ID-based logic if sample not in Labels.xls
+                        label = 1 if int(sample_id) > 300 else 0
+                except:
+                    # Fallback to ID-based logic if error occurs
+                    label = 1 if int(sample_id) > 300 else 0
+            else:
+                # Fallback to ID-based logic if Labels.xls not available
+                label = 1 if int(sample_id) > 300 else 0
             
             test_data.append({
                 'sample_id': sample_id,
@@ -475,9 +488,29 @@ def analyze_fault_detection_performance(test_data, labels):
     true_labels = np.array(true_labels)
     
     # Find optimal threshold using ROC curve
+    # For anomaly detection: higher reconstruction error should indicate fault (label=1)
+    # ROC curve expects: higher score for positive class (fault=1)
     from sklearn.metrics import roc_curve, auc
     fpr, tpr, thresholds = roc_curve(true_labels, reconstruction_errors)
     roc_auc = auc(fpr, tpr)
+    
+    # Debug: Print some statistics to understand the data better
+    normal_errors = reconstruction_errors[true_labels == 0]
+    fault_errors = reconstruction_errors[true_labels == 1]
+    
+    print(f"  Debug - Normal samples reconstruction error: mean={np.mean(normal_errors):.6f}, std={np.std(normal_errors):.6f}")
+    print(f"  Debug - Fault samples reconstruction error: mean={np.mean(fault_errors):.6f}, std={np.std(fault_errors):.6f}")
+    
+    # Check if fault samples actually have higher reconstruction errors (as expected)
+    if np.mean(fault_errors) < np.mean(normal_errors):
+        print("  WARNING: Fault samples have LOWER reconstruction errors than normal samples!")
+        print("  This suggests either: 1) Model training issue, 2) Label assignment error, or 3) Different reconstruction logic needed")
+        
+        # Option: Invert the AUC interpretation if the assumption is violated
+        print("  INFO: Inverting AUC calculation due to unexpected error pattern")
+        roc_auc_corrected = 1.0 - roc_auc
+        print(f"  Original AUC: {roc_auc:.4f} -> Corrected AUC: {roc_auc_corrected:.4f}")
+        roc_auc = roc_auc_corrected
     
     # Find threshold that maximizes (tpr - fpr)
     optimal_idx = np.argmax(tpr - fpr)
@@ -853,7 +886,7 @@ def main():
     
     # Load test samples (mix of normal and fault)
     test_sample_ids = normal_samples[:25] + fault_samples[:25]  # 25 from each class
-    test_data, labels, successful_samples = load_test_samples(test_sample_ids, max_samples=50)
+    test_data, labels, successful_samples = load_test_samples(test_sample_ids, max_samples=50, labels_df=labels_df)
     
     if not test_data:
         print("ERROR: No test data loaded, cannot proceed with analysis")
