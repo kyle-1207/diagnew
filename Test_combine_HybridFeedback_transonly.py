@@ -1513,12 +1513,19 @@ def process_single_sample(sample_id, models, config=None):
         print(f"   🔍 基线数据合理性检查:")
         print(f"      前段数据(0:{min(nm, len(fault_indicator)//2)}): 均值={mean_early:.6f}, 标准差={std_early:.6f}")
         print(f"      后段数据({nm}:{mm}): 均值={mean_baseline:.6f}, 标准差={std_baseline:.6f}")
-        print(f"      统计差异: 均值差={abs(mean_baseline-mean_early):.6f}, 标准差比={std_baseline/std_early:.2f}")
-        
-        # 如果前后段差异过大，给出警告
-        if abs(mean_baseline - mean_early) > std_early or std_baseline/std_early > 2.0 or std_baseline/std_early < 0.5:
-            print(f"   ⚠️ 警告：前后段数据差异较大，基线选择可能不合理")
-            print(f"   💡 建议：考虑使用全数据或更稳定的分段方式")
+        # 安全的统计差异计算
+        mean_diff = abs(mean_baseline - mean_early)
+        if std_early is not None and std_early > 0:
+            std_ratio = std_baseline / std_early
+            print(f"      统计差异: 均值差={mean_diff:.6f}, 标准差比={std_ratio:.2f}")
+            
+            # 如果前后段差异过大，给出警告
+            if mean_diff > std_early or std_ratio > 2.0 or std_ratio < 0.5:
+                print(f"   ⚠️ 警告：前后段数据差异较大，基线选择可能不合理")
+                print(f"   💡 建议：考虑使用全数据或更稳定的分段方式")
+        else:
+            print(f"      统计差异: 均值差={mean_diff:.6f}, 标准差比=无法计算(std_early={std_early})")
+            print(f"   ⚠️ 警告：前段数据标准差异常，基线计算可能不稳定")
         
         threshold1 = mean_baseline + 3 * std_baseline      # 3σ
         threshold2 = mean_baseline + 4.5 * std_baseline    # 4.5σ  
@@ -1530,16 +1537,16 @@ def process_single_sample(sample_id, models, config=None):
         
         # 🔧 添加阈值合理性分析
         print(f"   🔍 阈值合理性分析:")
-        beyond_t1 = np.sum(fai > threshold1)
-        beyond_t2 = np.sum(fai > threshold2)
-        beyond_t3 = np.sum(fai > threshold3)
-        print(f"      超过T1的点数: {beyond_t1} ({beyond_t1/len(fai)*100:.2f}%)")
-        print(f"      超过T2的点数: {beyond_t2} ({beyond_t2/len(fai)*100:.2f}%)")
-        print(f"      超过T3的点数: {beyond_t3} ({beyond_t3/len(fai)*100:.2f}%)")
+        beyond_t1 = np.sum(fault_indicator > threshold1)
+        beyond_t2 = np.sum(fault_indicator > threshold2)
+        beyond_t3 = np.sum(fault_indicator > threshold3)
+        print(f"      超过T1的点数: {beyond_t1} ({beyond_t1/len(fault_indicator)*100:.2f}%)")
+        print(f"      超过T2的点数: {beyond_t2} ({beyond_t2/len(fault_indicator)*100:.2f}%)")
+        print(f"      超过T3的点数: {beyond_t3} ({beyond_t3/len(fault_indicator)*100:.2f}%)")
         
         # 显示阈值与最大值的关系
-        fai_max = np.max(fai)
-        print(f"      FAI最大值: {fai_max:.6f}")
+        fai_max = np.max(fault_indicator)
+        print(f"      故障指标最大值: {fai_max:.6f}")
         print(f"      最大值相对于T1: {fai_max/threshold1:.2f}倍")
         print(f"      最大值相对于T2: {fai_max/threshold2:.2f}倍")
         print(f"      最大值相对于T3: {fai_max/threshold3:.2f}倍")
@@ -1548,8 +1555,8 @@ def process_single_sample(sample_id, models, config=None):
         print(f"   ⚠️ 警告：样本{sample_id}数据长度({mm})不足3000，无法按源代码方式计算")
         print(f"   ⚠️ 降级为全数据计算，可能与源代码结果不一致")
         
-        mean_all = np.mean(fai)
-        std_all = np.std(fai)
+        mean_all = np.mean(fault_indicator)
+        std_all = np.std(fault_indicator)
         
         threshold1 = mean_all + 3 * std_all
         threshold2 = mean_all + 4.5 * std_all  
