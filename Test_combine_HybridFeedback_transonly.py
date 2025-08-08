@@ -1,6 +1,6 @@
 # PN混合反馈Transformer模型测试脚本
 # 基于 Train_Transformer_PN_HybridFeedback_EN.py 训练的模型进行测试
-cl# 导入必要的库
+# 导入必要的库11
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numpy as np
