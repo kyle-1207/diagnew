@@ -132,53 +132,56 @@ warnings.filterwarnings('ignore')
 
 # 设置中文字体显示
 import matplotlib.font_manager as fm
+from matplotlib import rcParams
 import platform
 
-def setup_chinese_fonts():
-    """配置中文字体显示"""
-    system = platform.system()
-    
-    # 根据操作系统选择字体
-    if system == "Windows":
-        chinese_fonts = ['SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi']
-    elif system == "Linux":
-        chinese_fonts = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'Source Han Sans CN', 'DejaVu Sans']
-    elif system == "Darwin":  # macOS
-        chinese_fonts = ['PingFang SC', 'Hiragino Sans GB', 'STHeiti', 'Arial Unicode MS']
-    else:
-        chinese_fonts = ['DejaVu Sans', 'Arial Unicode MS']
-    
-    # 查找可用的中文字体
-    available_font = None
-    for font in chinese_fonts:
+def setup_chinese_fonts_strict():
+    """更稳健的中文字体与渲染设置"""
+    candidates = [
+        'Noto Sans CJK SC',
+        'WenQuanYi Micro Hei',
+        'Source Han Sans CN',
+        'Microsoft YaHei',
+        'SimHei',
+        'DejaVu Sans',
+    ]
+
+    chosen = None
+    for name in candidates:
         try:
-            # 检查字体是否存在
-            font_path = fm.findfont(font)
-            if font_path != fm.rcParams['font.sans-serif'][0]:
-                available_font = font
-                break
-        except:
+            _ = fm.findfont(name, fallback_to_default=False)
+            chosen = name
+            break
+        except Exception:
             continue
-    
-    if available_font:
-        plt.rcParams['font.sans-serif'] = [available_font] + plt.rcParams['font.sans-serif']
-        print(f"✅ 使用中文字体: {available_font}")
-    else:
-        print("⚠️ 未找到合适的中文字体，尝试使用默认配置")
-        # 使用更通用的字体配置
-        plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial Unicode MS', 'SimHei']
-    
-    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
-# 执行字体配置
-setup_chinese_fonts()
+    if chosen is None:
+        chosen = 'DejaVu Sans'
 
-# 清理字体缓存并强制刷新
-try:
-    fm._rebuild()
-    print("✅ 字体缓存已清理并重建")
-except:
-    print("⚠️ 字体缓存清理失败，继续使用当前配置")
+    # 全局渲染参数
+    rcParams['font.family'] = 'sans-serif'
+    rcParams['font.sans-serif'] = [chosen]
+    rcParams['axes.unicode_minus'] = False
+    rcParams['pdf.fonttype'] = 42
+    rcParams['ps.fonttype'] = 42
+    rcParams['savefig.dpi'] = 300
+    rcParams['figure.dpi'] = 120
+    rcParams['figure.autolayout'] = False
+    rcParams['axes.titlesize'] = 13
+    rcParams['axes.labelsize'] = 11
+    rcParams['legend.fontsize'] = 10
+    rcParams['xtick.labelsize'] = 10
+    rcParams['ytick.labelsize'] = 10
+
+    try:
+        fm._rebuild()
+    except Exception:
+        pass
+
+    print(f"✅ 使用中文字体: {chosen}")
+
+# 执行字体配置（更稳健）
+setup_chinese_fonts_strict()
 
 #----------------------------------------数据预处理函数------------------------------
 def physics_based_data_processing_silent(data, feature_type='general'):
@@ -1564,7 +1567,7 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     """生成Transformer ROC曲线分析"""
     print("   📈 生成Transformer ROC曲线分析...")
     
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=PLOT_CONFIG["figsize_large"])
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=PLOT_CONFIG["figsize_large"], constrained_layout=True)
     
     # === 子图1: 连续阈值ROC曲线 ===
     ax1.set_title('(a) Transformer ROC Curve\n(Continuous Threshold Scan)')
@@ -1776,7 +1779,7 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
                 f'{value:.3f}', ha='center', va='bottom')
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
+    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
     print(f"   ✅ Transformer ROC分析图保存至: {save_path}")
@@ -1789,7 +1792,7 @@ def create_fault_detection_timeline(test_results, save_path):
     # 选择一个故障样本进行可视化
     fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'  # 使用第一个故障样本
     
-    fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True, constrained_layout=True)
     
     # 找到对应样本的结果
     sample_result = next((r for r in test_results["TRANSFORMER"] if r.get('sample_id') == fault_sample_id), None)
@@ -1865,7 +1868,7 @@ def create_fault_detection_timeline(test_results, save_path):
     ax3.set_title('三点检测过程 (Transformer)')
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
+    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
     print(f"   ✅ Transformer时序图保存至: {save_path}")
@@ -1910,7 +1913,7 @@ def create_performance_radar(performance_metrics, save_path):
     
     transformer_values += transformer_values[:1]  # 闭合
     
-    fig, ax = plt.subplots(figsize=PLOT_CONFIG["figsize_medium"], subplot_kw=dict(projection='polar'))
+    fig, ax = plt.subplots(figsize=PLOT_CONFIG["figsize_medium"], subplot_kw=dict(projection='polar'), constrained_layout=True)
     
     # 绘制雷达图
     ax.plot(angles, transformer_values, 'o-', linewidth=2, label='Transformer', color='blue')
@@ -1938,7 +1941,7 @@ def create_performance_radar(performance_metrics, save_path):
                 fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
+    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
     print(f"   ✅ Transformer雷达图保存至: {save_path}")
@@ -1951,7 +1954,7 @@ def create_three_window_visualization(test_results, save_path):
     # 选择一个故障样本进行详细分析
     fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'
     
-    fig = plt.figure(figsize=(16, 10))
+    fig = plt.figure(figsize=(16, 10), constrained_layout=True)
     
     # 使用GridSpec进行复杂布局
     gs = fig.add_gridspec(3, 4, height_ratios=[2, 1, 1], width_ratios=[1, 1, 1, 1])
@@ -2128,7 +2131,7 @@ def create_three_window_visualization(test_results, save_path):
              bbox=dict(boxstyle="round,pad=0.5", facecolor="lightyellow", alpha=0.8))
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
+    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
     print(f"   ✅ Transformer三点检测过程图保存至: {save_path}")

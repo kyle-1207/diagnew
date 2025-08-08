@@ -136,53 +136,56 @@ warnings.filterwarnings('ignore')
 
 # 设置中文字体显示
 import matplotlib.font_manager as fm
+from matplotlib import rcParams
 import platform
 
-def setup_chinese_fonts():
-    """配置中文字体显示"""
-    system = platform.system()
-    
-    # 根据操作系统选择字体
-    if system == "Windows":
-        chinese_fonts = ['SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi']
-    elif system == "Linux":
-        chinese_fonts = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'Source Han Sans CN', 'DejaVu Sans']
-    elif system == "Darwin":  # macOS
-        chinese_fonts = ['PingFang SC', 'Hiragino Sans GB', 'STHeiti', 'Arial Unicode MS']
-    else:
-        chinese_fonts = ['DejaVu Sans', 'Arial Unicode MS']
-    
-    # 查找可用的中文字体
-    available_font = None
-    for font in chinese_fonts:
+def setup_chinese_fonts_strict():
+    """更稳健的中文字体与渲染设置"""
+    candidates = [
+        'Noto Sans CJK SC',
+        'WenQuanYi Micro Hei',
+        'Source Han Sans CN',
+        'Microsoft YaHei',
+        'SimHei',
+        'DejaVu Sans',
+    ]
+
+    chosen = None
+    for name in candidates:
         try:
-            # 检查字体是否存在
-            font_path = fm.findfont(font)
-            if font_path != fm.rcParams['font.sans-serif'][0]:
-                available_font = font
-                break
-        except:
+            _ = fm.findfont(name, fallback_to_default=False)
+            chosen = name
+            break
+        except Exception:
             continue
-    
-    if available_font:
-        plt.rcParams['font.sans-serif'] = [available_font] + plt.rcParams['font.sans-serif']
-        print(f"✅ 使用中文字体: {available_font}")
-    else:
-        print("⚠️ 未找到合适的中文字体，尝试使用默认配置")
-        # 使用更通用的字体配置
-        plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial Unicode MS', 'SimHei']
-    
-    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
-# 执行字体配置
-setup_chinese_fonts()
+    if chosen is None:
+        chosen = 'DejaVu Sans'
 
-# 清理字体缓存并强制刷新
-try:
-    fm._rebuild()
-    print("✅ 字体缓存已清理并重建")
-except:
-    print("⚠️ 字体缓存清理失败，继续使用当前配置")
+    # 全局渲染参数
+    rcParams['font.family'] = 'sans-serif'
+    rcParams['font.sans-serif'] = [chosen]
+    rcParams['axes.unicode_minus'] = False
+    rcParams['pdf.fonttype'] = 42
+    rcParams['ps.fonttype'] = 42
+    rcParams['savefig.dpi'] = 300
+    rcParams['figure.dpi'] = 120
+    rcParams['figure.autolayout'] = False
+    rcParams['axes.titlesize'] = 13
+    rcParams['axes.labelsize'] = 11
+    rcParams['legend.fontsize'] = 10
+    rcParams['xtick.labelsize'] = 10
+    rcParams['ytick.labelsize'] = 10
+
+    try:
+        fm._rebuild()
+    except Exception:
+        pass
+
+    print(f"✅ 使用中文字体: {chosen}")
+
+# 执行字体配置（更稳健）
+setup_chinese_fonts_strict()
 
 #----------------------------------------测试配置------------------------------
 print("="*60)
@@ -511,80 +514,74 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         fault_labels: 故障标签序列 (0=正常, 1=轻微故障, 2=中等故障, 3=严重故障)
         detection_info: 检测过程详细信息
     """
-    # 初始化输出
+    # 与Transformer保持一致：跳过启动期并首选外部阈值
+    STARTUP_PERIOD = 3000
     fault_labels = np.zeros(len(fai_values), dtype=int)
     detection_info = {
-        'trigger_points': [],      # 触发5点检测的点
-        'marked_regions': [],      # 标记的5点区域
-        'detection_stats': {},     # 检测统计信息
-        'fai_stats': {            # FAI统计信息
+        'trigger_points': [],
+        'marked_regions': [],
+        'detection_stats': {},
+        'fai_stats': {
             'mean': np.mean(fai_values),
             'std': np.std(fai_values),
             'max': np.max(fai_values),
             'min': np.min(fai_values)
-        }
+        },
+        'startup_period': STARTUP_PERIOD
     }
-    
-    # 检查是否为故障样本（基于样本ID）
-    is_fault_sample = sample_id in TEST_SAMPLES['fault']
-    
-    # 调试信息
-    print(f"   样本{sample_id}: 类型={type(sample_id)}, 故障样本列表={TEST_SAMPLES['fault']}, 是故障样本={is_fault_sample}")
-    
+
+    # 样本类型判定（字符串对齐）
+    sample_id_str = str(sample_id)
+    is_fault_sample = sample_id_str in TEST_SAMPLES['fault']
+    is_normal_sample = sample_id_str in TEST_SAMPLES['normal']
+
+    if not is_fault_sample and not is_normal_sample:
+        print(f"   ⚠️ 样本{sample_id}未出现在两类列表中，默认按故障样本处理")
+        is_fault_sample = True
+
+    # 正常样本：不标注任何故障，输出假阳性统计（与Transformer一致）
     if not is_fault_sample:
-        # 正常样本直接返回全0标签
-        print(f"   → 样本{sample_id}为正常样本，返回全0标签")
+        startup_fai = fai_values[:STARTUP_PERIOD] if len(fai_values) > STARTUP_PERIOD else fai_values
+        stable_fai = fai_values[STARTUP_PERIOD:] if len(fai_values) > STARTUP_PERIOD else []
+        startup_fp = np.sum(startup_fai > threshold1) if len(startup_fai) > 0 else 0
+        stable_fp = np.sum(stable_fai > threshold1) if len(stable_fai) > 0 else 0
+        total_fp = startup_fp + stable_fp
         detection_info['detection_stats'] = {
             'total_trigger_points': 0,
             'total_marked_regions': 0,
             'total_fault_points': 0,
             'fault_ratio': 0.0,
-            'detection_mode': 'normal_sample'
+            'detection_mode': 'normal_sample',
+            'startup_false_positives': int(startup_fp),
+            'stable_false_positives': int(stable_fp),
+            'total_false_positives': int(total_fp),
+            'startup_fp_ratio': float(startup_fp/len(startup_fai)) if len(startup_fai) > 0 else 0.0,
+            'stable_fp_ratio': float(stable_fp/len(stable_fai)) if len(stable_fai) > 0 else 0.0,
+            'total_fp_ratio': float(total_fp/len(fai_values)) if len(fai_values) > 0 else 0.0
         }
-        # 为兼容性添加空字段
-        detection_info['trigger_points'] = []
-        detection_info['marked_regions'] = []
-        detection_info['candidate_points'] = []
-        detection_info['verified_points'] = []
-        
-        # 确保fault_labels确实是全0
         fault_labels.fill(0)
-        print(f"   → fault_labels总和: {np.sum(fault_labels)} (应该为0)")
         return fault_labels, detection_info
-    
-    # 获取多级阈值（严格按照源代码Test_.py的方式）
+
+    # 获取/计算多级阈值（优先外部配置）
     if config and 'threshold2' in config and 'threshold3' in config:
         threshold2 = config['threshold2']
         threshold3 = config['threshold3']
+        print(f"   ✅ 使用外部阈值: T1={threshold1:.4f}, T2={threshold2:.4f}, T3={threshold3:.4f}")
     else:
-        # 按照源代码Test_.py的阈值计算方式
-        nm = 3000
+        nm = STARTUP_PERIOD
         mm = len(fai_values)
-        
         if mm > nm:
-            # 使用后半段数据计算阈值（与源代码一致）
             baseline_fai = fai_values[nm:mm]
             mean_fai = np.mean(baseline_fai)
             std_fai = np.std(baseline_fai)
-            
-            threshold1_calc = mean_fai + 3 * std_fai      # 对应源代码threshold1
-            threshold2 = mean_fai + 4.5 * std_fai        # 对应源代码threshold2  
-            threshold3 = mean_fai + 6 * std_fai          # 对应源代码threshold3
-            
-            # 验证threshold1是否与传入的一致（调试用）
-            print(f"   源代码阈值计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
         else:
-            # 数据太短，使用全部数据
             mean_fai = np.mean(fai_values)
             std_fai = np.std(fai_values)
-            
-            threshold1_calc = mean_fai + 3 * std_fai
-            threshold2 = mean_fai + 4.5 * std_fai
-            threshold3 = mean_fai + 6 * std_fai
-            
-            print(f"   短数据阈值计算: T1={threshold1_calc:.4f}(传入{threshold1:.4f}), T2={threshold2:.4f}, T3={threshold3:.4f}")
+        threshold2 = mean_fai + 4.5 * std_fai
+        threshold3 = mean_fai + 6.0 * std_fai
+        print(f"   ℹ️ 内部阈值计算: T2={threshold2:.4f}, T3={threshold3:.4f}")
     
-    # 故障样本：实施改进的多级5点检测
+    # 故障样本：实施改进的多级5点检测（与Transformer一致，跳过启动期）
     trigger_points = []
     marked_regions = []
     
@@ -623,9 +620,11 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     print(f"   Level 2 (4.5σ): 中心阈值={threshold2:.4f}, 邻域阈值={threshold1:.4f}, 最少邻居=1个, 标记3点")
     print(f"   Level 1 (3σ): 中心阈值={threshold1:.4f}, 邻域阈值={threshold1*0.67:.4f}, 最少邻居=1个, 标记3点")
     
-    # 三级分级检测实现
+    # 三级分级检测实现：从稳定期开始
     triggers = []
-    for i in range(2, len(fai_values) - 2):
+    detection_start = max(STARTUP_PERIOD + 2, 2)
+    detection_end = len(fai_values) - 2
+    for i in range(detection_start, detection_end):
         neighborhood = fai_values[i-2:i+3]  # 5个点的邻域
         neighbors = [fai_values[i-2], fai_values[i-1], fai_values[i+1], fai_values[i+2]]  # 4个邻居
         center = fai_values[i]
@@ -750,28 +749,34 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     detection_info['verified_points'] = []   # 5点检测模式中不使用，但为兼容性保留
     
     # 统计信息（分级检测）
-    fault_count = np.sum(fault_labels > 0)  # 任何级别都算故障
+    fault_count = np.sum(fault_labels > 0)  # 全序列
+    effective_labels = fault_labels[STARTUP_PERIOD:] if len(fault_labels) > STARTUP_PERIOD else fault_labels
+    effective_fault_count = np.sum(effective_labels > 0) if len(effective_labels) > 0 else 0
     level1_count = np.sum(fault_labels == 1)
     level2_count = np.sum(fault_labels == 2)
     level3_count = np.sum(fault_labels == 3)
-    
+
     detection_info['detection_stats'] = {
         'total_trigger_points': len(trigger_points),
         'total_marked_regions': len(marked_regions),
-        'total_fault_points': fault_count,
-        'fault_ratio': fault_count / len(fault_labels),
-        'detection_mode': 'hierarchical_three_level',
+        'total_fault_points': int(fault_count),
+        'effective_fault_points': int(effective_fault_count),
+        'fault_ratio': float(fault_count / len(fault_labels)) if len(fault_labels) > 0 else 0.0,
+        'effective_fault_ratio': float(effective_fault_count / len(effective_labels)) if len(effective_labels) > 0 else 0.0,
+        'detection_mode': 'hierarchical_three_level_with_startup_skip',
+        'startup_period': STARTUP_PERIOD,
+        'effective_length': len(effective_labels) if len(effective_labels) > 0 else 0,
         'level_statistics': {
-            'level_1_points': level1_count,
-            'level_2_points': level2_count,
-            'level_3_points': level3_count,
-            'level_1_triggers': level_counts[1],
-            'level_2_triggers': level_counts[2],
-            'level_3_triggers': level_counts[3]
+            'level_1_points': int(level1_count),
+            'level_2_points': int(level2_count),
+            'level_3_points': int(level3_count),
+            'level_1_triggers': int(level_counts[1]),
+            'level_2_triggers': int(level_counts[2]),
+            'level_3_triggers': int(level_counts[3])
         },
-        'mean_region_length': np.mean([m['length'] for m in marked_regions]) if marked_regions else 0,
-        'mean_trigger_fai': np.mean([m['trigger_values']['center'] for m in marked_regions]) if marked_regions else 0,
-        'strategy_used': 'strategy_4_hierarchical_detection',
+        'mean_region_length': float(np.mean([m['length'] for m in marked_regions])) if marked_regions else 0.0,
+        'mean_trigger_fai': float(np.mean([m['trigger_values']['center'] for m in marked_regions])) if marked_regions else 0.0,
+        'strategy_used': 'strategy_4_hierarchical_detection_startup_aware',
         'parameters': detection_config
     }
     
@@ -1033,9 +1038,13 @@ def process_single_sample(sample_id, models):
     print(f"   (内部计算的报警点数被忽略，使用外部阈值重新计算)")
     
     # 根据检测模式选择检测函数
-    if CURRENT_DETECTION_MODE == "five_point":
-        # 5点检测函数内部会按照源代码方式计算threshold2和threshold3
-        fault_labels, detection_info = five_point_fault_detection(fai, threshold1, sample_id)
+    threshold_config = {
+        'threshold1': threshold1,
+        'threshold2': threshold2,
+        'threshold3': threshold3
+    }
+    if CURRENT_DETECTION_MODE in ("five_point", "five_point_improved"):
+        fault_labels, detection_info = five_point_fault_detection(fai, threshold1, sample_id, threshold_config)
     else:
         fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id)
     
@@ -1239,7 +1248,7 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     """生成BiLSTM ROC曲线分析"""
     print("   📈 生成BiLSTM ROC曲线分析...")
     
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=PLOT_CONFIG["figsize_large"])
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=PLOT_CONFIG["figsize_large"], constrained_layout=True)
     
     # === 子图1: 连续阈值ROC曲线 ===
     ax1.set_title('(a) BiLSTM ROC Curve\n(Continuous Threshold Scan)')
@@ -1442,7 +1451,7 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
                 f'{value:.3f}', ha='center', va='bottom')
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
+    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
     print(f"   ✅ BiLSTM ROC分析图保存至: {save_path}")
@@ -1455,7 +1464,7 @@ def create_fault_detection_timeline(test_results, save_path):
     # 选择一个故障样本进行可视化
     fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'  # 使用第一个故障样本
     
-    fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True, constrained_layout=True)
     
     # 找到对应样本的结果
     sample_result = next((r for r in test_results["BILSTM"] if r.get('sample_id') == fault_sample_id), None)
@@ -1552,7 +1561,7 @@ def create_fault_detection_timeline(test_results, save_path):
     ax3.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
+    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
     print(f"   ✅ BiLSTM时序图保存至: {save_path}")
@@ -1592,7 +1601,7 @@ def create_performance_radar(performance_metrics, save_path):
     
     bilstm_values += bilstm_values[:1]  # 闭合
     
-    fig, ax = plt.subplots(figsize=PLOT_CONFIG["figsize_medium"], subplot_kw=dict(projection='polar'))
+    fig, ax = plt.subplots(figsize=PLOT_CONFIG["figsize_medium"], subplot_kw=dict(projection='polar'), constrained_layout=True)
     
     # 绘制雷达图
     ax.plot(angles, bilstm_values, 'o-', linewidth=2, label='BiLSTM', color='blue')
@@ -1620,7 +1629,7 @@ def create_performance_radar(performance_metrics, save_path):
                 fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
+    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
     print(f"   ✅ BiLSTM雷达图保存至: {save_path}")
@@ -1633,7 +1642,7 @@ def create_three_window_visualization(test_results, save_path):
     # 选择一个故障样本进行详细分析
     fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'
     
-    fig = plt.figure(figsize=(16, 10))
+    fig = plt.figure(figsize=(16, 10), constrained_layout=True)
     
     # 使用GridSpec进行复杂布局
     gs = fig.add_gridspec(3, 4, height_ratios=[2, 1, 1], width_ratios=[1, 1, 1, 1])
@@ -1852,7 +1861,7 @@ def create_three_window_visualization(test_results, save_path):
              bbox=dict(boxstyle="round,pad=0.5", facecolor="lightyellow", alpha=0.8))
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"])
+    plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
     print(f"   ✅ BiLSTM三窗口过程图保存至: {save_path}")
