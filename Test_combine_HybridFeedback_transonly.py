@@ -439,11 +439,12 @@ TEST_SAMPLES = load_test_samples()
 ALL_TEST_SAMPLES = TEST_SAMPLES['normal'] + TEST_SAMPLES['fault']
 
 # 模型路径配置 (从PN混合反馈训练结果加载)
+# 注意：PN训练脚本只训练了Transformer，MC-AE模型可能不存在
 MODEL_PATHS = {
     "TRANSFORMER": {
         "transformer_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/PN_model/transformer_model_pn.pth",
-        "net_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/PN_model/net_model_pn.pth", 
-        "netx_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/PN_model/netx_model_pn.pth"
+        "net_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/PN_model/net_model_pn.pth",  # 可能不存在
+        "netx_model": "/mnt/bz25t/bzhy/datasave/Transformer/models/PN_model/netx_model_pn.pth"  # 可能不存在
     }
 }
 
@@ -1189,9 +1190,16 @@ def load_models():
     
     print("🔧 开始加载Transformer模型...")
     
-    # 加载Transformer模型 (从PN训练脚本导入)
-    from Train_Transformer_PN_HybridFeedback_EN import TransformerPredictor
-    models['transformer'] = TransformerPredictor(input_size=7, d_model=128, nhead=8, num_layers=3, output_size=2).to(device)
+    # 加载Transformer模型 (参考原始脚本做法)
+    try:
+        from Train_Transformer_PN_HybridFeedback_EN import TransformerPredictor
+        models['transformer'] = TransformerPredictor().to(device)  # 使用默认参数
+        print("   ✅ 使用PN训练脚本的TransformerPredictor（默认参数）")
+    except ImportError:
+        print("   ⚠️ PN训练脚本不可用，尝试使用原始HybridFeedback脚本")
+        from Train_Transformer_HybridFeedback import TransformerPredictor
+        models['transformer'] = TransformerPredictor().to(device)
+        print("   ✅ 使用原始HybridFeedback脚本的TransformerPredictor")
     
     # 使用安全加载函数
     if not safe_load_model(models['transformer'], 
@@ -1200,64 +1208,94 @@ def load_models():
         raise RuntimeError("Transformer模型加载失败")
     
     # 加载MC-AE模型 (如果可用)
+    # 注意：PN训练脚本只训练了Transformer，MC-AE模型文件可能不存在
     print("🔧 尝试加载MC-AE模型...")
-    try:
-        models['net'] = CombinedAE(input_size=2, encode2_input_size=3, output_size=110,
-                                  activation_fn=custom_activation, use_dx_in_forward=True).to(device)
-        models['netx'] = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, 
-                                   activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
-        
-        # 使用安全加载函数
-        if not safe_load_model(models['net'], 
-                              MODEL_PATHS["TRANSFORMER"]["net_model"], 
-                              "MC-AE1"):
-            print("⚠️  MC-AE1模型加载失败，将使用简化重构误差计算")
-            models['net'] = None
-        
-        if not safe_load_model(models['netx'], 
-                              MODEL_PATHS["TRANSFORMER"]["netx_model"], 
-                              "MC-AE2"):
-            print("⚠️  MC-AE2模型加载失败，将使用简化重构误差计算")
-            models['netx'] = None
-    except Exception as e:
-        print(f"⚠️  MC-AE模型初始化失败: {e}")
-        print("   将使用简化重构误差计算（仅基于Transformer预测误差）")
+    
+    # 首先检查文件是否存在
+    net_model_exists = os.path.exists(MODEL_PATHS["TRANSFORMER"]["net_model"])
+    netx_model_exists = os.path.exists(MODEL_PATHS["TRANSFORMER"]["netx_model"])
+    
+    print(f"   📁 net_model存在: {net_model_exists}")
+    print(f"   📁 netx_model存在: {netx_model_exists}")
+    
+    if not net_model_exists and not netx_model_exists:
+        print("⚠️  MC-AE模型文件不存在（PN训练脚本只训练了Transformer）")
+        print("   将使用基于Transformer预测误差的简化故障检测")
         models['net'] = None
         models['netx'] = None
+    else:
+        try:
+            if net_model_exists:
+                models['net'] = CombinedAE(input_size=2, encode2_input_size=3, output_size=110,
+                                          activation_fn=custom_activation, use_dx_in_forward=True).to(device)
+                if not safe_load_model(models['net'], MODEL_PATHS["TRANSFORMER"]["net_model"], "MC-AE1"):
+                    models['net'] = None
+            else:
+                models['net'] = None
+                
+            if netx_model_exists:
+                models['netx'] = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, 
+                                           activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
+                if not safe_load_model(models['netx'], MODEL_PATHS["TRANSFORMER"]["netx_model"], "MC-AE2"):
+                    models['netx'] = None
+            else:
+                models['netx'] = None
+                
+        except Exception as e:
+            print(f"⚠️  MC-AE模型初始化失败: {e}")
+            models['net'] = None
+            models['netx'] = None
     
     # 加载PCA参数 (从PN混合反馈训练结果加载)
     pca_params_path = "/mnt/bz25t/bzhy/datasave/Transformer/models/PN_model/pca_params_pn.pkl"
-    try:
-        with open(pca_params_path, 'rb') as f:
-            models['pca_params'] = pickle.load(f)
-        print(f"✅ PCA参数已加载: {pca_params_path}")
-    except Exception as e:
-        print(f"❌ 加载PCA参数失败: {e}")
+    
+    # 检查PCA参数文件是否存在
+    if os.path.exists(pca_params_path):
+        try:
+            with open(pca_params_path, 'rb') as f:
+                models['pca_params'] = pickle.load(f)
+            print(f"✅ PCA参数已加载: {pca_params_path}")
+        except Exception as e:
+            print(f"❌ 加载PCA参数失败: {e}")
+            models['pca_params'] = None
+    else:
+        print(f"⚠️  PCA参数文件不存在: {pca_params_path}")
         print("🔄 尝试从单独的npy文件重建PCA参数...")
         try:
             # 从PN训练脚本保存的npy文件重建PCA参数
             pca_base_path = "/mnt/bz25t/bzhy/datasave/Transformer/models/PN_model/"
-            models['pca_params'] = {
-                'v_I': np.load(f"{pca_base_path}v_I_pn.npy"),
-                'v': np.load(f"{pca_base_path}v_pn.npy"),
-                'v_ratio': np.load(f"{pca_base_path}v_ratio_pn.npy"),
-                'p_k': np.load(f"{pca_base_path}p_k_pn.npy"),
-                'data_mean': np.load(f"{pca_base_path}data_mean_pn.npy"),
-                'data_std': np.load(f"{pca_base_path}data_std_pn.npy"),
-                'T_95_limit': np.load(f"{pca_base_path}T_95_limit_pn.npy"),
-                'T_99_limit': np.load(f"{pca_base_path}T_99_limit_pn.npy"),
-                'SPE_95_limit': np.load(f"{pca_base_path}SPE_95_limit_pn.npy"),
-                'SPE_99_limit': np.load(f"{pca_base_path}SPE_99_limit_pn.npy"),
-                'P': np.load(f"{pca_base_path}P_pn.npy"),
-                'k': np.load(f"{pca_base_path}k_pn.npy"),
-                'P_t': np.load(f"{pca_base_path}P_t_pn.npy"),
-                'X': np.load(f"{pca_base_path}X_pn.npy"),
-                'data_nor': np.load(f"{pca_base_path}data_nor_pn.npy")
-            }
-            print(f"✅ PCA参数从npy文件重建成功")
+            required_files = ['v_I_pn.npy', 'v_pn.npy', 'data_mean_pn.npy', 'data_std_pn.npy']
+            
+            # 检查必要的npy文件是否存在
+            missing_files = [f for f in required_files if not os.path.exists(f"{pca_base_path}{f}")]
+            
+            if missing_files:
+                print(f"⚠️  缺少必要的PCA文件: {missing_files}")
+                print("   PN训练脚本可能没有保存完整的PCA参数")
+                print("   将使用简化的故障检测方法（基于Transformer预测误差）")
+                models['pca_params'] = None
+            else:
+                models['pca_params'] = {
+                    'v_I': np.load(f"{pca_base_path}v_I_pn.npy"),
+                    'v': np.load(f"{pca_base_path}v_pn.npy"),
+                    'v_ratio': np.load(f"{pca_base_path}v_ratio_pn.npy"),
+                    'p_k': np.load(f"{pca_base_path}p_k_pn.npy"),
+                    'data_mean': np.load(f"{pca_base_path}data_mean_pn.npy"),
+                    'data_std': np.load(f"{pca_base_path}data_std_pn.npy"),
+                    'T_95_limit': np.load(f"{pca_base_path}T_95_limit_pn.npy"),
+                    'T_99_limit': np.load(f"{pca_base_path}T_99_limit_pn.npy"),
+                    'SPE_95_limit': np.load(f"{pca_base_path}SPE_95_limit_pn.npy"),
+                    'SPE_99_limit': np.load(f"{pca_base_path}SPE_99_limit_pn.npy"),
+                    'P': np.load(f"{pca_base_path}P_pn.npy"),
+                    'k': np.load(f"{pca_base_path}k_pn.npy"),
+                    'P_t': np.load(f"{pca_base_path}P_t_pn.npy"),
+                    'X': np.load(f"{pca_base_path}X_pn.npy"),
+                    'data_nor': np.load(f"{pca_base_path}data_nor_pn.npy")
+                }
+                print(f"✅ PCA参数从npy文件重建成功")
         except Exception as e2:
             print(f"❌ PCA参数重建也失败: {e2}")
-            print("⚠️  将使用简化的故障指标计算（基于重构误差）")
+            print("⚠️  将使用简化的故障指标计算（基于Transformer预测误差）")
             models['pca_params'] = None
     
     return models
@@ -1416,14 +1454,33 @@ def process_single_sample(sample_id, models, config=None):
                 ERRORU = np.random.normal(0, np.std(yTrainU) * 0.1, yTrainU.shape)
                 ERRORX = np.random.normal(0, np.std(yTrainX) * 0.1, yTrainX.shape)
         else:
-            # 使用简化的重构误差计算（基于输入数据自身）
-            print("   🔧 使用简化重构误差计算...")
-            yTrainU = y_recovered.cpu().detach().numpy()
-            yTrainX = y_recovered2.cpu().detach().numpy()
+            # 当MC-AE模型不可用时，使用基于Transformer预测误差的故障检测
+            print("   🔧 MC-AE模型不可用，使用基于Transformer预测误差的简化故障检测...")
             
-            # 简化误差：使用数据的统计特性
-            ERRORU = np.random.normal(0, np.std(yTrainU) * 0.1, yTrainU.shape)
-            ERRORX = np.random.normal(0, np.std(yTrainX) * 0.1, yTrainX.shape)
+            # 使用Transformer进行预测
+            models['transformer'].eval()
+            with torch.no_grad():
+                # 使用vin1的前N个特征作为输入
+                transformer_input = vin1_data[:, :models['transformer'].input_size] if vin1_data.shape[1] >= models['transformer'].input_size else vin1_data
+                
+                # 如果特征不足，进行padding
+                if transformer_input.shape[1] < models['transformer'].input_size:
+                    padding_needed = models['transformer'].input_size - transformer_input.shape[1]
+                    padding = torch.zeros(transformer_input.shape[0], padding_needed, device=device)
+                    transformer_input = torch.cat([transformer_input, padding], dim=1)
+                
+                # Transformer预测
+                transformer_pred = models['transformer'](transformer_input)
+                
+                # 计算预测误差作为故障指标
+                # 这里使用输入特征的变化作为"真实值"的代理
+                pred_error = torch.abs(transformer_pred - transformer_input[:, :transformer_pred.shape[1]])
+                ERRORU = pred_error.cpu().detach().numpy()
+                
+                # 为了与原始逻辑兼容，创建相同形状的ERRORX
+                ERRORX = ERRORU.copy()
+                
+                print(f"   ✅ Transformer预测误差计算完成: ERRORU {ERRORU.shape}, ERRORX {ERRORX.shape}")
 
     # 诊断特征提取
     try:
@@ -1464,13 +1521,15 @@ def process_single_sample(sample_id, models, config=None):
             print("   🔄 降级使用简化故障指标...")
             # 降级处理
             FAI = np.mean(np.abs(df_data.values), axis=1)
-            lamda = CONTN = t_total = q_total = S = g = h = kesi = fai = f_time = level = maxlevel = contTT = contQ = X_ratio = CContn = data_mean = data_std = None
+            fai = FAI  # 确保fai变量存在
+            lamda = CONTN = t_total = q_total = S = g = h = kesi = f_time = level = maxlevel = contTT = contQ = X_ratio = CContn = data_mean = data_std = None
     else:
         print("   ⚠️ PCA参数不可用，使用简化的故障指标计算...")
         # 简化的故障指标计算
         FAI = np.mean(np.abs(df_data.values), axis=1)  # 简单的均值误差作为故障指标
+        fai = FAI  # 确保fai变量存在
         # 其他变量设为默认值
-        lamda = CONTN = t_total = q_total = S = g = h = kesi = fai = f_time = level = maxlevel = contTT = contQ = X_ratio = CContn = data_mean = data_std = None
+        lamda = CONTN = t_total = q_total = S = g = h = kesi = f_time = level = maxlevel = contTT = contQ = X_ratio = CContn = data_mean = data_std = None
     
     # 🔧 严格按照源代码Test_.py的阈值计算方式
     # 源代码注释中的计算方法：
@@ -1480,38 +1539,33 @@ def process_single_sample(sample_id, models, config=None):
     # threshold2 = np.mean(fai[nm:mm]) + 4.5*np.std(fai[nm:mm]) 
     # threshold3 = np.mean(fai[nm:mm]) + 6*np.std(fai[nm:mm])
     
-    # 使用有效的故障指标进行阈值计算
-    if fai is not None:
-        fault_indicator = fai
-        print("   📊 使用完整PCA计算的故障指标 (fai)")
-    else:
-        fault_indicator = FAI
-        print("   📊 使用简化故障指标 (FAI)")
-    
+    # 使用故障指标进行阈值计算（保持与原始脚本一致）
     nm = 3000  # 源代码固定值
-    mm = len(fault_indicator)  # 数据总长度
+    mm = len(fai)  # 数据总长度
+    
+    print("   📊 使用故障指标 (fai) 进行阈值计算")
     
     print(f"   📊 阈值计算: nm={nm}, mm={mm}, 使用数据段=[{nm}:{mm}]")
     
     # 🔧 添加故障指标分布分析
     print(f"   📊 故障指标值分布分析:")
-    print(f"      全序列统计: 均值={np.mean(fault_indicator):.6f}, 标准差={np.std(fault_indicator):.6f}")
-    print(f"      全序列范围: 最小值={np.min(fault_indicator):.6f}, 最大值={np.max(fault_indicator):.6f}")
-    print(f"      分位数: 50%={np.percentile(fault_indicator, 50):.6f}, 95%={np.percentile(fault_indicator, 95):.6f}, 99%={np.percentile(fault_indicator, 99):.6f}")
+    print(f"      全序列统计: 均值={np.mean(fai):.6f}, 标准差={np.std(fai):.6f}")
+    print(f"      全序列范围: 最小值={np.min(fai):.6f}, 最大值={np.max(fai):.6f}")
+    print(f"      分位数: 50%={np.percentile(fai, 50):.6f}, 95%={np.percentile(fai, 95):.6f}, 99%={np.percentile(fai, 99):.6f}")
     
     if mm > nm:
         # 严格按照源代码：使用后半段数据计算阈值
-        fai_baseline = fault_indicator[nm:mm]
+        fai_baseline = fai[nm:mm]
         mean_baseline = np.mean(fai_baseline)
         std_baseline = np.std(fai_baseline)
         
         # 🔧 添加基线数据合理性检查
-        fai_early = fault_indicator[:nm] if nm < len(fault_indicator) else fault_indicator[:len(fault_indicator)//2]
+        fai_early = fai[:nm] if nm < len(fai) else fai[:len(fai)//2]
         mean_early = np.mean(fai_early)
         std_early = np.std(fai_early)
         
         print(f"   🔍 基线数据合理性检查:")
-        print(f"      前段数据(0:{min(nm, len(fault_indicator)//2)}): 均值={mean_early:.6f}, 标准差={std_early:.6f}")
+        print(f"      前段数据(0:{min(nm, len(fai)//2)}): 均值={mean_early:.6f}, 标准差={std_early:.6f}")
         print(f"      后段数据({nm}:{mm}): 均值={mean_baseline:.6f}, 标准差={std_baseline:.6f}")
         # 安全的统计差异计算
         mean_diff = abs(mean_baseline - mean_early)
@@ -1537,15 +1591,15 @@ def process_single_sample(sample_id, models, config=None):
         
         # 🔧 添加阈值合理性分析
         print(f"   🔍 阈值合理性分析:")
-        beyond_t1 = np.sum(fault_indicator > threshold1)
-        beyond_t2 = np.sum(fault_indicator > threshold2)
-        beyond_t3 = np.sum(fault_indicator > threshold3)
-        print(f"      超过T1的点数: {beyond_t1} ({beyond_t1/len(fault_indicator)*100:.2f}%)")
-        print(f"      超过T2的点数: {beyond_t2} ({beyond_t2/len(fault_indicator)*100:.2f}%)")
-        print(f"      超过T3的点数: {beyond_t3} ({beyond_t3/len(fault_indicator)*100:.2f}%)")
+        beyond_t1 = np.sum(fai > threshold1)
+        beyond_t2 = np.sum(fai > threshold2)
+        beyond_t3 = np.sum(fai > threshold3)
+        print(f"      超过T1的点数: {beyond_t1} ({beyond_t1/len(fai)*100:.2f}%)")
+        print(f"      超过T2的点数: {beyond_t2} ({beyond_t2/len(fai)*100:.2f}%)")
+        print(f"      超过T3的点数: {beyond_t3} ({beyond_t3/len(fai)*100:.2f}%)")
         
         # 显示阈值与最大值的关系
-        fai_max = np.max(fault_indicator)
+        fai_max = np.max(fai)
         print(f"      故障指标最大值: {fai_max:.6f}")
         print(f"      最大值相对于T1: {fai_max/threshold1:.2f}倍")
         print(f"      最大值相对于T2: {fai_max/threshold2:.2f}倍")
@@ -1555,8 +1609,8 @@ def process_single_sample(sample_id, models, config=None):
         print(f"   ⚠️ 警告：样本{sample_id}数据长度({mm})不足3000，无法按源代码方式计算")
         print(f"   ⚠️ 降级为全数据计算，可能与源代码结果不一致")
         
-        mean_all = np.mean(fault_indicator)
-        std_all = np.std(fault_indicator)
+        mean_all = np.mean(fai)
+        std_all = np.std(fai)
         
         threshold1 = mean_all + 3 * std_all
         threshold2 = mean_all + 4.5 * std_all  
@@ -1577,22 +1631,22 @@ def process_single_sample(sample_id, models, config=None):
     
     print(f"   📊 传递给检测函数的阈值: T1={threshold1:.4f}, T2={threshold2:.4f}, T3={threshold3:.4f}")
     
-    # 输入验证
-    if fault_indicator is None:
-        print(f"   ❌ 错误：样本{sample_id}的fault_indicator为None")
+    # 输入验证 (使用fai，与原始脚本一致)
+    if fai is None:
+        print(f"   ❌ 错误：样本{sample_id}的fai为None")
         fault_labels = np.array([])
-        detection_info = {'error': 'fault_indicator_is_none'}
-    elif len(fault_indicator) == 0:
-        print(f"   ❌ 错误：样本{sample_id}的fault_indicator为空")
+        detection_info = {'error': 'fai_is_none'}
+    elif len(fai) == 0:
+        print(f"   ❌ 错误：样本{sample_id}的fai为空")
         fault_labels = np.array([])
-        detection_info = {'error': 'fault_indicator_is_empty'}
+        detection_info = {'error': 'fai_is_empty'}
     else:
-        print(f"   ✅ 故障检测输入验证通过：fault_indicator长度={len(fault_indicator)}")
+        print(f"   ✅ 故障检测输入验证通过：fai长度={len(fai)}")
         
         if CURRENT_DETECTION_MODE == "five_point" or CURRENT_DETECTION_MODE == "five_point_improved":
-            fault_labels, detection_info = five_point_fault_detection(fault_indicator, threshold1, sample_id, threshold_config)
+            fault_labels, detection_info = five_point_fault_detection(fai, threshold1, sample_id, threshold_config)
         else:
-            fault_labels, detection_info = three_window_fault_detection(fault_indicator, threshold1, sample_id, threshold_config)
+            fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id, threshold_config)
     
     # 构建结果
     sample_result = {
@@ -1600,7 +1654,7 @@ def process_single_sample(sample_id, models, config=None):
         'model_type': 'TRANSFORMER',
         'label': 1 if sample_id in TEST_SAMPLES['fault'] else 0,
         'df_data': df_data.values,
-        'fai': fault_indicator if fault_indicator is not None else [],
+        'fai': fai if fai is not None else [],
         'T_squared': t_total if t_total is not None else [],
         'SPE': q_total if q_total is not None else [],
         'thresholds': {
