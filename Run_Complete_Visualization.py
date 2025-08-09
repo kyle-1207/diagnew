@@ -184,7 +184,7 @@ class CompleteVisualizationRunner:
         
         # 创建训练洞察图表
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-        fig.suptitle('Training Process Insights and Recommendations\n训练过程洞察与建议', 
+        fig.suptitle('Training Process Insights and Recommendations', 
                      fontsize=16, fontweight='bold')
         
         # 1. 训练策略对比 (左上)
@@ -214,7 +214,7 @@ class CompleteVisualizationRunner:
     
     def _plot_training_strategy_comparison(self, ax):
         """绘制训练策略对比"""
-        ax.set_title('Training Strategy Comparison\n训练策略对比', fontweight='bold')
+        ax.set_title('Training Strategy Comparison', fontweight='bold')
         
         strategies = ['Standard\nTraining', 'Mixed\nPrecision', 'Hybrid\nFeedback', 'Positive-Negative\nSampling']
         
@@ -246,7 +246,7 @@ class CompleteVisualizationRunner:
     
     def _plot_hyperparameter_sensitivity(self, ax):
         """绘制超参数敏感性分析"""
-        ax.set_title('Hyperparameter Sensitivity Analysis\n超参数敏感性分析', fontweight='bold')
+        ax.set_title('Hyperparameter Sensitivity Analysis', fontweight='bold')
         
         hyperparams = ['Learning\nRate', 'Batch\nSize', 'Hidden\nDim', 'Dropout', 'L2\nRegularization']
         sensitivity_scores = [0.8, 0.6, 0.4, 0.5, 0.3]  # 敏感性评分 (0-1)
@@ -273,7 +273,7 @@ class CompleteVisualizationRunner:
     
     def _plot_data_augmentation_effects(self, ax):
         """绘制数据增强效果分析"""
-        ax.set_title('Data Augmentation Effects\n数据增强效果分析', fontweight='bold')
+        ax.set_title('Data Augmentation Effects', fontweight='bold')
         
         augmentation_methods = ['None', 'Noise\nInjection', 'Time\nWarping', 'Magnitude\nScaling', 'Combined\nMethods']
         base_accuracy = [88, 89.2, 90.1, 89.8, 91.5]
@@ -305,7 +305,7 @@ class CompleteVisualizationRunner:
     
     def _plot_training_recommendations(self, ax):
         """绘制训练建议总结"""
-        ax.set_title('Training Recommendations Summary\n训练建议总结', fontweight='bold')
+        ax.set_title('Training Recommendations Summary', fontweight='bold')
         
         # 移除坐标轴
         ax.axis('off')
