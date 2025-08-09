@@ -386,6 +386,8 @@ class ModelComparisonVisualizer:
         ax.set_title('Training Loss Comparison', fontweight='bold')
         
         for model_name, data in self.model_data.items():
+            if data is None or not isinstance(data, dict):
+                continue
             if 'losses' in data or 'mcae1_losses' in data:
                 # 处理不同的损失数据格式
                 if 'losses' in data:
@@ -448,6 +450,8 @@ class ModelComparisonVisualizer:
         model_names = []
         
         for model_name, data in self.model_data.items():
+            if data is None or not isinstance(data, dict):
+                continue
             if 'losses' in data or 'mcae1_losses' in data:
                 losses = data.get('losses', data.get('mcae1_losses', []))
                 if len(losses) > 10:
@@ -484,6 +488,8 @@ class ModelComparisonVisualizer:
         ax.set_title('Reconstruction Error Distribution\n重构误差分布对比', fontweight='bold')
         
         for model_name, data in self.model_data.items():
+            if data is None or not isinstance(data, dict):
+                continue
             # 模拟重构误差数据（实际使用时从模型结果中提取）
             if 'mcae1_reconstruction_error_mean' in data:
                 mean_error = data['mcae1_reconstruction_error_mean']
@@ -638,6 +644,8 @@ class ModelComparisonVisualizer:
         # 计算综合评分（基于多个指标的加权平均）
         scores = {}
         for model_name, data in self.model_data.items():
+            if data is None or not isinstance(data, dict):
+                continue
             # 基于最终损失、收敛速度等计算综合评分
             if 'losses' in data or 'mcae1_losses' in data:
                 losses = data.get('losses', data.get('mcae1_losses', [1.0]))
@@ -722,6 +730,8 @@ class ModelComparisonVisualizer:
         ax.set_title('Loss Function Trends', fontweight='bold')
         
         for model_name, data in self.model_data.items():
+            if data is None or not isinstance(data, dict):
+                continue
             if 'losses' in data or 'mcae1_losses' in data:
                 losses = data.get('losses', data.get('mcae1_losses', []))
                 epochs = range(1, len(losses) + 1)
@@ -802,6 +812,8 @@ class ModelComparisonVisualizer:
         
         stability_metrics = {}
         for model_name, data in self.model_data.items():
+            if data is None or not isinstance(data, dict):
+                continue
             if 'losses' in data or 'mcae1_losses' in data:
                 losses = data.get('losses', data.get('mcae1_losses', []))
                 if len(losses) > 50:
