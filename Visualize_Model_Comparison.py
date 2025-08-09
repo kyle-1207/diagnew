@@ -40,17 +40,17 @@ class ModelComparisonVisualizer:
         self.model_data = {}
         self.colors = {
             'BiLSTM': '#1f77b4',           # 蓝色
-            'Transformer': '#ff7f0e',      # 橙色  
+            'Transformer-BACK': '#ff7f0e',      # 橙色  
             'HybridFeedback': '#2ca02c',   # 绿色
             'PN_HybridFeedback': '#d62728', # 红色
-            'Combined': '#9467bd'          # 紫色
+            'Transformer-FOR-BACK': '#9467bd'          # 紫色
         }
         self.markers = {
             'BiLSTM': 'o',
-            'Transformer': 's', 
+            'Transformer-BACK': 's', 
             'HybridFeedback': '^',
             'PN_HybridFeedback': 'D',
-            'Combined': 'v'
+            'Transformer-FOR-BACK': 'v'
         }
         
     def load_model_results(self):
@@ -67,25 +67,28 @@ class ModelComparisonVisualizer:
             print("⚠️  BiLSTM training history not found, generating sample data")
             self.model_data['BiLSTM'] = self._generate_bilstm_model_data()
         
-        # 加载Transformer结果  
+        # 加载Transformer-BACK结果  
         transformer_dir = f"{self.result_base_dir}/Transformer/models"
         transformer_files = [
             f"{transformer_dir}/transformer_training_history.pkl",
-            f"{transformer_dir}/training_history.pkl"
+            f"{transformer_dir}/training_history.pkl",
+            f"{transformer_dir}/hybrid_training_history.pkl",
+            f"{self.result_base_dir}/hybrid_feedback_training_history.pkl",  # Train_Transformer_HybridFeedback.py的实际保存路径
+            f"/tmp/hybrid_feedback_training_history.pkl"  # 备选路径
         ]
         
         for transformer_file in transformer_files:
             if os.path.exists(transformer_file):
                 try:
                     with open(transformer_file, 'rb') as f:
-                        self.model_data['Transformer'] = pickle.load(f)
-                    print("✅ Transformer results loaded")
+                        self.model_data['Transformer-BACK'] = pickle.load(f)
+                    print(f"✅ Transformer-BACK results loaded from {transformer_file}")
                     break
                 except Exception as e:
-                    print(f"⚠️  Failed to load Transformer from {transformer_file}: {e}")
+                    print(f"⚠️  Failed to load Transformer-BACK from {transformer_file}: {e}")
         else:
-            print("⚠️  No Transformer training history found, generating sample data")
-            self.model_data['Transformer'] = self._generate_transformer_model_data()
+            print("⚠️  No Transformer-BACK training history found, will generate sample data")
+            self.model_data['Transformer-BACK'] = None  # 先设为None，稍后生成样本数据
             
         # 加载混合反馈Transformer结果
         hybrid_dir = f"{self.result_base_dir}/HybridFeedback/models"
@@ -101,7 +104,7 @@ class ModelComparisonVisualizer:
                 self.model_data['PN_HybridFeedback'] = pickle.load(f)
             print("✅ PN_HybridFeedback results loaded")
             
-        # 加载Combined模型结果（PN_model）
+        # 加载Transformer-FOR-BACK模型结果（PN_model）
         combined_paths = [
             f"{self.result_base_dir}/Transformer/models/PN_model/pn_training_history.pkl",
             f"{self.result_base_dir}/Transformer/models/PN_model/training_history.pkl",
@@ -114,22 +117,23 @@ class ModelComparisonVisualizer:
             if os.path.exists(path):
                 try:
                     with open(path, 'rb') as f:
-                        self.model_data['Combined'] = pickle.load(f)
-                    print(f"✅ Combined model results loaded from {path}")
+                        self.model_data['Transformer-FOR-BACK'] = pickle.load(f)
+                    print(f"✅ Transformer-FOR-BACK model results loaded from {path}")
                     combined_loaded = True
                     break
                 except Exception as e:
-                    print(f"⚠️  Failed to load Combined results from {path}: {e}")
+                    print(f"⚠️  Failed to load Transformer-FOR-BACK results from {path}: {e}")
                     
-        # 如果没有真实数据，为Combined模型生成合理的模拟数据
+        # 如果没有真实数据，为Transformer-FOR-BACK模型生成合理的模拟数据
         if not combined_loaded and len(self.model_data) > 0:
-            self._generate_combined_model_data()
-            print("✅ Generated Combined model simulation data")
+            self.model_data['Transformer-FOR-BACK'] = self._generate_combined_model_data()
+            print("✅ Generated Transformer-FOR-BACK model simulation data")
             
-        # 确保Transformer模型也被加载（如果没有）
-        if 'Transformer' not in self.model_data and len(self.model_data) > 0:
-            self._generate_transformer_model_data()
-            print("✅ Generated Transformer model simulation data")
+        # 确保Transformer-BACK模型也被加载（如果没有）
+        if 'Transformer-BACK' not in self.model_data or self.model_data['Transformer-BACK'] is None:
+            if len(self.model_data) > 0:
+                self.model_data['Transformer-BACK'] = self._generate_transformer_model_data()
+                print("✅ Generated Transformer-BACK model simulation data")
             
         print(f"📊 Loaded {len(self.model_data)} model results")
         
