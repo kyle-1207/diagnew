@@ -15,12 +15,15 @@ def test_transformer_for_back_loading():
     
     result_base_dir = '/mnt/bz25t/bzhy/datasave'
     
-    # 根据修复后的路径配置进行测试
+    # 根据Train_Transformer_PN_HybridFeedback_EN.py的实际保存路径配置进行测试
     combined_paths = [
-        f"{result_base_dir}/hybrid_feedback_training_history.pkl",  # 主要保存路径
-        f"/tmp/hybrid_feedback_training_history.pkl",  # 备选路径1
-        f"./hybrid_feedback_training_history.pkl",  # 备选路径2
-        f"{result_base_dir}/Transformer/models/PN_model/pn_training_history.pkl",
+        f"{result_base_dir}/pn_training_history.pkl",  # 主要保存路径（根据PN脚本配置）
+        f"{result_base_dir}/Transformer/models/PN_model/pn_training_history.pkl",  # PN模型目录
+        f"./pn_training_history.pkl",  # 当前目录备选路径
+        f"/tmp/pn_training_history.pkl",  # 临时目录备选路径
+        f"{result_base_dir}/hybrid_feedback_training_history.pkl",  # 旧版路径（兼容性）
+        f"/tmp/hybrid_feedback_training_history.pkl",  # 旧版备选路径1
+        f"./hybrid_feedback_training_history.pkl",  # 旧版备选路径2
         f"{result_base_dir}/Transformer/models/PN_model/training_history.pkl",
         f"{result_base_dir}/Transformer/models/PN_model/combined_training_history.pkl",
         f"{result_base_dir}/Transformer-FOR-BACK/models/combined_training_history.pkl"

@@ -104,13 +104,16 @@ class ModelComparisonVisualizer:
                 self.model_data['PN_HybridFeedback'] = pickle.load(f)
             print("✅ PN_HybridFeedback results loaded")
             
-        # 加载Transformer-FOR-BACK模型结果（混合反馈Transformer模型）
-        # 根据Train_Transformer_HybridFeedback.py的实际保存路径配置
+        # 加载Transformer-FOR-BACK模型结果（PN混合反馈Transformer模型）
+        # 根据Train_Transformer_PN_HybridFeedback_EN.py的实际保存路径配置
         combined_paths = [
-            f"{self.result_base_dir}/hybrid_feedback_training_history.pkl",  # 主要保存路径
-            f"/tmp/hybrid_feedback_training_history.pkl",  # 备选路径1
-            f"./hybrid_feedback_training_history.pkl",  # 备选路径2
-            f"{self.result_base_dir}/Transformer/models/PN_model/pn_training_history.pkl",
+            f"{self.result_base_dir}/pn_training_history.pkl",  # 主要保存路径（根据PN脚本配置）
+            f"{self.result_base_dir}/Transformer/models/PN_model/pn_training_history.pkl",  # PN模型目录
+            f"./pn_training_history.pkl",  # 当前目录备选路径
+            f"/tmp/pn_training_history.pkl",  # 临时目录备选路径
+            f"{self.result_base_dir}/hybrid_feedback_training_history.pkl",  # 旧版路径（兼容性）
+            f"/tmp/hybrid_feedback_training_history.pkl",  # 旧版备选路径1
+            f"./hybrid_feedback_training_history.pkl",  # 旧版备选路径2
             f"{self.result_base_dir}/Transformer/models/PN_model/training_history.pkl",
             f"{self.result_base_dir}/Transformer/models/PN_model/combined_training_history.pkl",
             f"{self.result_base_dir}/Transformer-FOR-BACK/models/combined_training_history.pkl"

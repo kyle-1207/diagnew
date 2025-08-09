@@ -862,9 +862,56 @@ def main():
     torch.save(transformer_to_save.state_dict(), transformer_save_path)
     print(f"   Model saved: {transformer_save_path}")
     
+    # Save training history
+    training_history = {
+        'losses': transformer_losses,
+        'epochs': phase1_epochs,
+        'final_loss': transformer_losses[-1] if transformer_losses else 0.0,
+        'model_config': {
+            'input_size': model_input_size,
+            'output_size': model_output_size,
+            'd_model': 128,
+            'nhead': 8,
+            'num_layers': 3
+        },
+        'training_config': {
+            'batch_size': config['batch_size'],
+            'learning_rate': config['learning_rate'],
+            'optimizer': 'Adam',
+            'scheduler': 'StepLR',
+            'device': str(device)
+        },
+        'data_info': {
+            'train_samples': len(successful_train),
+            'positive_samples': len(successful_positive),
+            'negative_samples': len(successful_negative),
+            'data_shape': train_vin1.shape
+        },
+        'timestamp': datetime.now().strftime('%Y%m%d_%H%M%S')
+    }
+    
+    # Save to multiple locations for compatibility
+    history_save_paths = [
+        os.path.join(config['save_base_path'], 'pn_training_history.pkl'),
+        '/mnt/bz25t/bzhy/datasave/pn_training_history.pkl',
+        './pn_training_history.pkl'
+    ]
+    
+    for history_path in history_save_paths:
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(history_path), exist_ok=True)
+            
+            with open(history_path, 'wb') as f:
+                pickle.dump(training_history, f)
+            print(f"   Training history saved: {history_path}")
+        except Exception as e:
+            print(f"   Failed to save training history to {history_path}: {e}")
+    
     print("\nTraining completed successfully!")
     print(f"Final Transformer loss: {transformer_losses[-1]:.6f}")
     print(f"Model saved to: {transformer_save_path}")
+    print(f"Training history saved to {len([p for p in history_save_paths if os.path.exists(p)])} locations")
 
 if __name__ == "__main__":
     main()
