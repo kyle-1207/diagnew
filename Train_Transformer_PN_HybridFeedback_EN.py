@@ -262,6 +262,92 @@ class ContrastiveMCAELoss(nn.Module):
         else:
             return positive_loss, positive_loss, torch.tensor(0.0, device=positive_loss.device)
 
+#=================================== MC-AE Models ===================================
+
+class MC_AE1(nn.Module):
+    """Multi-Channel Autoencoder 1 - Primary reconstruction channel"""
+    
+    def __init__(self, input_size=7, hidden_size=32, latent_size=16):
+        super(MC_AE1, self).__init__()
+        
+        # Encoder
+        self.encoder = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, latent_size),
+            nn.ReLU()
+        )
+        
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, input_size)
+        )
+    
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return decoded, encoded
+
+class MC_AE2(nn.Module):
+    """Multi-Channel Autoencoder 2 - Secondary feature extraction channel"""
+    
+    def __init__(self, input_size=7, hidden_size=24, latent_size=12):
+        super(MC_AE2, self).__init__()
+        
+        # Encoder with different architecture
+        self.encoder = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Tanh(),
+            nn.Dropout(0.15),
+            nn.Linear(hidden_size, latent_size),
+            nn.Tanh()
+        )
+        
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_size, hidden_size),
+            nn.Tanh(),
+            nn.Dropout(0.15),
+            nn.Linear(hidden_size, input_size)
+        )
+    
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return decoded, encoded
+
+class MC_AE3(nn.Module):
+    """Multi-Channel Autoencoder 3 - Tertiary validation channel"""
+    
+    def __init__(self, input_size=7, hidden_size=20, latent_size=10):
+        super(MC_AE3, self).__init__()
+        
+        # Encoder with smaller capacity for validation
+        self.encoder = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_size, latent_size),
+            nn.LeakyReLU(0.1)
+        )
+        
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_size, hidden_size),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_size, input_size)
+        )
+    
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return decoded, encoded
+
 #=================================== Transformer Model ===================================
 
 class TransformerPredictor(nn.Module):
