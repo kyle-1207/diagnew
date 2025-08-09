@@ -24,11 +24,13 @@ warnings.filterwarnings('ignore')
 # Linux环境matplotlib配置
 mpl.use('Agg')  # 使用非交互式后端
 
-# 设置中文字体
-plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+# 设置字体配置 - 避免中文显示为方格
+plt.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans', 'Liberation Sans']
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.size'] = 12
+# 移除中文字符，使用英文标签
+plt.rcParams['axes.unicode_minus'] = False
 
 class ModelComparisonVisualizer:
     """模型对比可视化类"""
@@ -130,7 +132,28 @@ class ModelComparisonVisualizer:
             print("✅ Generated Transformer model simulation data")
             
         print(f"📊 Loaded {len(self.model_data)} model results")
+        
+        # 添加数据诊断
+        self._diagnose_model_data()
+        
         return len(self.model_data) > 0
+    
+    def _diagnose_model_data(self):
+        """诊断模型数据加载情况"""
+        print("\n🔍 Model Data Diagnosis:")
+        for model_name, data in self.model_data.items():
+            if data is None:
+                print(f"❌ {model_name}: Data is None")
+            elif not isinstance(data, dict):
+                print(f"❌ {model_name}: Data is not a dictionary (type: {type(data)})")
+            else:
+                print(f"✅ {model_name}: Data loaded successfully")
+                print(f"   Available keys: {list(data.keys())}")
+                if 'losses' in data:
+                    print(f"   Loss data length: {len(data['losses'])}")
+                if 'mcae1_losses' in data:
+                    print(f"   MCAE1 loss data length: {len(data['mcae1_losses'])}")
+        print("=" * 50)
     
     def _generate_combined_model_data(self):
         """为Combined模型生成合理的模拟数据（基于已有模型数据）"""
@@ -729,8 +752,10 @@ class ModelComparisonVisualizer:
         """绘制损失函数趋势"""
         ax.set_title('Loss Function Trends', fontweight='bold')
         
+        plots_added = False
         for model_name, data in self.model_data.items():
             if data is None or not isinstance(data, dict):
+                print(f"⚠️  {model_name} data is None or not dict")
                 continue
             if 'losses' in data or 'mcae1_losses' in data:
                 losses = data.get('losses', data.get('mcae1_losses', []))
@@ -739,6 +764,8 @@ class ModelComparisonVisualizer:
                 # 原始损失
                 ax.plot(epochs, losses, color=self.colors[model_name], 
                        alpha=0.3, linewidth=1)
+                plots_added = True
+                print(f"✅ Added {model_name} loss plot with {len(losses)} epochs")
                 
                 # 平滑处理（移动平均）
                 if len(losses) > 10:
@@ -746,8 +773,13 @@ class ModelComparisonVisualizer:
                     ax.plot(epochs, smoothed, color=self.colors[model_name], 
                            linewidth=2, label=f'{model_name} (Smoothed)')
         
-        ax.set_xlabel('Training Epochs / 训练轮数')
-        ax.set_ylabel('Loss / 损失值')
+        if not plots_added:
+            ax.text(0.5, 0.5, 'No Training Loss Data Available', 
+                   transform=ax.transAxes, ha='center', va='center', fontsize=12)
+            print("⚠️  No loss plots were added")
+        
+        ax.set_xlabel('Training Epochs')
+        ax.set_ylabel('Loss Value')
         ax.set_yscale('log')
         ax.legend()
         ax.grid(True, alpha=0.3)
@@ -808,11 +840,13 @@ class ModelComparisonVisualizer:
     
     def _plot_training_stability(self, ax):
         """绘制训练稳定性分析"""
-        ax.set_title('Training Stability\n训练稳定性', fontweight='bold')
+        ax.set_title('Training Stability', fontweight='bold')
         
         stability_metrics = {}
+        plots_added = False
         for model_name, data in self.model_data.items():
             if data is None or not isinstance(data, dict):
+                print(f"⚠️  {model_name} data is None or not dict for stability")
                 continue
             if 'losses' in data or 'mcae1_losses' in data:
                 losses = data.get('losses', data.get('mcae1_losses', []))
@@ -821,6 +855,8 @@ class ModelComparisonVisualizer:
                     loss_changes = np.diff(losses)
                     stability = np.std(loss_changes)
                     stability_metrics[model_name] = stability
+                    plots_added = True
+                    print(f"✅ Added {model_name} stability metric: {stability:.4f}")
         
         if stability_metrics:
             model_names = list(stability_metrics.keys())
@@ -834,9 +870,13 @@ class ModelComparisonVisualizer:
             for bar, value in zip(bars, stability_values):
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(stability_values)*0.01,
                        f'{value:.4f}', ha='center', va='bottom')
+        else:
+            ax.text(0.5, 0.5, 'No Stability Data Available', 
+                   transform=ax.transAxes, ha='center', va='center', fontsize=12)
+            print("⚠️  No stability metrics were calculated")
         
-        ax.set_xlabel('Models / 模型')
-        ax.set_ylabel('Loss Variance / 损失方差')
+        ax.set_xlabel('Models')
+        ax.set_ylabel('Loss Variance')
         ax.tick_params(axis='x', rotation=45)
         ax.grid(True, alpha=0.3)
     
