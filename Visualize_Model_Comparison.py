@@ -22,7 +22,7 @@ import time
 warnings.filterwarnings('ignore')
 
 # Linux环境matplotlib配置
-matplotlib.use('Agg')  # 使用非交互式后端
+mpl.use('Agg')  # 使用非交互式后端
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']

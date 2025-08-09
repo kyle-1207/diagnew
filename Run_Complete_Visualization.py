@@ -15,7 +15,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Linux环境配置
-matplotlib.use('Agg')
+mpl.use('Agg')
 
 class CompleteVisualizationRunner:
     """完整可视化分析运行器"""

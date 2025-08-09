@@ -23,7 +23,7 @@ import time
 warnings.filterwarnings('ignore')
 
 # Linux环境matplotlib配置
-matplotlib.use('Agg')
+mpl.use('Agg')
 
 # 设置字体（英文标签，避免中文方框问题）
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
