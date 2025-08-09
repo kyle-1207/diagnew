@@ -233,7 +233,7 @@ def setup_chinese_fonts_strict():
     # 6. 测试中文显示
     try:
         plt.figure(figsize=(1, 1))
-        plt.text(0.5, 0.5, '测试中文', fontsize=10)
+        plt.text(0.5, 0.5, 'Font Test', fontsize=10)
         plt.close()
         print("✅ 中文字体测试通过")
     except Exception as e:
@@ -1331,9 +1331,9 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     if len(all_fai) == 0:
         print("   ⚠️ 警告: 没有可用的FAI数据，跳过ROC曲线生成")
         # 创建一个空的ROC图
-        ax1.text(0.5, 0.5, '无数据', ha='center', va='center', 
+        ax1.text(0.5, 0.5, 'No Data', ha='center', va='center', 
                 transform=ax1.transAxes, fontsize=12)
-        ax1.set_title('(a) BiLSTM ROC Curve\n(无数据)')
+        ax1.set_title('(a) BiLSTM ROC Curve\n(No Data)')
         ax1.set_xlabel('False Positive Rate')
         ax1.set_ylabel('True Positive Rate')
         ax1.grid(True, alpha=0.3)
@@ -1744,7 +1744,7 @@ def create_three_window_visualization(test_results, save_path):
         if detection_info.get('verified_points'):
             verified_indices = [v['point'] for v in detection_info['verified_points']]
             ax_main.scatter(verified_indices, [fai_values[i] for i in verified_indices],
-                           color='red', s=60, alpha=0.9, label=f'验证: {len(verified_indices)} 个确认点',
+                           color='red', s=60, alpha=0.9, label=f'Verification: {len(verified_indices)} Confirmed Points',
                            marker='^', zorder=6)
         
         # 显示验证窗口范围
@@ -1886,8 +1886,8 @@ def create_three_window_visualization(test_results, save_path):
         fault_ratio = detection_stats.get('fault_ratio', 0.0)
     
     bars4 = ax4.bar(['BiLSTM'], [fault_ratio], color='blue', alpha=0.7)
-    ax4.set_title('BiLSTM\n(故障检测比率)')
-    ax4.set_ylabel('故障比率')
+    ax4.set_title('BiLSTM\n(Fault Detection Ratio)')
+    ax4.set_ylabel('Fault Ratio')
     
     for bar, value in zip(bars4, [fault_ratio]):
         ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
