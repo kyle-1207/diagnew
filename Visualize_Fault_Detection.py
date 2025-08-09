@@ -44,9 +44,9 @@ class FaultDetectionVisualizer:
             'EA': '#3498db'           # 蓝色 - 电解液泄漏
         }
         self.detection_strategies = {
-            'BiLSTM_3Window': {'name': 'BiLSTM Three-Window', 'color': '#1f77b4'},
-            'BiLSTM_5Point': {'name': 'BiLSTM Five-Point', 'color': '#ff7f0e'},
-            'Transformer': {'name': 'Transformer', 'color': '#2ca02c'},
+            'BiLSTM': {'name': 'BiLSTM', 'color': '#1f77b4'},
+            'Transformer': {'name': 'Transformer', 'color': '#ff7f0e'},
+            'Combined': {'name': 'Combined Model', 'color': '#2ca02c'},
             'HybridFeedback': {'name': 'Hybrid Feedback', 'color': '#d62728'}
         }
         
@@ -56,28 +56,152 @@ class FaultDetectionVisualizer:
         
         self.detection_data = {}
         
-        # 加载BiLSTM检测结果
+        # 方法1: 尝试加载传统格式的检测结果
         bilstm_dir = f"{self.result_base_dir}/BILSTM/detection_results"
         if os.path.exists(f"{bilstm_dir}/detection_summary.pkl"):
             with open(f"{bilstm_dir}/detection_summary.pkl", 'rb') as f:
                 self.detection_data['BiLSTM'] = pickle.load(f)
-            print("✅ BiLSTM detection results loaded")
+            print("✅ BiLSTM detection results loaded (traditional format)")
         
-        # 加载Transformer检测结果
         transformer_dir = f"{self.result_base_dir}/Transformer/detection_results"
         if os.path.exists(f"{transformer_dir}/detection_summary.pkl"):
             with open(f"{transformer_dir}/detection_summary.pkl", 'rb') as f:
                 self.detection_data['Transformer'] = pickle.load(f)
-            print("✅ Transformer detection results loaded")
+            print("✅ Transformer detection results loaded (traditional format)")
+        
+        # 方法2: 尝试加载最新的测试结果格式（参考BiLSTM成功做法）
+        if not self.detection_data:
+            print("📋 Traditional format not found, searching for recent test results...")
+            self._load_recent_test_results()
         
         print(f"📊 Loaded {len(self.detection_data)} detection result sets")
         
-        # 如果没有真实数据，生成模拟数据用于演示
+        # 如果仍然没有真实数据，生成模拟数据用于演示
         if not self.detection_data:
             print("⚠️  No detection results found, generating simulated data for demonstration")
             self._generate_simulated_detection_data()
         
         return len(self.detection_data) > 0
+    
+    def _load_recent_test_results(self):
+        """加载最新的测试结果（参考BiLSTM成功做法）"""
+        import glob
+        
+        # 搜索BiLSTM测试结果
+        bilstm_pattern = f"{self.result_base_dir}/BILSTM/test_results/*/detailed_results/bilstm_detailed_results.pkl"
+        bilstm_files = glob.glob(bilstm_pattern)
+        
+        if bilstm_files:
+            # 选择最新的文件
+            latest_bilstm = max(bilstm_files, key=os.path.getmtime)
+            try:
+                with open(latest_bilstm, 'rb') as f:
+                    bilstm_test_results = pickle.load(f)
+                
+                # 转换为故障检测分析所需的格式
+                self.detection_data['BiLSTM'] = self._convert_test_results_to_detection_format(bilstm_test_results, 'BiLSTM')
+                print(f"✅ BiLSTM test results loaded from: {latest_bilstm}")
+                
+            except Exception as e:
+                print(f"⚠️  Failed to load BiLSTM test results: {e}")
+        
+        # 搜索Transformer测试结果 
+        transformer_pattern = f"{self.result_base_dir}/Transformer/test_results/*/detailed_results/transformer_detailed_results.pkl"
+        transformer_files = glob.glob(transformer_pattern)
+        
+        if transformer_files:
+            latest_transformer = max(transformer_files, key=os.path.getmtime)
+            try:
+                with open(latest_transformer, 'rb') as f:
+                    transformer_test_results = pickle.load(f)
+                
+                self.detection_data['Transformer'] = self._convert_test_results_to_detection_format(transformer_test_results, 'Transformer')
+                print(f"✅ Transformer test results loaded from: {latest_transformer}")
+                
+            except Exception as e:
+                print(f"⚠️  Failed to load Transformer test results: {e}")
+        
+        # 搜索Combined模型测试结果
+        combined_pattern = f"{self.result_base_dir}/Combined/test_results/*/detailed_results/combined_detailed_results.pkl"
+        combined_files = glob.glob(combined_pattern)
+        
+        if combined_files:
+            latest_combined = max(combined_files, key=os.path.getmtime)
+            try:
+                with open(latest_combined, 'rb') as f:
+                    combined_test_results = pickle.load(f)
+                
+                self.detection_data['Combined'] = self._convert_test_results_to_detection_format(combined_test_results, 'Combined')
+                print(f"✅ Combined test results loaded from: {latest_combined}")
+                
+            except Exception as e:
+                print(f"⚠️  Failed to load Combined test results: {e}")
+    
+    def _convert_test_results_to_detection_format(self, test_results, model_name):
+        """将测试结果转换为故障检测分析格式（参考BiLSTM成功做法）"""
+        converted_data = {}
+        
+        # 按样本类型分组
+        normal_samples = []
+        fault_samples = []
+        
+        for result in test_results:
+            sample_id = result.get('sample_id', 'unknown')
+            true_label = result.get('label', 0)
+            fai_values = result.get('fai', [])
+            fault_labels = result.get('fault_labels', [])
+            detection_info = result.get('detection_info', {})
+            
+            # 生成预测概率（基于fai值）
+            if len(fai_values) > 0:
+                thresholds = result.get('thresholds', {})
+                threshold1 = thresholds.get('threshold1', np.mean(fai_values) + 3 * np.std(fai_values))
+                
+                # 将fai值转换为预测概率
+                pred_probs = np.clip(fai_values / (threshold1 * 2), 0, 1)
+                pred_labels = (np.array(fai_values) > threshold1).astype(int)
+                
+                sample_data = {
+                    'sample_id': sample_id,
+                    'true_labels': np.array([true_label] * len(fai_values)),
+                    'pred_labels': pred_labels,
+                    'pred_probs': pred_probs,
+                    'n_samples': len(fai_values),
+                    'fai_values': fai_values,
+                    'fault_labels': fault_labels,
+                    'detection_info': detection_info,
+                    'thresholds': thresholds
+                }
+                
+                if true_label == 0:
+                    normal_samples.append(sample_data)
+                else:
+                    fault_samples.append(sample_data)
+        
+        # 合并同类样本
+        if normal_samples:
+            converted_data['Normal'] = self._merge_sample_data(normal_samples)
+        
+        if fault_samples:
+            # 可以按故障类型进一步分类，这里简化为一个故障类型
+            converted_data['Fault'] = self._merge_sample_data(fault_samples)
+        
+        return converted_data
+    
+    def _merge_sample_data(self, sample_list):
+        """合并同类样本数据"""
+        if not sample_list:
+            return {}
+        
+        merged = {
+            'true_labels': np.concatenate([s['true_labels'] for s in sample_list]),
+            'pred_labels': np.concatenate([s['pred_labels'] for s in sample_list]),
+            'pred_probs': np.concatenate([s['pred_probs'] for s in sample_list]),
+            'n_samples': sum(s['n_samples'] for s in sample_list),
+            'sample_details': sample_list  # 保留详细信息用于进一步分析
+        }
+        
+        return merged
     
     def _generate_simulated_detection_data(self):
         """生成模拟故障检测数据用于演示"""
@@ -187,7 +311,7 @@ class FaultDetectionVisualizer:
         self._plot_comprehensive_detection_score(ax12)
         
         # 添加总标题
-        fig.suptitle('Fault Detection Comprehensive Analysis Dashboard\n故障检测综合分析仪表板', 
+        fig.suptitle('Fault Detection Comprehensive Analysis Dashboard', 
                      fontsize=16, fontweight='bold', y=0.95)
         
         # 保存图表
