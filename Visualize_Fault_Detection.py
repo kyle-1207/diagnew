@@ -121,9 +121,12 @@ class FaultDetectionVisualizer:
             except Exception as e:
                 print(f"⚠️  Failed to load Transformer test results: {e}")
         
-        # 搜索Combined模型测试结果
-        combined_pattern = f"{self.result_base_dir}/Combined/test_results/*/detailed_results/combined_detailed_results.pkl"
-        combined_files = glob.glob(combined_pattern)
+        # 搜索Combined模型测试结果（PN_model）
+        # 根据实际文件路径结构搜索
+        combined_pattern_1 = f"{self.result_base_dir}/Combined/test_results/*/detailed_results/combined_detailed_results.pkl"
+        combined_pattern_2 = f"{self.result_base_dir}/Transformer/models/PN_model/test_results*/detailed_results/transformer_detailed_results.pkl"
+        
+        combined_files = glob.glob(combined_pattern_1) + glob.glob(combined_pattern_2)
         
         if combined_files:
             latest_combined = max(combined_files, key=os.path.getmtime)
@@ -136,6 +139,8 @@ class FaultDetectionVisualizer:
                 
             except Exception as e:
                 print(f"⚠️  Failed to load Combined test results: {e}")
+        else:
+            print("⚠️  No Combined model test results found")
     
     def _convert_test_results_to_detection_format(self, test_results, model_name):
         """将测试结果转换为故障检测分析格式（参考BiLSTM成功做法）"""
