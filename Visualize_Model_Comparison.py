@@ -104,12 +104,16 @@ class ModelComparisonVisualizer:
                 self.model_data['PN_HybridFeedback'] = pickle.load(f)
             print("✅ PN_HybridFeedback results loaded")
             
-        # 加载Transformer-FOR-BACK模型结果（PN_model）
+        # 加载Transformer-FOR-BACK模型结果（混合反馈Transformer模型）
+        # 根据Train_Transformer_HybridFeedback.py的实际保存路径配置
         combined_paths = [
+            f"{self.result_base_dir}/hybrid_feedback_training_history.pkl",  # 主要保存路径
+            f"/tmp/hybrid_feedback_training_history.pkl",  # 备选路径1
+            f"./hybrid_feedback_training_history.pkl",  # 备选路径2
             f"{self.result_base_dir}/Transformer/models/PN_model/pn_training_history.pkl",
             f"{self.result_base_dir}/Transformer/models/PN_model/training_history.pkl",
             f"{self.result_base_dir}/Transformer/models/PN_model/combined_training_history.pkl",
-            f"{self.result_base_dir}/Combined/models/combined_training_history.pkl"
+            f"{self.result_base_dir}/Transformer-FOR-BACK/models/combined_training_history.pkl"
         ]
         
         combined_loaded = False
@@ -160,11 +164,11 @@ class ModelComparisonVisualizer:
         print("=" * 50)
     
     def _generate_combined_model_data(self):
-        """为Combined模型生成合理的模拟数据（基于已有模型数据）"""
+        """为Transformer-FOR-BACK模型生成合理的模拟数据（基于已有模型数据）"""
         if not self.model_data:
             return
             
-        # 基于BiLSTM和Transformer的平均表现生成Combined数据
+        # 基于BiLSTM和Transformer的平均表现生成Transformer-FOR-BACK数据
         reference_models = ['BiLSTM', 'Transformer']
         available_models = [m for m in reference_models if m in self.model_data]
         
@@ -193,7 +197,7 @@ class ModelComparisonVisualizer:
             epochs = list(range(1, max_epochs + 1))
             combined_data['epochs'] = epochs
             
-            # 生成损失曲线（Combined表现应该更好）
+            # 生成损失曲线（Transformer-FOR-BACK表现应该更好）
             for epoch in range(max_epochs):
                 # 训练损失：比单独模型稍好
                 train_losses = []
@@ -265,7 +269,7 @@ class ModelComparisonVisualizer:
                 'f1_score': min(np.mean(f1s) * 1.075, 0.999) if f1s else 0.89,
             }
             
-            self.model_data['Combined'] = combined_data
+            self.model_data['Transformer-FOR-BACK'] = combined_data
     
     def _generate_bilstm_model_data(self):
         """生成BiLSTM模型的模拟训练数据"""
