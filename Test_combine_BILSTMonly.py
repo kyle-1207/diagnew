@@ -1896,23 +1896,23 @@ def create_three_window_visualization(test_results, save_path):
     # === 底部：过程说明 ===
     if CURRENT_DETECTION_MODE == "three_window":
         process_text = """
-    BiLSTM三窗口检测过程:
+    BiLSTM Three-Window Detection Process:
     
-    1. 检测窗口 (25点): 扫描候选故障点，条件：φ(FAI) > 阈值
-    2. 验证窗口 (15点): 验证候选点，检查连续性 (≥60% 超阈值)
-    3. 标记窗口 (±10点): 标记确认的故障区域
+    1. Detection Window (25 points): Scan candidate fault points, condition: φ(FAI) > threshold
+    2. Verification Window (15 points): Verify candidates, check continuity (≥60% above threshold)
+    3. Marking Window (±10 points): Mark confirmed fault regions
     
-    优势: 在保持高敏感性的同时减少误报
+    Advantage: Maintain high sensitivity while reducing false alarms
         """
     else:
         process_text = """
-    BiLSTM五点检测过程:
+    BiLSTM Five-Point Detection Process:
     
-    1. 扫描时序: 逐点检查φ(FAI)值是否超过阈值
-    2. 触发条件: 当前点及前后相邻点都高于阈值时触发
-    3. 区域标记: 标记当前点及前后2个点（共5个点）为故障
+    1. Time Series Scan: Check φ(FAI) values point by point against threshold
+    2. Trigger Condition: Triggered when current point and neighbors exceed threshold
+    3. Region Marking: Mark current point and ±2 neighboring points (5 total) as fault
     
-    优势: 简化检测逻辑，提高计算效率
+    Advantage: Simplified detection logic with improved computational efficiency
     """
     
     fig.text(0.02, 0.02, process_text, fontsize=10, 
