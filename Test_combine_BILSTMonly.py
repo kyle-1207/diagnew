@@ -297,43 +297,32 @@ MODEL_PATHS = {
 
 # 检测模式配置
 DETECTION_MODES = {
-    "three_window": {
-        "name": "三窗口检测模式",
-        "description": "基于FAI的三窗口故障检测机制（检测->验证->标记）",
-        "function": "three_window_fault_detection"
+    "three_point": {
+        "name": "3点检测模式（原版）", 
+        "description": "对于故障样本，如果某点高于阈值且前后相邻点也高于阈值，则标记该点及前后1个点（共3个点）",
+        "function": "three_point_fault_detection"
     },
-    "five_point": {
-        "name": "5点检测模式（原版）", 
-        "description": "对于故障样本，如果某点高于阈值且前后相邻点也高于阈值，则标记该点及前后2个点（共5个点）",
-        "function": "five_point_fault_detection"
-    },
-    "five_point_improved": {
-        "name": "5点检测模式（改进版）",
-        "description": "改进的5点检测：严格的触发条件 + 分级标记范围 + 有效降噪机制",
-        "function": "five_point_fault_detection"
+    "three_point_improved": {
+        "name": "3点检测模式（改进版）",
+        "description": "改进的3点检测：严格的触发条件 + 分级标记范围 + 有效降噪机制",
+        "function": "three_point_fault_detection"
     }
 }
 
 # 当前使用的检测模式
-CURRENT_DETECTION_MODE = "five_point_improved"  # 使用改进的5点检测模式
-# 备选：如果改进版仍然过严格，可以切换回 "five_point" 原版
+CURRENT_DETECTION_MODE = "three_point_improved"  # 使用改进的3点检测模式
+# 备选：如果改进版仍然过严格，可以切换回 "three_point" 原版
 
-# 基于FAI的三窗口检测配置
+# 3点检测配置
 # 设计原理：
-# 1. 检测窗口(50采样点=25分钟)：
-#    - 基于FAI统计特性识别异常
-#    - 时间跨度足够捕捉故障发展
-# 2. 验证窗口(30采样点=15分钟)：
-#    - 确认FAI异常的持续性
-#    - 排除随机波动的影响
-# 3. 标记窗口(40采样点=20分钟)：
-#    - 考虑故障的前后影响范围
-#    - 保证故障区域的完整性
-WINDOW_CONFIG = {
-    "detection_window": 25,      # 检测窗口：25个采样点 (12.5分钟)
-    "verification_window": 15,   # 验证窗口：15个采样点 (7.5分钟)
-    "marking_window": 10,        # 标记窗口：10个采样点 (5分钟)
-    "verification_threshold": 0.6 # 验证窗口内FAI异常比例阈值 (60%)
+# 1. 触发条件：中心点+前后相邻点共3个点满足阈值条件
+# 2. 标记范围：标记触发点前后各1个点（共3个点）
+# 3. 分级检测：根据阈值严格程度分为3个等级
+THREE_POINT_CONFIG = {
+    "marking_range": 1,          # 标记范围：前后各1个点
+    "neighbor_check": True,      # 是否检查邻居点
+    "multi_level": True,         # 是否启用多级检测
+    "startup_period": 3000       # 启动期（跳过前3000个点）
 }
 
 # 高分辨率可视化配置
@@ -349,10 +338,8 @@ print(f"   测试样本: {ALL_TEST_SAMPLES}")
 print(f"   正常样本: {TEST_SAMPLES['normal']}")
 print(f"   故障样本: {TEST_SAMPLES['fault']}")
 print(f"   检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
-if CURRENT_DETECTION_MODE == "three_window":
-    print(f"   三窗口参数: {WINDOW_CONFIG}")
-else:
-    print(f"   5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
+print(f"   3点检测参数: {THREE_POINT_CONFIG}")
+print(f"   3点检测模式: 当前点+前后相邻点高于阈值时，标记3点区域")
 
 #----------------------------------------模型文件检查------------------------------
 def check_model_files():
@@ -427,139 +414,14 @@ def check_model_files():
 # 执行模型文件检查
 check_model_files()
 
-#----------------------------------------三窗口故障检测机制------------------------------
-def three_window_fault_detection(fai_values, threshold1, sample_id):
+#----------------------------------------3点故障检测机制------------------------------
+def three_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     """
-    基于FAI的三窗口故障检测机制
-    
-    原理：
-    1. 检测窗口：基于FAI统计特性识别异常点
-    2. 验证窗口：确认FAI异常的持续性，排除随机波动
-    3. 标记窗口：考虑故障的前后影响范围
-    
-    Args:
-        fai_values: FAI序列（综合故障指标）
-        threshold1: FAI阈值
-        sample_id: 样本ID（用于记录）
-    
-    Returns:
-        fault_labels: 故障标签序列 (0=正常, 1=故障)
-        detection_info: 检测过程详细信息
-    """
-    # 获取窗口配置
-    detection_window = WINDOW_CONFIG["detection_window"]      # 50点 = 25分钟
-    verification_window = WINDOW_CONFIG["verification_window"] # 30点 = 15分钟
-    marking_window = WINDOW_CONFIG["marking_window"]          # 40点 = 20分钟
-    verification_threshold = WINDOW_CONFIG["verification_threshold"]  # 20%
-    
-    # 初始化输出
-    fault_labels = np.zeros(len(fai_values), dtype=int)
-    detection_info = {
-        'candidate_points': [],    # 候选故障点
-        'verified_points': [],     # 已验证的故障点
-        'marked_regions': [],      # 标记的故障区域
-        'window_stats': {},        # 窗口统计信息
-        'fai_stats': {            # FAI统计信息
-            'mean': np.mean(fai_values),
-            'std': np.std(fai_values),
-            'max': np.max(fai_values),
-            'min': np.min(fai_values)
-        }
-    }
-    
-    # 阶段1：检测窗口 - 基于FAI统计特性识别异常点
-    candidate_points = []
-    for i in range(len(fai_values)):
-        if fai_values[i] > threshold1:
-            candidate_points.append(i)
-    
-    detection_info['candidate_points'] = candidate_points
-    
-    if len(candidate_points) == 0:
-        # 没有候选点，直接返回
-        return fault_labels, detection_info
-    
-    # 阶段2：验证窗口 - 确认FAI异常的持续性
-    verified_points = []
-    for candidate in candidate_points:
-        # 定义验证窗口范围（前后各半个窗口）
-        start_verify = max(0, candidate - verification_window//2)
-        end_verify = min(len(fai_values), candidate + verification_window//2)
-        verify_data = fai_values[start_verify:end_verify]
-        
-        # 计算FAI异常比例
-        continuous_ratio = np.sum(verify_data > threshold1) / len(verify_data)
-        
-        # 计算FAI在验证窗口的统计特性
-        window_stats = {
-            'mean': np.mean(verify_data),
-            'std': np.std(verify_data),
-            'max': np.max(verify_data),
-            'min': np.min(verify_data),
-            'duration': end_verify - start_verify
-        }
-        
-        # 基于verification_threshold验证持续性
-        if continuous_ratio >= verification_threshold:
-            verified_points.append({
-                'point': candidate,
-                'continuous_ratio': continuous_ratio,
-                'verify_range': (start_verify, end_verify),
-                'window_stats': window_stats
-            })
-    
-    detection_info['verified_points'] = verified_points
-    
-    # 阶段3：标记窗口 - 考虑故障的影响范围
-    marked_regions = []
-    for verified in verified_points:
-        candidate = verified['point']
-        
-        # 定义对称的标记窗口范围
-        start_mark = max(0, candidate - marking_window)
-        end_mark = min(len(fai_values), candidate + marking_window)
-        
-        # 提取标记区域的FAI特征
-        mark_data = fai_values[start_mark:end_mark]
-        region_stats = {
-            'mean_fai': np.mean(mark_data),
-            'max_fai': np.max(mark_data),
-            'std_fai': np.std(mark_data),
-            'duration': end_mark - start_mark
-        }
-        
-        # 标记故障区域
-        fault_labels[start_mark:end_mark] = 1
-        
-        marked_regions.append({
-            'center': candidate,
-            'range': (start_mark, end_mark),
-            'length': end_mark - start_mark,
-            'region_stats': region_stats
-        })
-    
-    detection_info['marked_regions'] = marked_regions
-    
-    # 完整的统计信息
-    detection_info['window_stats'] = {
-        'total_candidates': len(candidate_points),
-        'verified_candidates': len(verified_points),
-        'total_fault_points': np.sum(fault_labels),
-        'fault_ratio': np.sum(fault_labels) / len(fault_labels),
-        'mean_continuous_ratio': np.mean([v['continuous_ratio'] for v in verified_points]) if verified_points else 0,
-        'mean_region_length': np.mean([m['length'] for m in marked_regions]) if marked_regions else 0
-    }
-    
-    return fault_labels, detection_info
-
-
-def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
-    """
-    改进的5点故障检测机制：增强连续性检测和降噪能力
+    改进的3点故障检测机制：增强连续性检测和降噪能力
     
     设计原理：
     1. 严格的触发条件：要求中心点及其邻域满足更严格的一致性
-    2. 合理的标记范围：根据故障级别标记不同大小的区域
+    2. 合理的标记范围：根据故障级别标记3个点的区域
     3. 有效的降噪机制：过滤孤立异常点，关注持续性故障
     
     Args:
@@ -639,7 +501,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
         threshold3 = mean_fai + 6.0 * std_fai
         print(f"   ℹ️ 内部阈值计算: T2={threshold2:.4f}, T3={threshold3:.4f}")
     
-    # 故障样本：实施改进的多级5点检测（与Transformer一致，跳过启动期）
+    # 故障样本：实施改进的多级3点检测（与Transformer一致，跳过启动期）
     trigger_points = []
     marked_regions = []
     
@@ -802,9 +664,9 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
     detection_info['marked_regions'] = marked_regions
     detection_info['processed_triggers'] = processed_triggers
     
-    # 为兼容三窗口检测模式的可视化代码，添加空的兼容字段
-    detection_info['candidate_points'] = []  # 5点检测模式中不使用，但为兼容性保留
-    detection_info['verified_points'] = []   # 5点检测模式中不使用，但为兼容性保留
+    # 为兼容旧版检测模式的可视化代码，添加空的兼容字段
+    detection_info['candidate_points'] = []  # 3点检测模式中不使用，但为兼容性保留
+    detection_info['verified_points'] = []   # 3点检测模式中不使用，但为兼容性保留
     
     # 统计信息（分级检测）
     fault_count = np.sum(fault_labels > 0)  # 全序列
@@ -864,7 +726,7 @@ def five_point_fault_detection(fai_values, threshold1, sample_id, config=None):
             'center_threshold': threshold1,           # 保持3σ阈值
             'neighbor_threshold': threshold1 * 0.6,  # 进一步降低邻域要求到60%
             'min_neighbors': 0,                      # 不要求邻居（纯中心点检测）
-            'marking_range': 2,                      # 标记±2个点
+            'marking_range': 1,                      # 标记±1个点（3点总共）
             'condition': 'strategy2_relaxed'
         }
         
@@ -1101,10 +963,11 @@ def process_single_sample(sample_id, models):
         'threshold2': threshold2,
         'threshold3': threshold3
     }
-    if CURRENT_DETECTION_MODE in ("five_point", "five_point_improved"):
-        fault_labels, detection_info = five_point_fault_detection(fai, threshold1, sample_id, threshold_config)
+    if CURRENT_DETECTION_MODE in ("three_point", "three_point_improved"):
+        fault_labels, detection_info = three_point_fault_detection(fai, threshold1, sample_id, threshold_config)
     else:
-        fault_labels, detection_info = three_window_fault_detection(fai, threshold1, sample_id)
+        # 默认使用3点检测
+        fault_labels, detection_info = three_point_fault_detection(fai, threshold1, sample_id, threshold_config)
     
     # 构建结果
     sample_result = {
@@ -1149,7 +1012,7 @@ def main_test_process():
         "BILSTM": [],
         "metadata": {
             "test_samples": TEST_SAMPLES,
-            "window_config": WINDOW_CONFIG,
+            "three_point_config": THREE_POINT_CONFIG,
             "detection_modes": DETECTION_MODES,
             "current_mode": CURRENT_DETECTION_MODE,
             "timestamp": datetime.now().isoformat()
@@ -1186,7 +1049,7 @@ def main_test_process():
                 metrics = sample_result.get('performance_metrics', {})
                 detection_info = sample_result.get('detection_info', {})
                 
-                # 5点检测模式 - 安全获取检测统计
+                # 3点检测模式 - 安全获取检测统计
                 detection_stats = detection_info.get('detection_stats', {})
                 detection_ratio = detection_stats.get('fault_ratio', 0.0)
                 
@@ -1235,7 +1098,7 @@ def calculate_performance_metrics(test_results):
             if true_label == 0:  # 正常样本
                 point_true_label = 0  # 正常样本的所有点都是正常的
             else:  # 故障样本
-                point_true_label = fault_pred  # 故障样本使用5点检测生成的伪标签
+                point_true_label = fault_pred  # 故障样本使用3点检测生成的伪标签
             
             all_true_labels.append(point_true_label)  # 使用点级别标签
             all_fai_values.append(fai_val)
@@ -1577,37 +1440,17 @@ def create_fault_detection_timeline(test_results, save_path):
     
     ax3.plot(time_axis, fai_values, 'b-', alpha=0.5, label='φ Index Value')
     
-    # 根据检测模式显示不同的检测过程
-    if CURRENT_DETECTION_MODE == "three_window":
-        # 三窗口检测模式
-        # 标记候选点
-        if detection_info.get('candidate_points'):
-            ax3.scatter(detection_info['candidate_points'], 
-                       [fai_values[i] for i in detection_info['candidate_points']],
-                       color='orange', s=30, label='Candidate Points', alpha=0.8)
-        
-        # 标记验证通过的点
-        if detection_info.get('verified_points'):
-            verified_indices = [v['point'] for v in detection_info['verified_points']]
-            ax3.scatter(verified_indices,
-                       [fai_values[i] for i in verified_indices],
-                       color='red', s=50, label='Verified Points', marker='^')
+    # 3点检测模式
+    # 标记触发点
+    if detection_info.get('trigger_points'):
+        ax3.scatter(detection_info['trigger_points'], 
+                   [fai_values[i] for i in detection_info['trigger_points']],
+                   color='orange', s=30, label='Trigger Points', alpha=0.8)
     
-        ax3.set_ylabel('Three-Window\nDetection Process')
-        ax3.set_title('Three-Window Detection Process (BiLSTM)')
-        
-    else:
-        # 5点检测模式
-        # 标记触发点
-        if detection_info.get('trigger_points'):
-            ax3.scatter(detection_info['trigger_points'], 
-                       [fai_values[i] for i in detection_info['trigger_points']],
-                       color='orange', s=30, label='Trigger Points', alpha=0.8)
-        
-        ax3.set_ylabel('5-Point Detection\nProcess')
-        ax3.set_title('5-Point Detection Process (BiLSTM)')
+    ax3.set_ylabel('3-Point Detection\nProcess')
+    ax3.set_title('3-Point Detection Process (BiLSTM)')
     
-    # 标记故障区域（两种模式都有）
+    # 标记故障区域
     if detection_info.get('marked_regions'):
         for i, region in enumerate(detection_info['marked_regions']):
             start, end = region['range']
@@ -1692,10 +1535,10 @@ def create_performance_radar(performance_metrics, save_path):
     
     print(f"   ✅ BiLSTM雷达图保存至: {save_path}")
 
-#----------------------------------------三窗口过程可视化------------------------------
-def create_three_window_visualization(test_results, save_path):
-    """生成BiLSTM三窗口检测过程可视化"""
-    print("   🔍 生成BiLSTM三窗口过程可视化...")
+#----------------------------------------3点检测过程可视化------------------------------
+def create_three_point_visualization(test_results, save_path):
+    """生成BiLSTM 3点检测过程可视化"""
+    print("   🔍 生成BiLSTM 3点检测过程可视化...")
     
     # 选择一个故障样本进行详细分析
     fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'
@@ -1705,7 +1548,7 @@ def create_three_window_visualization(test_results, save_path):
     # 使用GridSpec进行复杂布局
     gs = fig.add_gridspec(3, 4, height_ratios=[2, 1, 1], width_ratios=[1, 1, 1, 1])
     
-    # === 主图：三窗口检测过程时序图 ===
+    # === 主图：3点检测过程时序图 ===
     ax_main = fig.add_subplot(gs[0, :])
     
     # 选择BiLSTM结果进行可视化
@@ -1730,38 +1573,15 @@ def create_three_window_visualization(test_results, save_path):
     ax_main.plot(time_axis, fai_values, 'b-', linewidth=1.5, alpha=0.8, label='Comprehensive Diagnostic Index φ(FAI)')
     ax_main.axhline(y=threshold1, color='red', linestyle='--', alpha=0.7, label='Level 1 Threshold')
     
-    # 根据检测模式显示不同的检测过程
-    if CURRENT_DETECTION_MODE == "three_window":
-        # 三窗口检测模式
-        # 阶段1：检测窗口 - 标记候选点
-        if detection_info.get('candidate_points'):
-            candidate_points = detection_info['candidate_points']
-            ax_main.scatter(candidate_points, [fai_values[i] for i in candidate_points],
-                           color='orange', s=40, alpha=0.8, label=f'Detection: {len(candidate_points)} Candidate Points',
-                           marker='o', zorder=5)
-        
-        # 阶段2：验证窗口 - 标记验证通过的点
-        if detection_info.get('verified_points'):
-            verified_indices = [v['point'] for v in detection_info['verified_points']]
-            ax_main.scatter(verified_indices, [fai_values[i] for i in verified_indices],
-                           color='red', s=60, alpha=0.9, label=f'Verification: {len(verified_indices)} Confirmed Points',
-                           marker='^', zorder=6)
-        
-        # 显示验证窗口范围
-        for v_point in detection_info['verified_points']:
-            verify_start, verify_end = v_point['verify_range']
-            ax_main.axvspan(verify_start, verify_end, alpha=0.1, color='yellow')
-    else:
-        # 5点检测模式
-        # 标记触发点
-        if detection_info.get('trigger_points'):
-            trigger_points = detection_info['trigger_points']
-            ax_main.scatter(trigger_points, [fai_values[i] for i in trigger_points],
-                           color='orange', s=40, alpha=0.8, label=f'Trigger: {len(trigger_points)} Points',
-                           marker='o', zorder=5)
+    # 3点检测模式
+    # 标记触发点
+    if detection_info.get('trigger_points'):
+        trigger_points = detection_info['trigger_points']
+        ax_main.scatter(trigger_points, [fai_values[i] for i in trigger_points],
+                       color='orange', s=40, alpha=0.8, label=f'Trigger: {len(trigger_points)} Points',
+                       marker='o', zorder=5)
     
-    # 阶段3：标记窗口 - 故障区域
-    fault_regions_plotted = set()  # 避免重复绘制图例
+    # 标记故障区域
     for i, region in enumerate(detection_info['marked_regions']):
         start, end = region['range']
         label = 'Marked: Fault Region' if i == 0 else ""
@@ -1770,12 +1590,8 @@ def create_three_window_visualization(test_results, save_path):
     ax_main.set_xlabel('Time Step')
     ax_main.set_ylabel('Comprehensive Diagnostic Index φ')
     
-    # 根据检测模式设置标题
-    if CURRENT_DETECTION_MODE == "three_window":
-        title = f'BiLSTM Three-Window Fault Detection Process - Sample {fault_sample_id}'
-    else:
-        title = f'BiLSTM Five-Point Fault Detection Process - Sample {fault_sample_id}'
-    
+    # 设置标题
+    title = f'BiLSTM Three-Point Fault Detection Process - Sample {fault_sample_id}'
     ax_main.set_title(title, fontsize=14, fontweight='bold')
     ax_main.legend(loc='upper left')
     ax_main.grid(True, alpha=0.3)
@@ -1804,72 +1620,37 @@ def create_three_window_visualization(test_results, save_path):
     # === 子图2：检测模式配置 ===
     ax2 = fig.add_subplot(gs[1, 1])
     
-    if CURRENT_DETECTION_MODE == "three_window":
-        # 三窗口检测模式
-        window_params = [
-            WINDOW_CONFIG['detection_window'],
-            WINDOW_CONFIG['verification_window'],
-            WINDOW_CONFIG['marking_window']
-        ]
-        window_labels = ['Detection Window\n(25)', 'Verification Window\n(15)', 'Marking Window\n(10)']
-        colors2 = ['lightblue', 'lightgreen', 'lightcoral']
-        
-        wedges, texts, autotexts = ax2.pie(window_params, labels=window_labels, colors=colors2,
-                                          autopct='%1.0f', startangle=90)
-        ax2.set_title('Window Size\n(Sample Points)')
-    else:
-        # 5点检测模式
-        mode_params = [5, 3, 1]  # 5点区域, 3点触发条件, 1个中心点
-        mode_labels = ['Marked Region\n(5 Points)', 'Trigger Condition\n(3 Points)', 'Center Point\n(1 Point)']
-        colors2 = ['lightblue', 'lightgreen', 'lightcoral']
-        
-        wedges, texts, autotexts = ax2.pie(mode_params, labels=mode_labels, colors=colors2,
-                                          autopct='%1.0f', startangle=90)
-        ax2.set_title('5-Point Detection\nParameter Config')
+    # 3点检测模式
+    mode_params = [3, 2, 1]  # 3点区域, 2个邻居, 1个中心点
+    mode_labels = ['Marked Region\n(3 Points)', 'Neighbor Check\n(2 Points)', 'Center Point\n(1 Point)']
+    colors2 = ['lightblue', 'lightgreen', 'lightcoral']
+    
+    wedges, texts, autotexts = ax2.pie(mode_params, labels=mode_labels, colors=colors2,
+                                      autopct='%1.0f', startangle=90)
+    ax2.set_title('3-Point Detection\nParameter Config')
     
     # === 子图3：检测详情 ===
     ax3 = fig.add_subplot(gs[1, 2])
     
-    if CURRENT_DETECTION_MODE == "three_window":
-        # 三窗口检测模式：显示验证比率
-        if detection_info.get('verified_points'):
-            continuous_ratios = [v['continuous_ratio'] for v in detection_info['verified_points']]
-            verify_points = [v['point'] for v in detection_info['verified_points']]
-            
-            bars3 = ax3.bar(range(len(continuous_ratios)), continuous_ratios, 
-                           color='green', alpha=0.7)
-            ax3.axhline(y=WINDOW_CONFIG['verification_threshold'], color='red', linestyle='--', 
-                       alpha=0.7, label=f'Threshold ({WINDOW_CONFIG["verification_threshold"]*100:.0f}%)')
-            ax3.set_title('Verification Ratio')
-            ax3.set_xlabel('Verification Point')
-            ax3.set_ylabel('Continuous Ratio')
-            ax3.set_xticks(range(len(continuous_ratios)))
-            ax3.set_xticklabels([f'P{i+1}' for i in range(len(continuous_ratios))])
-            ax3.legend()
-        else:
-            ax3.text(0.5, 0.5, 'No Verification Points', ha='center', va='center', 
-                    transform=ax3.transAxes, fontsize=12)
-            ax3.set_title('Verification Ratio')
+    # 3点检测模式：显示触发点的FAI值分布
+    if detection_info.get('trigger_points'):
+        trigger_points = detection_info['trigger_points']
+        trigger_fai_values = [fai_values[i] for i in trigger_points]
+        
+        bars3 = ax3.bar(range(len(trigger_fai_values)), trigger_fai_values, 
+                       color='orange', alpha=0.7)
+        ax3.axhline(y=threshold1, color='red', linestyle='--', 
+                   alpha=0.7, label='Level 1 Threshold')
+        ax3.set_title('Trigger Point FAI Values')
+        ax3.set_xlabel('Trigger Point')
+        ax3.set_ylabel('FAI Value')
+        ax3.set_xticks(range(len(trigger_fai_values)))
+        ax3.set_xticklabels([f'T{i+1}' for i in range(len(trigger_fai_values))])
+        ax3.legend()
     else:
-        # 5点检测模式：显示触发点的FAI值分布
-        if detection_info.get('trigger_points'):
-            trigger_points = detection_info['trigger_points']
-            trigger_fai_values = [fai_values[i] for i in trigger_points]
-            
-            bars3 = ax3.bar(range(len(trigger_fai_values)), trigger_fai_values, 
-                           color='orange', alpha=0.7)
-            ax3.axhline(y=threshold1, color='red', linestyle='--', 
-                       alpha=0.7, label='Level 1 Threshold')
-            ax3.set_title('Trigger Point FAI Values')
-            ax3.set_xlabel('Trigger Point')
-            ax3.set_ylabel('FAI Value')
-            ax3.set_xticks(range(len(trigger_fai_values)))
-            ax3.set_xticklabels([f'T{i+1}' for i in range(len(trigger_fai_values))])
-            ax3.legend()
-        else:
-            ax3.text(0.5, 0.5, 'No Trigger Points', ha='center', va='center', 
-                    transform=ax3.transAxes, fontsize=12)
-            ax3.set_title('Trigger Point FAI Values')
+        ax3.text(0.5, 0.5, 'No Trigger Points', ha='center', va='center', 
+                transform=ax3.transAxes, fontsize=12)
+        ax3.set_title('Trigger Point FAI Values')
     
     # === 子图4：BiLSTM性能 ===
     ax4 = fig.add_subplot(gs[1, 3])
@@ -1894,25 +1675,14 @@ def create_three_window_visualization(test_results, save_path):
                 f'{value:.3f}', ha='center', va='bottom')
     
     # === 底部：过程说明 ===
-    if CURRENT_DETECTION_MODE == "three_window":
-        process_text = """
-    BiLSTM Three-Window Detection Process:
-    
-    1. Detection Window (25 points): Scan candidate fault points, condition: φ(FAI) > threshold
-    2. Verification Window (15 points): Verify candidates, check continuity (≥60% above threshold)
-    3. Marking Window (±10 points): Mark confirmed fault regions
-    
-    Advantage: Maintain high sensitivity while reducing false alarms
-        """
-    else:
-        process_text = """
-    BiLSTM Five-Point Detection Process:
+    process_text = """
+    BiLSTM Three-Point Detection Process:
     
     1. Time Series Scan: Check φ(FAI) values point by point against threshold
     2. Trigger Condition: Triggered when current point and neighbors exceed threshold
-    3. Region Marking: Mark current point and ±2 neighboring points (5 total) as fault
+    3. Region Marking: Mark current point and ±1 neighboring points (3 total) as fault
     
-    Advantage: Simplified detection logic with improved computational efficiency
+    Advantage: Precise detection with minimal false positives and efficient computation
     """
     
     fig.text(0.02, 0.02, process_text, fontsize=10, 
@@ -1922,7 +1692,7 @@ def create_three_window_visualization(test_results, save_path):
     plt.savefig(save_path, dpi=PLOT_CONFIG["dpi"], bbox_inches=PLOT_CONFIG["bbox_inches"], facecolor='white')
     plt.close()
     
-    print(f"   ✅ BiLSTM三窗口过程图保存至: {save_path}")
+    print(f"   ✅ BiLSTM 3点检测过程图保存至: {save_path}")
 
 #----------------------------------------结果保存函数------------------------------
 def save_test_results(test_results, performance_metrics):
@@ -2031,8 +1801,8 @@ create_fault_detection_timeline(test_results, f"{result_dir}/visualizations/bils
 # 生成性能雷达图
 create_performance_radar(performance_metrics, f"{result_dir}/visualizations/bilstm_performance_radar.png")
 
-# 生成三窗口过程图
-create_three_window_visualization(test_results, f"{result_dir}/visualizations/bilstm_three_window_process.png")
+# 生成3点检测过程图
+create_three_point_visualization(test_results, f"{result_dir}/visualizations/bilstm_three_point_process.png")
 
 #----------------------------------------最终总结------------------------------
 print("\n" + "="*80)
@@ -2043,10 +1813,8 @@ print(f"\n📊 测试结果总结:")
 print(f"   • 测试样本: {len(ALL_TEST_SAMPLES)} 个 (正常: {len(TEST_SAMPLES['normal'])}, 故障: {len(TEST_SAMPLES['fault'])})")
 print(f"   • 模型类型: BiLSTM")
 print(f"   • 检测模式: {DETECTION_MODES[CURRENT_DETECTION_MODE]['name']}")
-if CURRENT_DETECTION_MODE == "three_window":
-    print(f"   • 三窗口参数: 检测({WINDOW_CONFIG['detection_window']}) → 验证({WINDOW_CONFIG['verification_window']}) → 标记({WINDOW_CONFIG['marking_window']})")
-else:
-    print(f"   • 5点检测模式: 当前点+前后相邻点高于阈值时，标记5点区域")
+print(f"   • 3点检测参数: {THREE_POINT_CONFIG}")
+print(f"   • 3点检测模式: 当前点+前后相邻点高于阈值时，标记3点区域")
 
 print(f"\n🔬 BiLSTM性能:")
 metrics = performance_metrics["BILSTM"]['classification_metrics']
@@ -2062,7 +1830,7 @@ print(f"   • 可视化图表: {result_dir}/visualizations")
 print(f"     - ROC分析图: bilstm_roc_analysis.png")
 print(f"     - 故障检测时序图: bilstm_fault_detection_timeline.png") 
 print(f"     - 性能雷达图: bilstm_performance_radar.png")
-print(f"     - 三窗口过程图: bilstm_three_window_process.png")
+print(f"     - 3点检测过程图: bilstm_three_point_process.png")
 print(f"   • 性能指标: bilstm_performance_metrics.json")
 print(f"   • Excel报告: bilstm_summary.xlsx")
 
