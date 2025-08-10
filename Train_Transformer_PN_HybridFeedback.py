@@ -21,6 +21,8 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import pickle
 import warnings
+import matplotlib
+matplotlib.use('Agg')  # 使用非GUI后端，避免在服务器环境中卡住
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import platform
@@ -1820,7 +1822,7 @@ def main():
     # 保存图像
     plot_save_path = os.path.join(config['save_base_path'], 'pn_training_results.png')
     plt.savefig(plot_save_path, dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()  # 关闭图像，释放内存
     print(f"   训练结果图已保存: {plot_save_path}")
     
     #=== 训练完成总结 ===
