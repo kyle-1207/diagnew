@@ -1937,9 +1937,29 @@ def main():
         'training_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
     
+    # 转换NumPy类型为Python原生类型，避免JSON序列化错误
+    def convert_numpy_types(obj):
+        """递归转换NumPy类型为Python原生类型"""
+        import numpy as np
+        if isinstance(obj, dict):
+            return {key: convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_numpy_types(item) for item in obj]
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return obj
+    
+    # 转换results_summary中的NumPy类型
+    results_summary_clean = convert_numpy_types(results_summary)
+    
     summary_save_path = os.path.join(config['save_base_path'], 'training_summary_pn.json')
     with open(summary_save_path, 'w', encoding='utf-8') as f:
-        json.dump(results_summary, f, ensure_ascii=False, indent=2)
+        json.dump(results_summary_clean, f, ensure_ascii=False, indent=2)
     
     print(f"   训练总结: {summary_save_path}")
     
