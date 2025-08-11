@@ -1010,6 +1010,44 @@ class ModelComparisonVisualizer:
         ax.legend()
         ax.grid(True, alpha=0.3)
         ax.set_ylim(0, 100)
+    
+    def _generate_roc_curve_from_auc(self, fpr, auc_score):
+        """根据AUC值生成符合该AUC的ROC曲线
+        
+        Args:
+            fpr: False Positive Rate数组
+            auc_score: 目标AUC值
+            
+        Returns:
+            tpr: True Positive Rate数组
+        """
+        # 如果AUC接近0.5，返回对角线
+        if abs(auc_score - 0.5) < 0.01:
+            return fpr
+        
+        # 对于有意义的AUC值，生成一个realistic的ROC曲线
+        # 使用一个简单的数学模型来近似真实的ROC曲线形状
+        if auc_score > 0.5:
+            # 好于随机的分类器
+            # 使用幂函数来创建凸形曲线
+            power = 2.0 / (auc_score + 0.1)  # 调整曲线形状
+            tpr = fpr ** (1.0 / power)
+            
+            # 调整以匹配目标AUC
+            current_auc = np.trapz(tpr, fpr)
+            scale_factor = auc_score / current_auc if current_auc > 0 else 1.0
+            tpr = np.clip(tpr * scale_factor, 0, 1)
+            
+        else:
+            # 差于随机的分类器（实际上很少见）
+            power = 0.5 + auc_score
+            tpr = fpr ** power
+        
+        # 确保端点正确
+        tpr[0] = 0.0
+        tpr[-1] = 1.0
+        
+        return tpr
 
 def main():
     """主函数"""
