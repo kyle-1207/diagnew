@@ -382,8 +382,8 @@ def load_test_samples():
             'fault': test_fault_samples
         }
     except Exception as e:
-        print(f"❌ 加载Labels.xls失败: {e}")
-        print("⚠️  使用默认测试样本")
+        print(f"❌ Failed to load Labels.xls: {e}")
+        print("⚠️  Using default test samples")
         return {
             'normal': [str(i) for i in range(10, 21)],  # 正常样本：10-20
             'fault': [str(i) for i in range(340, 351)]  # 故障样本：340-350
@@ -1807,7 +1807,15 @@ def create_fault_detection_timeline(test_results, save_path):
     print("   📊 生成Transformer故障检测时序图...")
     
     # 选择一个故障样本进行可视化
-    fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'  # 使用第一个故障样本
+    # Debug: check TEST_SAMPLES type and content
+    print(f"DEBUG: TEST_SAMPLES type: {type(TEST_SAMPLES)}")
+    print(f"DEBUG: TEST_SAMPLES content: {TEST_SAMPLES}")
+    
+    try:
+        fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'  # 使用第一个故障样本
+    except (TypeError, KeyError) as e:
+        print(f"ERROR accessing TEST_SAMPLES['fault'][0]: {e}")
+        fault_sample_id = '335'  # 使用默认故障样本
     
     fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True, constrained_layout=True)
     
@@ -1969,7 +1977,15 @@ def create_three_window_visualization(test_results, save_path):
     print("   🔍 生成Transformer三点检测过程可视化...")
     
     # 选择一个故障样本进行详细分析
-    fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'
+    # Debug: check TEST_SAMPLES type and content
+    print(f"DEBUG: TEST_SAMPLES type: {type(TEST_SAMPLES)}")
+    print(f"DEBUG: TEST_SAMPLES content: {TEST_SAMPLES}")
+    
+    try:
+        fault_sample_id = TEST_SAMPLES['fault'][0] if TEST_SAMPLES['fault'] else '335'
+    except (TypeError, KeyError) as e:
+        print(f"ERROR accessing TEST_SAMPLES['fault'][0]: {e}")
+        fault_sample_id = '335'  # 使用默认故障样本
     
     fig = plt.figure(figsize=(16, 10), constrained_layout=True)
     
