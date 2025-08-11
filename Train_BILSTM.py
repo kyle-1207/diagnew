@@ -580,7 +580,7 @@ if len(all_train_X) > 0:
     
     # 内存监控的BILSTM训练函数
     @memory_monitor
-    def bilstm_training_loop():
+    def bilstm_training_loop(train_loader):
         print(f"\n🏋️ 开始BILSTM训练 (A100优化版本)...")
         
         # 🚨 训练前CUDA状态检查
@@ -608,7 +608,7 @@ if len(all_train_X) > 0:
             
             # 🚨 DataLoader枚举保护
             try:
-                for step, (b_x, b_y) in enumerate(bilstm_train_loader):
+                for step, (b_x, b_y) in enumerate(train_loader):
                     try:
                         # 前向传播
                         output = bilstm_model(b_x)
@@ -645,7 +645,7 @@ if len(all_train_X) > 0:
                     print("   原因: CUDA初始化失败")
                     print("   🔄 尝试重新创建DataLoader...")
                     # 强制使用CPU模式重新创建DataLoader
-                    bilstm_train_loader = DataLoader(
+                    train_loader = DataLoader(
                         train_dataset, 
                         batch_size=safe_batch_size, 
                         shuffle=True,
@@ -653,8 +653,12 @@ if len(all_train_X) > 0:
                         pin_memory=False,
                         persistent_workers=False
                     )
+                    print("   ✅ DataLoader重新创建完成，继续训练")
+                    # 重新尝试这个epoch
+                    epoch -= 1  # 重新尝试当前epoch
                     continue
                 else:
+                    print(f"   ❌ 未知DataLoader错误: {e}")
                     raise e
             
             # 更新学习率
@@ -670,7 +674,7 @@ if len(all_train_X) > 0:
         return loss_train_100
     
     # 执行训练
-    loss_train_100 = bilstm_training_loop()
+    loss_train_100 = bilstm_training_loop(bilstm_train_loader)
     
     # 保存BILSTM模型和Loss记录（基于所有样本训练）
     bilstm_model_path = os.path.join(save_dir, 'bilstm_model_all_samples.pth')
