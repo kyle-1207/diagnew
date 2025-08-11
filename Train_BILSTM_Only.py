@@ -180,20 +180,21 @@ device, cuda_available = init_cuda_device()
 dataloader_workers, pin_memory_enabled, use_persistent = get_dataloader_config(device, cuda_available)
 
 # BiLSTM训练参数（与Transformer保持一致）
-BILSTM_LR = 5e-5  # 与Transformer保持一致的学习率
-BILSTM_EPOCH = 800  # 与Transformer保持一致的完整训练轮数
-BILSTM_BATCH_SIZE_TARGET = 512  # 与Transformer保持一致的批次大小
-WARMUP_EPOCHS = 50  # 与Transformer保持一致的预热轮数
+# 参照源代码Train_.py的训练参数设置
+BILSTM_LR = 1e-4     # 源代码中的学习率
+BILSTM_EPOCH = 100   # 源代码中的训练轮数
+BILSTM_BATCH_SIZE = 100  # 源代码中的批次大小
 
-# 数据处理参数
-TIME_STEP = 600  # 时间步长（与原始训练保持一致）
-INPUT_SIZE = 6   # 输入特征数量（X, Y, Z, 时间戳, SOC, 温度）
+# 数据处理参数（参照源代码Train_.py）
+TIME_STEP = 1    # 源代码中使用的时间步长
+INPUT_SIZE = 7   # 源代码中使用的输入特征数量
 
-print(f"🔧 BiLSTM训练参数:")
+print(f"🔧 BiLSTM训练参数（参照源代码Train_.py）:")
 print(f"   学习率: {BILSTM_LR}")
 print(f"   训练轮数: {BILSTM_EPOCH}")
-print(f"   目标批次大小: {BILSTM_BATCH_SIZE_TARGET}")
-print(f"   预热轮数: {WARMUP_EPOCHS}")
+print(f"   批次大小: {BILSTM_BATCH_SIZE}")
+print(f"   时间步长: {TIME_STEP}")
+print(f"   输入特征数: {INPUT_SIZE}")
 
 # 加载训练样本
 train_samples = load_train_samples()
@@ -268,7 +269,7 @@ for idx, sample_id in enumerate(train_samples):
             with open(vin_1_file, 'rb') as file:
                 sample_data = pickle.load(file)
             
-            # 使用源代码的prepare_training_data函数
+            # 使用源代码中的原始数据预处理函数
             sample_train_X, sample_train_y = prepare_training_data(sample_data, INPUT_SIZE, TIME_STEP, device)
             
             all_train_X.append(sample_train_X)
@@ -350,19 +351,9 @@ if len(all_train_X) > 0:
     # 打印模型结构
     print(f"   架构: BiLSTM(input=7, hidden=128, layers=3) + FC(256→128→64→2)")
     
-    # 设置批次大小（简化版本）
-    if cuda_available:
-        gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
-        if gpu_memory_gb >= 80:  # A100 80GB
-            safe_batch_size = 512
-        elif gpu_memory_gb >= 40:  # A100 40GB
-            safe_batch_size = 256
-        else:
-            safe_batch_size = 128
-    else:
-        safe_batch_size = 64  # CPU模式
-    
-    print(f"\n🎯 使用批次大小: {safe_batch_size}")
+    # 使用源代码中的批次大小设置
+    safe_batch_size = BILSTM_BATCH_SIZE
+    print(f"\n🎯 使用批次大小（参照源代码）: {safe_batch_size}")
     
     # 创建数据集和数据加载器
     train_dataset = MyDataset(train_X, train_y)
@@ -384,21 +375,17 @@ if len(all_train_X) > 0:
                                         eps=1e-8)
     bilstm_loss_func = nn.MSELoss()
     
-    # 学习率调度器（支持预热）
-    def get_lr_with_warmup(epoch):
-        if epoch < WARMUP_EPOCHS:
-            # 预热阶段：从0线性增加到目标学习率
-            return BILSTM_LR * (epoch + 1) / WARMUP_EPOCHS
-        else:
-            # 余弦退火阶段
-            cos_epoch = epoch - WARMUP_EPOCHS
-            cos_max = BILSTM_EPOCH - WARMUP_EPOCHS
-            return BILSTM_LR * 0.5 * (1 + np.cos(np.pi * cos_epoch / cos_max))
+    # 简化学习率调度器（参照源代码Train_.py）
+    def get_lr_with_decay(epoch):
+        # 使用源代码中的简单学习率衰减
+        lr_decay_freq = 25  # 源代码中的衰减频率
+        decay_factor = 0.9
+        return BILSTM_LR * (decay_factor ** (epoch // lr_decay_freq))
     
-    # 手动学习率调度（更精确控制）
+    # 手动学习率调度（参照源代码）
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         bilstm_optimizer, 
-        lr_lambda=lambda epoch: get_lr_with_warmup(epoch) / BILSTM_LR
+        lr_lambda=lambda epoch: get_lr_with_decay(epoch) / BILSTM_LR
     )
     
     print(f"\n🚀 A100大规模BILSTM训练配置:")
