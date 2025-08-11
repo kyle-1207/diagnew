@@ -405,11 +405,11 @@ def memory_monitor(func):
 
 # A100优化参数（大规模BILSTM适配版 - 稳定训练）
 BILSTM_LR = 5e-5  # 大幅降低学习率，确保训练稳定性
-BILSTM_EPOCH = 800  # 增加训练轮数（大模型+低学习率需要更多训练）
+BILSTM_EPOCH = 50  # 测试配置：快速验证训练流程（原值：800）
 BILSTM_BATCH_SIZE_TARGET = 512  # 降低批次大小，提高训练稳定性
 
 # 大模型训练的额外参数（保守策略）
-WARMUP_EPOCHS = 50  # 增加预热轮数，让大模型缓慢适应
+WARMUP_EPOCHS = 5  # 测试配置：快速预热（原值：50）
 GRADIENT_CLIP = 0.5  # 更严格的梯度裁剪，防止梯度爆炸
 WEIGHT_DECAY = 1e-5  # 降低权重衰减，避免过度正则化
 
