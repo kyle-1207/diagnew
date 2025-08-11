@@ -36,10 +36,10 @@ import os
 # 使用指定的GPU设备（A100环境）
 os.environ['CUDA_VISIBLE_DEVICES'] = '2'  # 只使用GPU2
 
-# 启用CUDA调试功能（帮助诊断CUDA初始化错误）
-os.environ['TORCH_USE_CUDA_DSA'] = '1'  # 启用设备端断言
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # 启用同步CUDA操作，便于调试
-print("🔧 已启用CUDA调试模式")
+# CUDA调试功能（在A100环境中可能导致初始化问题，暂时禁用）
+# os.environ['TORCH_USE_CUDA_DSA'] = '1'  # 可能导致A100初始化错误
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # 仅在需要详细调试时启用
+print("🔧 CUDA调试模式已禁用（避免A100初始化冲突）")
 
 # device将在init_cuda_device()函数中初始化
 
@@ -177,8 +177,38 @@ def init_cuda_device():
         print("🔄 回退到CPU模式")
         return torch.device('cpu'), False
 
+def get_dataloader_config(device, cuda_available):
+    """
+    根据设备类型获取安全的DataLoader配置
+    """
+    if device.type == 'cuda' and cuda_available:
+        # CUDA环境配置 - 减少worker避免初始化冲突
+        dataloader_workers = 2
+        pin_memory_enabled = True
+        use_persistent = False
+        print("📊 使用CUDA兼容的DataLoader配置")
+    else:
+        # CPU环境配置
+        dataloader_workers = 0
+        pin_memory_enabled = False
+        use_persistent = False
+        print("📊 使用CPU兼容的DataLoader配置")
+    
+    return dataloader_workers, pin_memory_enabled, use_persistent
+
 # 初始化CUDA设备
 device, cuda_available = init_cuda_device()
+
+# 获取安全的DataLoader配置
+dataloader_workers, pin_memory_enabled, use_persistent = get_dataloader_config(device, cuda_available)
+
+# 显示修复状态
+print("🔧 CUDA错误修复状态:")
+print(f"   - CUDA调试模式: 已禁用（避免A100冲突）")
+print(f"   - DataLoader workers: {dataloader_workers}")
+print(f"   - Pin memory: {pin_memory_enabled}")
+print(f"   - Persistent workers: {use_persistent}")
+print("   - 批次大小: 已优化为安全级别")
 
 # A100优化的MC-AE训练参数（安全版本）
 EPOCH = 500  # 增加训练轮数，充分利用A100性能
@@ -497,16 +527,17 @@ if len(all_train_X) > 0:
     print(f"   原目标: {BILSTM_BATCH_SIZE_TARGET}")
     print(f"   实际使用: {safe_batch_size}")
     
-    # 创建数据集和数据加载器（使用优化参数）
+    # 创建数据集和数据加载器（使用全局安全配置）
     train_dataset = MyDataset(train_X, train_y)
+    
     bilstm_train_loader = DataLoader(
         train_dataset, 
         batch_size=safe_batch_size, 
         shuffle=True,
-        num_workers=8,  # 多进程加载
-        pin_memory=True,  # 固定内存
-        persistent_workers=True,  # 持久化工作进程
-        prefetch_factor=2  # 预取因子
+        num_workers=dataloader_workers,
+        pin_memory=pin_memory_enabled,
+        persistent_workers=use_persistent,
+        prefetch_factor=2 if dataloader_workers > 0 else None
     )
     
     # 优化器配置（大模型适配版）
@@ -1363,10 +1394,10 @@ print(f"🎯 MC-AE1 安全批次大小: {safe_mcae1_batch}")
 del temp_net
 torch.cuda.empty_cache()
 
-# 中文注释：用DataLoader批量加载多通道特征数据（使用安全批次大小）
+# 中文注释：用DataLoader批量加载多通道特征数据（安全配置）
 train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), 
                            batch_size=safe_mcae1_batch, shuffle=False, 
-                           num_workers=8, pin_memory=True)  # A100优化配置
+                           num_workers=dataloader_workers, pin_memory=pin_memory_enabled)
 
 # 中文注释：初始化MC-AE模型（使用float32）
 try:
@@ -1579,10 +1610,10 @@ sample_q2 = q_recovered2[:test_sample_size2]
 safe_mcae2_batch = safe_mcae_batch_calculator(netx, sample_x2, sample_y2, sample_z2, sample_q2, BATCHSIZE, safety_margin=0.25)
 print(f"🎯 MC-AE2 安全批次大小: {safe_mcae2_batch}")
 
-# 中文注释：第二组特征的MC-AE训练（使用安全批次大小）
+# 中文注释：第二组特征的MC-AE训练（安全配置）
 train_loader_soc = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
                              batch_size=safe_mcae2_batch, shuffle=False,
-                             num_workers=8, pin_memory=True)  # A100优化配置
+                             num_workers=dataloader_workers, pin_memory=pin_memory_enabled)
 optimizer = torch.optim.Adam(netx.parameters(), lr=INIT_LR)
 loss_f = nn.MSELoss()
 
