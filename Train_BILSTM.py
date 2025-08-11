@@ -179,20 +179,18 @@ def init_cuda_device():
 
 def get_dataloader_config(device, cuda_available):
     """
-    根据设备类型获取安全的DataLoader配置
+    获取安全的DataLoader配置 - 完全禁用多进程避免CUDA初始化问题
     """
-    if device.type == 'cuda' and cuda_available:
-        # CUDA环境配置 - 减少worker避免初始化冲突
-        dataloader_workers = 2
-        pin_memory_enabled = True
-        use_persistent = False
-        print("📊 使用CUDA兼容的DataLoader配置")
-    else:
-        # CPU环境配置
-        dataloader_workers = 0
-        pin_memory_enabled = False
-        use_persistent = False
-        print("📊 使用CPU兼容的DataLoader配置")
+    # 🚨 紧急修复：完全禁用多进程DataLoader
+    # 这是最安全的配置，避免所有CUDA worker进程问题
+    dataloader_workers = 0  # 强制使用主进程，无多进程
+    pin_memory_enabled = False  # 禁用pin_memory避免CUDA内存问题
+    use_persistent = False  # 禁用持久worker
+    
+    print("🚨 紧急修复模式：完全禁用DataLoader多进程")
+    print("   - Workers: 0 (主进程加载)")
+    print("   - Pin Memory: False (避免CUDA内存冲突)")
+    print("   - 性能影响: 轻微，但确保稳定性")
     
     return dataloader_workers, pin_memory_enabled, use_persistent
 
@@ -584,6 +582,18 @@ if len(all_train_X) > 0:
     @memory_monitor
     def bilstm_training_loop():
         print(f"\n🏋️ 开始BILSTM训练 (A100优化版本)...")
+        
+        # 🚨 训练前CUDA状态检查
+        if device.type == 'cuda':
+            try:
+                torch.cuda.synchronize()  # 确保CUDA操作完成
+                print(f"✅ CUDA设备状态正常: {torch.cuda.get_device_name()}")
+                gpu_alloc, _, gpu_total = get_gpu_memory_info()
+                print(f"🔋 当前GPU显存: {gpu_alloc/gpu_total*100:.1f}%")
+            except Exception as e:
+                print(f"⚠️ CUDA状态检查警告: {e}")
+                print("🔄 继续使用当前配置...")
+        
         loss_train_100 = []
         bilstm_model.train()
         
@@ -596,37 +606,56 @@ if len(all_train_X) > 0:
                 gpu_alloc, _, gpu_total = get_gpu_memory_info()
                 print(f"   Epoch {epoch}: GPU显存使用 {gpu_alloc/gpu_total*100:.1f}%")
             
-            for step, (b_x, b_y) in enumerate(bilstm_train_loader):
-                try:
-                    # 前向传播
-                    output = bilstm_model(b_x)
-                    loss = bilstm_loss_func(b_y, output)
-                    
-                    # 反向传播
-                    bilstm_optimizer.zero_grad()
-                    loss.backward()
-                    
-                    # 梯度裁剪（防止梯度爆炸）
-                    torch.nn.utils.clip_grad_norm_(bilstm_model.parameters(), max_norm=GRADIENT_CLIP)
-                    
-                    bilstm_optimizer.step()
-                    
-                    # 记录损失
-                    if step % 20 == 0:  # 更频繁的记录
-                        loss_train_100.append(loss.cpu().detach().numpy())
-                        epoch_losses.append(loss.item())
-                    
-                    # 定期清理缓存
-                    if step % 100 == 0:
-                        torch.cuda.empty_cache()
+            # 🚨 DataLoader枚举保护
+            try:
+                for step, (b_x, b_y) in enumerate(bilstm_train_loader):
+                    try:
+                        # 前向传播
+                        output = bilstm_model(b_x)
+                        loss = bilstm_loss_func(b_y, output)
                         
-                except RuntimeError as e:
-                    if "out of memory" in str(e).lower():
-                        print(f"   ⚠️  Epoch {epoch}, Step {step}: 显存不足，清理缓存后继续")
-                        torch.cuda.empty_cache()
-                        continue
-                    else:
-                        raise e
+                        # 反向传播
+                        bilstm_optimizer.zero_grad()
+                        loss.backward()
+                        
+                        # 梯度裁剪（防止梯度爆炸）
+                        torch.nn.utils.clip_grad_norm_(bilstm_model.parameters(), max_norm=GRADIENT_CLIP)
+                        
+                        bilstm_optimizer.step()
+                        
+                        # 记录损失
+                        if step % 20 == 0:  # 更频繁的记录
+                            loss_train_100.append(loss.cpu().detach().numpy())
+                            epoch_losses.append(loss.item())
+                        
+                        # 定期清理缓存
+                        if step % 100 == 0:
+                            torch.cuda.empty_cache()
+                            
+                    except RuntimeError as e:
+                        if "out of memory" in str(e).lower():
+                            print(f"   ⚠️  Epoch {epoch}, Step {step}: 显存不足，清理缓存后继续")
+                            torch.cuda.empty_cache()
+                            continue
+                        else:
+                            raise e
+            except RuntimeError as e:
+                print(f"🚨 DataLoader错误 (Epoch {epoch}): {e}")
+                if "initialization error" in str(e).lower():
+                    print("   原因: CUDA初始化失败")
+                    print("   🔄 尝试重新创建DataLoader...")
+                    # 强制使用CPU模式重新创建DataLoader
+                    bilstm_train_loader = DataLoader(
+                        train_dataset, 
+                        batch_size=safe_batch_size, 
+                        shuffle=True,
+                        num_workers=0,  # 强制单进程
+                        pin_memory=False,
+                        persistent_workers=False
+                    )
+                    continue
+                else:
+                    raise e
             
             # 更新学习率
             scheduler.step()
@@ -1528,12 +1557,12 @@ for epoch in range(EPOCH):
             
         total_loss += loss_u.item()
         num_batches += 1
-            
+        
         optimizer.zero_grad()
         
         # 使用混合精度训练
         scaler.scale(loss_u).backward()
-            
+        
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
         has_grad_issue = False
@@ -1638,7 +1667,7 @@ for epoch in range(EPOCH):
         y = y.to(device)
         z = z.to(device)
         q = q.to(device)
-            
+        
         # 内存监控 - 定期检查内存使用情况
         if iteration % MEMORY_CHECK_INTERVAL == 0:
             memory_usage = check_gpu_memory()
@@ -1682,7 +1711,7 @@ for epoch in range(EPOCH):
         num_batches += 1
         optimizer.zero_grad()
         scaler2.scale(loss_x).backward()
-            
+        
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
         has_grad_issue = False
