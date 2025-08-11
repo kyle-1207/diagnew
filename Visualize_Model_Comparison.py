@@ -38,66 +38,84 @@ class ModelComparisonVisualizer:
     def __init__(self, result_base_dir='/mnt/bz25t/bzhy/datasave'):
         self.result_base_dir = result_base_dir
         self.model_data = {}
+        
+        # 默认模型路径配置（与实际文件结构对应）
+        self.model_paths = {
+            'bilstm': f"{result_base_dir}/BILSTM/models",  # Train_BILSTM.py 的结果
+            'transformer_positive': f"{result_base_dir}/transformer_positive",  # Train_Transformer_HybridFeedback.py 的结果
+            'transformer_pn': f"{result_base_dir}/transformer_PN"  # Train_Transformer_PN_HybridFeedback.py 的结果
+        }
+        
         self.colors = {
             'BiLSTM': '#1f77b4',           # 蓝色
-            'Transformer-BACK': '#ff7f0e',      # 橙色  
-            'HybridFeedback': '#2ca02c',   # 绿色
-            'PN_HybridFeedback': '#d62728', # 红色
-            'Transformer-FOR-BACK': '#9467bd'          # 紫色
+            'Transformer_Positive': '#ff7f0e',      # 橙色  
+            'Transformer_PN': '#2ca02c',   # 绿色
+            'HybridFeedback': '#d62728',    # 红色
+            'Combined': '#9467bd'          # 紫色
         }
         self.markers = {
             'BiLSTM': 'o',
-            'Transformer-BACK': 's', 
-            'HybridFeedback': '^',
-            'PN_HybridFeedback': 'D',
-            'Transformer-FOR-BACK': 'v'
+            'Transformer_Positive': 's', 
+            'Transformer_PN': '^',
+            'HybridFeedback': 'D',
+            'Combined': 'v'
         }
         
     def load_model_results(self):
         """加载所有模型的训练结果"""
-        print("📥 Loading model training results...")
+        print("📥 Loading model training results from updated paths...")
         
         # 加载BiLSTM结果
-        bilstm_dir = f"{self.result_base_dir}/BiLSTM/models"
-        if os.path.exists(f"{bilstm_dir}/bilstm_training_history.pkl"):
-            with open(f"{bilstm_dir}/bilstm_training_history.pkl", 'rb') as f:
+        bilstm_path = f"{self.model_paths['bilstm']}/bilstm_training_history.pkl"
+        if os.path.exists(bilstm_path):
+            with open(bilstm_path, 'rb') as f:
                 self.model_data['BiLSTM'] = pickle.load(f)
             print("✅ BiLSTM results loaded")
         else:
             print("⚠️  BiLSTM training history not found, generating sample data")
             self.model_data['BiLSTM'] = self._generate_bilstm_model_data()
         
-        # 加载Transformer-BACK结果  
-        transformer_dir = f"{self.result_base_dir}/Transformer/models"
-        transformer_files = [
-            f"{transformer_dir}/transformer_training_history.pkl",
-            f"{transformer_dir}/training_history.pkl",
-            f"{transformer_dir}/hybrid_training_history.pkl",
-            f"{self.result_base_dir}/hybrid_feedback_training_history.pkl",  # Train_Transformer_HybridFeedback.py的实际保存路径
-            f"/tmp/hybrid_feedback_training_history.pkl"  # 备选路径
+        # 加载Transformer Positive结果 (Train_Transformer_HybridFeedback.py)
+        transformer_positive_files = [
+            f"{self.model_paths['transformer_positive']}/hybrid_feedback_training_history.pkl",
+            f"{self.model_paths['transformer_positive']}/training_history.pkl",
+            f"{self.model_paths['transformer_positive']}/transformer_training_history.pkl"
         ]
         
-        for transformer_file in transformer_files:
+        for transformer_file in transformer_positive_files:
             if os.path.exists(transformer_file):
                 try:
                     with open(transformer_file, 'rb') as f:
-                        self.model_data['Transformer-BACK'] = pickle.load(f)
-                    print(f"✅ Transformer-BACK results loaded from {transformer_file}")
+                        self.model_data['Transformer_Positive'] = pickle.load(f)
+                    print(f"✅ Transformer Positive results loaded from {transformer_file}")
                     break
                 except Exception as e:
-                    print(f"⚠️  Failed to load Transformer-BACK from {transformer_file}: {e}")
+                    print(f"⚠️  Failed to load Transformer Positive from {transformer_file}: {e}")
         else:
-            print("⚠️  No Transformer-BACK training history found, will generate sample data")
-            self.model_data['Transformer-BACK'] = None  # 先设为None，稍后生成样本数据
+            print("⚠️  No Transformer Positive training history found, will generate sample data")
+            self.model_data['Transformer_Positive'] = None
+        
+        # 加载Transformer PN结果 (Train_Transformer_PN_HybridFeedback.py)
+        transformer_pn_files = [
+            f"{self.model_paths['transformer_pn']}/pn_training_history.pkl",
+            f"{self.model_paths['transformer_pn']}/training_history.pkl",
+            f"{self.model_paths['transformer_pn']}/hybrid_training_history.pkl"
+        ]
+        
+        for transformer_pn_file in transformer_pn_files:
+            if os.path.exists(transformer_pn_file):
+                try:
+                    with open(transformer_pn_file, 'rb') as f:
+                        self.model_data['Transformer_PN'] = pickle.load(f)
+                    print(f"✅ Transformer PN results loaded from {transformer_pn_file}")
+                    break
+                except Exception as e:
+                    print(f"⚠️  Failed to load Transformer PN from {transformer_pn_file}: {e}")
+        else:
+            print("⚠️  No Transformer PN training history found, will generate sample data")
+            self.model_data['Transformer_PN'] = None
             
-        # 加载混合反馈Transformer结果
-        hybrid_dir = f"{self.result_base_dir}/HybridFeedback/models"
-        if os.path.exists(f"{hybrid_dir}/hybrid_training_history.pkl"):
-            with open(f"{hybrid_dir}/hybrid_training_history.pkl", 'rb') as f:
-                self.model_data['HybridFeedback'] = pickle.load(f)
-            print("✅ HybridFeedback results loaded")
-            
-        # 加载正负样本对比结果
+        # 检查是否有遗留的混合反馈结果
         pn_dir = f"{self.result_base_dir}/PN_HybridFeedback/models"
         if os.path.exists(f"{pn_dir}/pn_training_history.pkl"):
             with open(f"{pn_dir}/pn_training_history.pkl", 'rb') as f:

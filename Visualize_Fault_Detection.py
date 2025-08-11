@@ -36,6 +36,14 @@ class FaultDetectionVisualizer:
     
     def __init__(self, result_base_dir='/mnt/bz25t/bzhy/datasave'):
         self.result_base_dir = result_base_dir
+        
+        # 默认模型路径配置（与实际文件结构对应）
+        self.model_paths = {
+            'bilstm': f"{result_base_dir}/BILSTM/models",  # Train_BILSTM.py 的结果
+            'transformer_positive': f"{result_base_dir}/transformer_positive",  # Train_Transformer_HybridFeedback.py 的结果
+            'transformer_pn': f"{result_base_dir}/transformer_PN"  # Train_Transformer_PN_HybridFeedback.py 的结果
+        }
+        
         self.fault_colors = {
             'Normal': '#2ecc71',      # 绿色 - 正常
             'ISC': '#e74c3c',         # 红色 - 内短路
@@ -45,9 +53,9 @@ class FaultDetectionVisualizer:
         }
         self.detection_strategies = {
             'BiLSTM': {'name': 'BiLSTM', 'color': '#1f77b4'},
-            'Transformer': {'name': 'Transformer', 'color': '#ff7f0e'},
-            'Combined': {'name': 'Combined Model', 'color': '#2ca02c'},
-            'HybridFeedback': {'name': 'Hybrid Feedback', 'color': '#d62728'}
+            'Transformer_Positive': {'name': 'Transformer Positive', 'color': '#ff7f0e'},
+            'Transformer_PN': {'name': 'Transformer PN', 'color': '#2ca02c'},
+            'Combined': {'name': 'Combined Model', 'color': '#d62728'}
         }
         
     def load_detection_results(self):
@@ -56,18 +64,45 @@ class FaultDetectionVisualizer:
         
         self.detection_data = {}
         
-        # 方法1: 尝试加载传统格式的检测结果
-        bilstm_dir = f"{self.result_base_dir}/BILSTM/detection_results"
-        if os.path.exists(f"{bilstm_dir}/detection_summary.pkl"):
-            with open(f"{bilstm_dir}/detection_summary.pkl", 'rb') as f:
-                self.detection_data['BiLSTM'] = pickle.load(f)
-            print("✅ BiLSTM detection results loaded (traditional format)")
+        # 方法1: 尝试加载基于新路径结构的检测结果
+        # BiLSTM检测结果
+        bilstm_detection_paths = [
+            f"{self.model_paths['bilstm']}/detection_summary.pkl",
+            f"{self.result_base_dir}/BILSTM/detection_results/detection_summary.pkl"
+        ]
         
-        transformer_dir = f"{self.result_base_dir}/Transformer/detection_results"
-        if os.path.exists(f"{transformer_dir}/detection_summary.pkl"):
-            with open(f"{transformer_dir}/detection_summary.pkl", 'rb') as f:
-                self.detection_data['Transformer'] = pickle.load(f)
-            print("✅ Transformer detection results loaded (traditional format)")
+        for bilstm_path in bilstm_detection_paths:
+            if os.path.exists(bilstm_path):
+                with open(bilstm_path, 'rb') as f:
+                    self.detection_data['BiLSTM'] = pickle.load(f)
+                print(f"✅ BiLSTM detection results loaded from {bilstm_path}")
+                break
+        
+        # Transformer Positive检测结果
+        transformer_positive_detection_paths = [
+            f"{self.model_paths['transformer_positive']}/detection_summary.pkl",
+            f"{self.result_base_dir}/transformer_positive/detection_results/detection_summary.pkl"
+        ]
+        
+        for transformer_path in transformer_positive_detection_paths:
+            if os.path.exists(transformer_path):
+                with open(transformer_path, 'rb') as f:
+                    self.detection_data['Transformer_Positive'] = pickle.load(f)
+                print(f"✅ Transformer Positive detection results loaded from {transformer_path}")
+                break
+        
+        # Transformer PN检测结果
+        transformer_pn_detection_paths = [
+            f"{self.model_paths['transformer_pn']}/detection_summary.pkl",
+            f"{self.result_base_dir}/transformer_PN/detection_results/detection_summary.pkl"
+        ]
+        
+        for transformer_pn_path in transformer_pn_detection_paths:
+            if os.path.exists(transformer_pn_path):
+                with open(transformer_pn_path, 'rb') as f:
+                    self.detection_data['Transformer_PN'] = pickle.load(f)
+                print(f"✅ Transformer PN detection results loaded from {transformer_pn_path}")
+                break
         
         # 方法2: 尝试加载最新的测试结果格式（参考BiLSTM成功做法）
         if not self.detection_data:
@@ -84,12 +119,18 @@ class FaultDetectionVisualizer:
         return len(self.detection_data) > 0
     
     def _load_recent_test_results(self):
-        """加载最新的测试结果（参考BiLSTM成功做法）"""
+        """加载最新的测试结果（基于新路径结构）"""
         import glob
         
         # 搜索BiLSTM测试结果
-        bilstm_pattern = f"{self.result_base_dir}/BILSTM/test_results/*/detailed_results/bilstm_detailed_results.pkl"
-        bilstm_files = glob.glob(bilstm_pattern)
+        bilstm_patterns = [
+            f"{self.model_paths['bilstm']}/test_results/*/detailed_results/bilstm_detailed_results.pkl",
+            f"{self.result_base_dir}/BILSTM/test_results/*/detailed_results/bilstm_detailed_results.pkl"
+        ]
+        
+        bilstm_files = []
+        for pattern in bilstm_patterns:
+            bilstm_files.extend(glob.glob(pattern))
         
         if bilstm_files:
             # 选择最新的文件

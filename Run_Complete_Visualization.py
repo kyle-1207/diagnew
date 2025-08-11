@@ -26,8 +26,20 @@ class CompleteVisualizationRunner:
         self.report_dir = f"{base_dir}/Complete_Analysis_Report"
         self.start_time = datetime.now()
         
+        # 根据实际文件结构定义模型结果路径
+        self.model_paths = {
+            'bilstm': f"{base_dir}/BILSTM/models",  # 对应 Train_BILSTM.py 的结果
+            'transformer_positive': f"{base_dir}/transformer_positive",  # 对应 Train_Transformer_HybridFeedback.py 的结果
+            'transformer_pn': f"{base_dir}/transformer_PN"  # 对应 Train_Transformer_PN_HybridFeedback.py 的结果
+        }
+        
         # 创建报告目录
         os.makedirs(self.report_dir, exist_ok=True)
+        
+        print(f"🔧 配置模型路径:")
+        for model_name, path in self.model_paths.items():
+            exists = "✅" if os.path.exists(path) else "❌"
+            print(f"   {model_name}: {path} {exists}")
         
     def run_complete_analysis(self):
         """运行完整的可视化分析"""
@@ -98,7 +110,9 @@ class CompleteVisualizationRunner:
             sys.path.append(self.script_dir)
             from Visualize_Model_Comparison import ModelComparisonVisualizer
             
+            # 传递路径配置给可视化器
             visualizer = ModelComparisonVisualizer(self.base_dir)
+            visualizer.model_paths = self.model_paths  # 传递实际路径配置
             
             # 加载模型结果
             if visualizer.load_model_results():
@@ -131,7 +145,9 @@ class CompleteVisualizationRunner:
         try:
             from Visualize_Fault_Detection import FaultDetectionVisualizer
             
+            # 传递路径配置给故障检测可视化器
             visualizer = FaultDetectionVisualizer(self.base_dir)
+            visualizer.model_paths = self.model_paths  # 传递实际路径配置
             
             # 加载检测结果
             if visualizer.load_detection_results():
