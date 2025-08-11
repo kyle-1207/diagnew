@@ -135,8 +135,12 @@ import matplotlib.font_manager as fm
 from matplotlib import rcParams
 import platform
 
+# 全局变量：标记是否支持中文显示
+CHINESE_FONT_AVAILABLE = False
+
 def setup_chinese_fonts_strict():
     """Linux服务器环境中文字体配置（增强版）"""
+    global CHINESE_FONT_AVAILABLE
     import subprocess
     import os
     
@@ -181,6 +185,7 @@ def setup_chinese_fonts_strict():
             font_path = fm.findfont(name, fallback_to_default=False)
             if font_path and 'DejaVu' not in font_path and os.path.exists(font_path):
                 chosen = name
+                CHINESE_FONT_AVAILABLE = True
                 print(f"🔍 找到字体: {name} -> {font_path}")
                 break
         except Exception:
@@ -193,9 +198,11 @@ def setup_chinese_fonts_strict():
         chinese_fonts = [f for f in all_fonts if any(keyword in f.lower() for keyword in ['cjk', 'han', 'hei', 'kai', 'ming', 'noto', 'wenquanyi'])]
         if chinese_fonts:
             chosen = chinese_fonts[0]
+            CHINESE_FONT_AVAILABLE = True
             print(f"🔍 通过扫描找到中文字体: {chosen}")
         else:
             chosen = 'DejaVu Sans'
+            CHINESE_FONT_AVAILABLE = False
             print("⚠️ 未找到中文字体，使用DejaVu Sans")
 
     # 4. 增强的全局渲染参数
@@ -229,17 +236,76 @@ def setup_chinese_fonts_strict():
     # 6. 测试中文显示
     try:
         plt.figure(figsize=(1, 1))
-        plt.text(0.5, 0.5, '测试中文', fontsize=10)
+        plt.text(0.5, 0.5, get_chart_label('测试中文'), fontsize=10)
         plt.close()
-        print("✅ 中文字体测试通过")
+        if CHINESE_FONT_AVAILABLE:
+            print("✅ 中文字体测试通过，将使用中文标签")
+        else:
+            print("⚠️ 中文字体测试未通过，将使用英文标签")
     except Exception as e:
         print(f"⚠️ 中文字体测试失败: {e}")
         # 降级到安全模式
         rcParams['font.sans-serif'] = ['DejaVu Sans']
+        CHINESE_FONT_AVAILABLE = False
         print("🔄 已切换到安全模式（英文标签）")
+    
+    return CHINESE_FONT_AVAILABLE
+
+def get_label_text(chinese_text, english_text):
+    """根据字体支持情况返回合适的标签文本"""
+    global CHINESE_FONT_AVAILABLE
+    return chinese_text if CHINESE_FONT_AVAILABLE else english_text
+
+# 常用图表标签字典（中英文对照）
+CHART_LABELS = {
+    'φ指标值': 'φ Index Value',
+    '触发点': 'Trigger Points', 
+    '验证': 'Verified',
+    '个确认点': ' Confirmed Points',
+    '确认点': 'Confirmed Points',
+    '故障区域': 'Fault Region',
+    '检测过程': 'Detection Process',
+    '时间步': 'Time Step',
+    '无数据': 'No Data',
+    '正常': 'Normal',
+    '故障': 'Fault',
+    '异常': 'Anomaly',
+    '检测': 'Detection',
+    '诊断': 'Diagnosis',
+    '指标': 'Index',
+    '阈值': 'Threshold',
+    '采样点': 'Sample Points',
+    '启动期': 'Startup Period',
+    '有效区域': 'Effective Region',
+    '降噪率': 'Noise Reduction Rate',
+    '误报': 'False Positive',
+    '漏报': 'False Negative',
+    '标记': 'Marked',
+    '综合诊断指标': 'Comprehensive Diagnostic Index',
+    '三点检测': 'Three-Point Detection',
+    '候选点': 'Candidate Points',
+    '统计信息': 'Statistics',
+    '等级分布': 'Level Distribution',
+    '触发等级': 'Trigger Level',
+    '触发次数': 'Trigger Count',
+    '分层': 'Hierarchy',
+    '工作点': 'Working Point',
+    '分类指标': 'Classification Metrics',
+    '样本级性能': 'Sample-Level Performance',
+    '标记的': 'Marked:',
+    '测试中文': 'Test Chinese'
+}
+
+def get_chart_label(chinese_key):
+    """获取图表标签（自动中英文切换）"""
+    global CHINESE_FONT_AVAILABLE
+    if CHINESE_FONT_AVAILABLE:
+        return chinese_key
+    else:
+        return CHART_LABELS.get(chinese_key, chinese_key)  # 如果没有对应的英文，返回原文
 
 # 执行字体配置（更稳健）
-setup_chinese_fonts_strict()
+CHINESE_FONT_AVAILABLE = setup_chinese_fonts_strict()
 
 #----------------------------------------数据预处理函数------------------------------
 def physics_based_data_processing_silent(data, feature_type='general'):
@@ -1654,9 +1720,9 @@ def create_roc_analysis(test_results, performance_metrics, save_path):
     if len(all_fai) == 0:
         print("   ⚠️ 警告: 没有可用的FAI数据，跳过ROC曲线生成")
         # 创建一个空的ROC图
-        ax1.text(0.5, 0.5, '无数据', ha='center', va='center', 
+        ax1.text(0.5, 0.5, get_chart_label('无数据'), ha='center', va='center', 
                 transform=ax1.transAxes, fontsize=12)
-        ax1.set_title('(a) Transformer ROC Curve\n(无数据)')
+        ax1.set_title(f'(a) Transformer ROC Curve\n({get_chart_label("无数据")})')
         ax1.set_xlabel('False Positive Rate')
         ax1.set_ylabel('True Positive Rate')
         ax1.grid(True, alpha=0.3)
@@ -1903,20 +1969,20 @@ def create_fault_detection_timeline(test_results, save_path):
     ax3 = axes[2]
     detection_info = sample_result['detection_info']
     
-    ax3.plot(time_axis, fai_values, 'b-', alpha=0.5, label='φ指标值')
+    ax3.plot(time_axis, fai_values, 'b-', alpha=0.5, label=get_chart_label('φ指标值'))
     
     # 🔧 修复：三点检测模式的可视化
     # 标记触发点（对应原来的候选点）
     if detection_info.get('trigger_points'):
         ax3.scatter(detection_info['trigger_points'], 
                    [fai_values[i] for i in detection_info['trigger_points']],
-                   color='orange', s=30, label='触发点', alpha=0.8)
+                   color='orange', s=30, label=get_chart_label('触发点'), alpha=0.8)
     
     # 标记故障区域
     marked_regions = detection_info.get('marked_regions', [])
     for i, region in enumerate(marked_regions):
         start, end = region['range']
-        label = 'Fault Region' if i == 0 else ""
+        label = get_chart_label('故障区域') if i == 0 else ""
         ax3.axvspan(start, end, alpha=0.2, color='red', label=label)
     
     ax3.set_ylabel('Three-Point Detection\nProcess')
@@ -2053,7 +2119,7 @@ def create_three_window_visualization(test_results, save_path):
     if detection_info['verified_points']:
         verified_indices = [v['point'] for v in detection_info['verified_points']]
         ax_main.scatter(verified_indices, [fai_values[i] for i in verified_indices],
-                       color='red', s=60, alpha=0.9, label=f'验证: {len(verified_indices)} 个确认点',
+                       color='red', s=60, alpha=0.9, label=f'{get_chart_label("验证")}: {len(verified_indices)}{get_chart_label("个确认点")}',
                        marker='^', zorder=6)
         
         # 显示验证窗口范围
@@ -2065,7 +2131,7 @@ def create_three_window_visualization(test_results, save_path):
     fault_regions_plotted = set()  # 避免重复绘制图例
     for i, region in enumerate(detection_info['marked_regions']):
         start, end = region['range']
-        label = 'Marked: Fault Region' if i == 0 else ""
+        label = f'{get_chart_label("标记的")} {get_chart_label("故障区域")}' if i == 0 else ""
         ax_main.axvspan(start, end, alpha=0.2, color='red', label=label)
     
     ax_main.set_xlabel('Time Step')
@@ -2308,6 +2374,304 @@ create_performance_radar(performance_metrics, f"{result_dir}/visualizations/tran
 # 生成三窗口过程图
 create_three_window_visualization(test_results, f"{result_dir}/visualizations/transformer_three_window_process.png")
 
+#----------------------------------------特定样本可视化------------------------------
+print("\n🎯 生成特定样本的详细可视化图表...")
+
+# 指定要生成详细图表的样本
+target_samples = {
+    'normal': [5, 6, 7],      # 正常样本
+    'fault': [340, 345, 346]  # 故障样本
+}
+
+def create_sample_specific_visualizations(test_results, target_samples, base_dir):
+    """为指定样本生成详细的可视化图表"""
+    
+    # 创建样本专用目录
+    sample_viz_dir = f"{base_dir}/sample_visualizations"
+    os.makedirs(sample_viz_dir, exist_ok=True)
+    
+    print(f"   📁 样本可视化目录: {sample_viz_dir}")
+    
+    # 找出所有需要处理的样本
+    all_target_samples = target_samples['normal'] + target_samples['fault']
+    
+    for sample_id in all_target_samples:
+        print(f"   🔍 处理样本 {sample_id}...")
+        
+        # 从测试结果中找到对应的样本
+        sample_result = None
+        for result in test_results["TRANSFORMER"]:
+            if result.get('sample_id') == sample_id:
+                sample_result = result
+                break
+        
+        if sample_result is None:
+            print(f"   ⚠️ 警告: 未找到样本 {sample_id} 的测试结果")
+            continue
+        
+        # 生成故障检测时序图（单样本版本）
+        try:
+            create_single_sample_timeline(sample_result, f"{sample_viz_dir}/transformer_fault_detection_timeline_sample_{sample_id}.png")
+            print(f"   ✅ 样本 {sample_id} 故障检测时序图已生成")
+        except Exception as e:
+            print(f"   ❌ 样本 {sample_id} 故障检测时序图生成失败: {e}")
+        
+        # 生成三窗口过程图（单样本版本）
+        try:
+            create_single_sample_three_window(sample_result, f"{sample_viz_dir}/transformer_three_window_process_sample_{sample_id}.png")
+            print(f"   ✅ 样本 {sample_id} 三窗口过程图已生成")
+        except Exception as e:
+            print(f"   ❌ 样本 {sample_id} 三窗口过程图生成失败: {e}")
+
+def create_single_sample_timeline(sample_result, save_path):
+    """为单个样本生成故障检测时序图"""
+    
+    sample_id = sample_result.get('sample_id', 'Unknown')
+    fai_values = np.array(sample_result.get('fai', []))
+    fault_labels = np.array(sample_result.get('fault_labels', []))
+    true_label = sample_result.get('label', 0)
+    thresholds = sample_result.get('thresholds', {})
+    
+    if len(fai_values) == 0:
+        print(f"   ⚠️ 样本 {sample_id} 无FAI数据")
+        return
+    
+    # 设置字体
+    setup_chinese_fonts_strict()
+    
+    # 创建图表
+    fig, axes = plt.subplots(3, 1, figsize=(15, 12), constrained_layout=True)
+    
+    time_steps = np.arange(len(fai_values))
+    
+    # === 子图1: FAI值时序图 ===
+    ax1 = axes[0]
+    ax1.plot(time_steps, fai_values, 'b-', linewidth=1, alpha=0.8, label=f'{get_chart_label("φ指标值")}')
+    
+    # 绘制阈值线
+    threshold1 = thresholds.get('threshold1', 0.0)
+    threshold2 = thresholds.get('threshold2', 0.0)
+    threshold3 = thresholds.get('threshold3', 0.0)
+    
+    ax1.axhline(y=threshold1, color='orange', linestyle='--', alpha=0.8, label=f'Level 1 Threshold')
+    if threshold2 > 0:
+        ax1.axhline(y=threshold2, color='red', linestyle='--', alpha=0.8, label=f'Level 2 Threshold')
+    if threshold3 > 0:
+        ax1.axhline(y=threshold3, color='darkred', linestyle='--', alpha=0.8, label=f'Level 3 Threshold')
+    
+    ax1.set_xlabel('Time Step')
+    ax1.set_ylabel('Comprehensive Diagnostic Index φ')
+    ax1.set_title(f'Transformer - Sample {sample_id} ({get_chart_label("故障区域") if true_label == 1 else "Normal Sample"})')
+    ax1.legend(loc='upper right')
+    ax1.grid(True, alpha=0.3)
+    
+    # === 子图2: 故障检测结果 ===
+    ax2 = axes[1]
+    ax2.fill_between(time_steps, 0, fault_labels, alpha=0.6, color='blue', 
+                     label=f'Transformer Fault Detection')
+    
+    ax2.set_xlabel('Time Step')
+    ax2.set_ylabel('Fault Detection Result')
+    ax2.set_title(f'Transformer Fault Detection Result')
+    ax2.set_ylim(-0.1, 1.1)
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # === 子图3: 综合分析 ===
+    ax3 = axes[2]
+    ax3.plot(time_steps, fai_values, 'b-', linewidth=1, alpha=0.7, label=f'{get_chart_label("φ指标值")}')
+    ax3.axhline(y=threshold1, color='orange', linestyle='--', alpha=0.8, label=f'Level 1 Threshold')
+    
+    # 标记故障区域
+    fault_regions = np.where(fault_labels == 1)[0]
+    if len(fault_regions) > 0:
+        # 找连续区域
+        regions = []
+        start = fault_regions[0]
+        for i in range(1, len(fault_regions)):
+            if fault_regions[i] - fault_regions[i-1] > 1:
+                regions.append((start, fault_regions[i-1]))
+                start = fault_regions[i]
+        regions.append((start, fault_regions[-1]))
+        
+        for i, (start, end) in enumerate(regions):
+            label = f'{get_chart_label("故障区域")}' if i == 0 else ""
+            ax3.axvspan(start, end, alpha=0.2, color='red', label=label)
+    
+    ax3.set_xlabel('Time Step')
+    ax3.set_ylabel('Comprehensive Diagnostic Index φ')
+    ax3.set_title(f'Transformer Fault Detection Process - Sample {sample_id}')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # 保存图表
+    try:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+    except Exception as e:
+        print(f"   ❌ 保存样本 {sample_id} 时序图失败: {e}")
+        plt.close()
+
+def create_single_sample_three_window(sample_result, save_path):
+    """为单个样本生成三窗口过程图"""
+    
+    sample_id = sample_result.get('sample_id', 'Unknown')
+    fai_values = np.array(sample_result.get('fai', []))
+    true_label = sample_result.get('label', 0)
+    thresholds = sample_result.get('thresholds', {})
+    detection_info = sample_result.get('detection_info', {})
+    
+    if len(fai_values) == 0:
+        print(f"   ⚠️ 样本 {sample_id} 无FAI数据")
+        return
+    
+    # 设置字体
+    setup_chinese_fonts_strict()
+    
+    # 创建主图和子图
+    fig = plt.figure(figsize=(16, 10))
+    gs = fig.add_gridspec(3, 4, height_ratios=[2, 1, 1], width_ratios=[1, 1, 1, 1], 
+                         hspace=0.3, wspace=0.3)
+    
+    # 主图：三窗口检测过程
+    ax_main = fig.add_subplot(gs[0, :])
+    
+    time_steps = np.arange(len(fai_values))
+    threshold1 = thresholds.get('threshold1', 0.0)
+    
+    # 绘制FAI值
+    ax_main.plot(time_steps, fai_values, 'b-', linewidth=1, alpha=0.8, 
+                label=f'Comprehensive Diagnostic Index φ(Δt)')
+    ax_main.axhline(y=threshold1, color='red', linestyle='--', alpha=0.8, 
+                   label=f'Level 1 Threshold')
+    
+    # 阶段1：触发点
+    trigger_points = detection_info.get('trigger_points', [])
+    if trigger_points:
+        trigger_indices = [p['index'] for p in trigger_points]
+        ax_main.scatter(trigger_indices, fai_values[trigger_indices], 
+                       color='red', s=30, marker='o', alpha=0.8, 
+                       label=f'{get_chart_label("触发点")}', zorder=5)
+    
+    # 阶段2：验证点
+    verified_points = detection_info.get('verified_points', [])
+    if verified_points:
+        verified_indices = [p['index'] for p in verified_points]
+        ax_main.scatter(verified_indices, fai_values[verified_indices], 
+                       color='orange', s=50, marker='^', alpha=0.8, 
+                       label=f'{get_chart_label("验证")}: {len(verified_points)} {get_chart_label("确认点")}', zorder=5)
+    
+    # 阶段3：标记窗口 - 故障区域
+    fault_regions_plotted = set()  # 避免重复绘制图例
+    marked_regions = detection_info.get('marked_regions', [])
+    for i, region in enumerate(marked_regions):
+        start, end = region['range']
+        label = f'{get_chart_label("标记的")} {get_chart_label("故障区域")}' if i == 0 else ""
+        ax_main.axvspan(start, end, alpha=0.2, color='red', label=label)
+    
+    ax_main.set_xlabel('Time Step')
+    ax_main.set_ylabel('Comprehensive Diagnostic Index φ')
+    ax_main.set_title(f'Transformer Three-Point Fault Detection Process - Sample {sample_id}', 
+                     fontsize=14, fontweight='bold')
+    ax_main.legend(loc='upper left', fontsize=9)
+    ax_main.grid(True, alpha=0.3)
+    
+    # 子图1：检测统计
+    ax1 = fig.add_subplot(gs[1, 0])
+    detection_stats = detection_info.get('detection_stats', {})
+    candidates = detection_stats.get('total_trigger_points', 0)
+    fault_points = detection_stats.get('total_marked_regions', 0)
+    
+    bars = ax1.bar(['Candidate Points', 'Fault Points'], [candidates, fault_points], 
+                  color=['orange', 'red'], alpha=0.7)
+    ax1.set_ylabel('Count')
+    ax1.set_title('Detection Statistics')
+    # 添加数值标签
+    for bar, value in zip(bars, [candidates, fault_points]):
+        if value > 0:
+            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1, 
+                    str(value), ha='center', va='bottom')
+    ax1.grid(True, alpha=0.3)
+    
+    # 子图2：层级阈值分布
+    ax2 = fig.add_subplot(gs[1, 1])
+    thresholds_data = [threshold1, thresholds.get('threshold2', 0), thresholds.get('threshold3', 0)]
+    threshold_names = ['Level 1', 'Level 2', 'Level 3']
+    colors = ['lightblue', 'orange', 'red']
+    
+    bars = ax2.bar(threshold_names, thresholds_data, color=colors, alpha=0.7)
+    ax2.set_ylabel('Threshold Value')
+    ax2.set_title('Detection Thresholds\n(Three-Level Hierarchy)')
+    ax2.tick_params(axis='x', rotation=45)
+    # 添加数值标签
+    for bar, value in zip(bars, thresholds_data):
+        if value > 0:
+            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, 
+                    f'{value:.2f}', ha='center', va='bottom', fontsize=8)
+    ax2.grid(True, alpha=0.3)
+    
+    # 子图3：触发点分布
+    ax3 = fig.add_subplot(gs[1, 2])
+    if trigger_points:
+        level_counts = {'Level 1': 0, 'Level 2': 0, 'Level 3': 0}
+        for point in trigger_points:
+            level = point.get('level', 1)
+            level_counts[f'Level {level}'] += 1
+        
+        levels = list(level_counts.keys())
+        counts = list(level_counts.values())
+        colors = ['lightblue', 'orange', 'red']
+        
+        bars = ax3.bar(levels, counts, color=colors, alpha=0.7)
+        # 添加数值标签
+        for bar, value in zip(bars, counts):
+            if value > 0:
+                ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1, 
+                        str(value), ha='center', va='bottom')
+    else:
+        ax3.text(0.5, 0.5, get_chart_label('无数据'), ha='center', va='center', 
+                transform=ax3.transAxes)
+    
+    ax3.set_ylabel('Trigger Count')
+    ax3.set_title('Trigger Level Distribution')
+    ax3.tick_params(axis='x', rotation=45)
+    ax3.grid(True, alpha=0.3)
+    
+    # 子图4：故障检测率
+    ax4 = fig.add_subplot(gs[1, 3])
+    fault_ratio = detection_stats.get('fault_ratio', 0.0)
+    ax4.bar(['Transformer'], [fault_ratio], color='blue', alpha=0.7, width=0.5)
+    ax4.set_ylabel('Fault Ratio')
+    ax4.set_title(f'{fault_ratio:.3f}\nTransformer\n(Fault Detection Ratio)')
+    ax4.set_ylim(0, 1)
+    ax4.grid(True, alpha=0.3)
+    
+    # 底部文字说明
+    explanation_ax = fig.add_subplot(gs[2, :])
+    explanation_ax.axis('off')
+    
+    explanation_text = f"""Transformer Three-Point Detection Process:
+1. Level 3 (5σ): Center point exceeds 5σ threshold, requirement, directly mark 1 points
+2. Level 2 (4.5σ): Center point succeeds 4.5σ + at least 1 neighbor succeeding 5σ in 3 points
+3. Level 1 (3σ): Center point succeeds 3σ + at least 1 neighbor succeeding 4σ or 2 neighbors out 3 points
+
+Advantages: Hierarchical detection + neighborhood verification, effective noise reduction while maintaining sensitivity"""
+    
+    explanation_ax.text(0.05, 0.8, explanation_text, transform=explanation_ax.transAxes, 
+                       fontsize=10, verticalalignment='top', 
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
+    
+    # 保存图表
+    try:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+    except Exception as e:
+        print(f"   ❌ 保存样本 {sample_id} 三窗口过程图失败: {e}")
+        plt.close()
+
+# 执行特定样本可视化
+create_sample_specific_visualizations(test_results, target_samples, result_dir)
+
 #----------------------------------------最终总结------------------------------
 print("\n" + "="*80)
 print("🎉 Transformer模型测试完成！")
@@ -2338,6 +2702,9 @@ print(f"     - ROC分析图: transformer_roc_analysis.png")
 print(f"     - 故障检测时序图: transformer_fault_detection_timeline.png") 
 print(f"     - 性能雷达图: transformer_performance_radar.png")
 print(f"     - 三窗口过程图: transformer_three_window_process.png")
+print(f"   • 特定样本可视化: {result_dir}/sample_visualizations")
+print(f"     - 正常样本 (5,6,7) 和故障样本 (340,345,346) 的详细图表")
+print(f"     - 文件格式: transformer_*_sample_[样本编号].png")
 print(f"   • 性能指标: transformer_performance_metrics.json")
 print(f"   • Excel报告: transformer_summary.xlsx")
 
