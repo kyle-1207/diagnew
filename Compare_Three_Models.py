@@ -15,31 +15,27 @@ import seaborn as sns
 from matplotlib import rcParams
 import matplotlib.font_manager as fm
 
+# 设置matplotlib后端和字体
+import matplotlib
+matplotlib.use('Agg')  # 设置非交互式后端
+
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+warnings.filterwarnings('ignore', message='Glyph.*missing from current font')
+
 # 设置中文字体
 def setup_chinese_fonts():
     """配置中文字体显示"""
-    # 尝试系统字体
-    font_candidates = [
-        'SimHei', 'Microsoft YaHei', 'DejaVu Sans', 'Arial Unicode MS',
-        'WenQuanYi Micro Hei', 'Source Han Sans CN'
-    ]
-    
-    chosen = None
-    for font in font_candidates:
-        try:
-            if any(font.lower() in f.name.lower() for f in fm.fontManager.ttflist):
-                chosen = font
-                break
-        except:
-            continue
-    
-    if chosen:
-        rcParams['font.sans-serif'] = [chosen]
+    try:
+        # 使用DejaVu Sans作为默认字体（Linux系统通常都有）
+        rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'sans-serif']
         rcParams['axes.unicode_minus'] = False
-        print(f"✅ 使用字体: {chosen}")
-    else:
-        print("⚠️ 未找到中文字体，使用默认字体")
-        rcParams['font.sans-serif'] = ['DejaVu Sans']
+        rcParams['font.family'] = 'sans-serif'
+        print("✅ 字体配置完成")
+    except Exception as e:
+        print(f"⚠️ 字体配置警告: {e}")
+        # 使用最基本的配置
+        rcParams['font.family'] = 'sans-serif'
 
 # 执行字体配置
 setup_chinese_fonts()
@@ -224,6 +220,12 @@ class ThreeModelComparator:
         """生成三模型ROC曲线对比图"""
         print("\n🎯 生成ROC曲线对比图...")
         
+        # 确保保存目录存在
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+            print(f"📁 创建目录: {save_dir}")
+        
         plt.figure(figsize=(10, 8))
         
         for model_name, data in self.model_data.items():
@@ -283,6 +285,12 @@ class ThreeModelComparator:
     def generate_performance_radar(self, save_path="Three_model/comparison_performance_radar.png"):
         """生成三模型性能雷达图对比"""
         print("\n🎯 生成性能雷达图对比...")
+        
+        # 确保保存目录存在
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+            print(f"📁 创建目录: {save_dir}")
         
         # 定义雷达图指标
         radar_metrics = ['Accuracy', 'Precision', 'Recall', 'F1 Score', 
@@ -363,6 +371,12 @@ class ThreeModelComparator:
         """生成性能指标柱状图对比"""
         print("\n🎯 生成性能指标柱状图对比...")
         
+        # 确保保存目录存在
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+            print(f"📁 创建目录: {save_dir}")
+        
         # 收集关键指标
         metrics_data = []
         for model_name, data in self.model_data.items():
@@ -423,6 +437,12 @@ class ThreeModelComparator:
     def generate_summary_report(self, save_path="Three_model/comparison_summary.txt"):
         """生成对比总结报告"""
         print("\n📊 生成对比总结报告...")
+        
+        # 确保保存目录存在
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+            print(f"📁 创建目录: {save_dir}")
         
         report_lines = []
         report_lines.append("="*80)
