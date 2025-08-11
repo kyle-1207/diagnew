@@ -48,15 +48,15 @@ class ModelComparisonVisualizer:
         
         self.colors = {
             'BiLSTM': '#1f77b4',           # 蓝色
-            'Transformer_Positive': '#ff7f0e',      # 橙色  
-            'Transformer_PN': '#2ca02c',   # 绿色
+            'Transformer-BACK': '#ff7f0e',      # 橙色  
+            'Transformer-FOR-BACK': '#2ca02c',   # 绿色
             'HybridFeedback': '#d62728',    # 红色
             'Combined': '#9467bd'          # 紫色
         }
         self.markers = {
             'BiLSTM': 'o',
-            'Transformer_Positive': 's', 
-            'Transformer_PN': '^',
+            'Transformer-BACK': 's', 
+            'Transformer-FOR-BACK': '^',
             'HybridFeedback': 'D',
             'Combined': 'v'
         }
@@ -86,14 +86,14 @@ class ModelComparisonVisualizer:
             if os.path.exists(transformer_file):
                 try:
                     with open(transformer_file, 'rb') as f:
-                        self.model_data['Transformer_Positive'] = pickle.load(f)
-                    print(f"✅ Transformer Positive results loaded from {transformer_file}")
+                        self.model_data['Transformer-BACK'] = pickle.load(f)
+                    print(f"✅ Transformer-BACK results loaded from {transformer_file}")
                     break
                 except Exception as e:
-                    print(f"⚠️  Failed to load Transformer Positive from {transformer_file}: {e}")
+                    print(f"⚠️  Failed to load Transformer-BACK from {transformer_file}: {e}")
         else:
-            print("⚠️  No Transformer Positive training history found, will generate sample data")
-            self.model_data['Transformer_Positive'] = None
+            print("⚠️  No Transformer-BACK training history found, will generate sample data")
+            self.model_data['Transformer-BACK'] = None
         
         # 加载Transformer PN结果 (Train_Transformer_PN_HybridFeedback.py)
         transformer_pn_files = [
@@ -106,14 +106,14 @@ class ModelComparisonVisualizer:
             if os.path.exists(transformer_pn_file):
                 try:
                     with open(transformer_pn_file, 'rb') as f:
-                        self.model_data['Transformer_PN'] = pickle.load(f)
-                    print(f"✅ Transformer PN results loaded from {transformer_pn_file}")
+                        self.model_data['Transformer-FOR-BACK'] = pickle.load(f)
+                    print(f"✅ Transformer-FOR-BACK results loaded from {transformer_pn_file}")
                     break
                 except Exception as e:
-                    print(f"⚠️  Failed to load Transformer PN from {transformer_pn_file}: {e}")
+                    print(f"⚠️  Failed to load Transformer-FOR-BACK from {transformer_pn_file}: {e}")
         else:
-            print("⚠️  No Transformer PN training history found, will generate sample data")
-            self.model_data['Transformer_PN'] = None
+            print("⚠️  No Transformer-FOR-BACK training history found, will generate sample data")
+            self.model_data['Transformer-FOR-BACK'] = None
             
         # 检查是否有遗留的混合反馈结果
         pn_dir = f"{self.result_base_dir}/PN_HybridFeedback/models"

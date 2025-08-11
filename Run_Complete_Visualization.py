@@ -101,22 +101,6 @@ class CompleteVisualizationRunner:
             
         filename = self.model_file_patterns[model_name][file_type]
         return os.path.join(self.model_paths[model_name], filename)
-    
-    def get_mapped_model_paths(self):
-        """获取映射后的模型路径配置（用于可视化器）"""
-        # 创建反向映射：从显示名到内部配置名的映射
-        reverse_mapping = {v: k for k, v in self.model_name_mapping.items()}
-        # 返回以显示名为键的路径配置
-        return {display_name: self.model_paths[internal_name] 
-                for display_name, internal_name in reverse_mapping.items()}
-    
-    def get_mapped_file_patterns(self):
-        """获取映射后的文件模式配置（用于可视化器）"""
-        # 创建反向映射：从显示名到内部配置名的映射
-        reverse_mapping = {v: k for k, v in self.model_name_mapping.items()}
-        # 返回以显示名为键的文件模式配置
-        return {display_name: self.model_file_patterns[internal_name] 
-                for display_name, internal_name in reverse_mapping.items()}
         
     def run_complete_analysis(self):
         """运行完整的可视化分析"""
@@ -190,8 +174,8 @@ class CompleteVisualizationRunner:
             # 传递 Three_model 路径配置给可视化器
             visualizer = ModelComparisonVisualizer(self.three_model_dir)  # 直接使用 Three_model 路径
             # 传递映射后的配置，确保键名与可视化器期望的一致
-            visualizer.model_paths = self.get_mapped_model_paths()  # 传递映射后的路径配置
-            visualizer.model_file_patterns = self.get_mapped_file_patterns()  # 传递映射后的文件名模式配置
+            visualizer.model_paths = self.model_paths  # 传递模型路径配置
+            visualizer.model_file_patterns = self.model_file_patterns  # 传递文件名模式配置
             visualizer.model_name_mapping = self.model_name_mapping  # 传递名称映射关系
             
             # 加载模型结果
@@ -228,8 +212,8 @@ class CompleteVisualizationRunner:
             # 传递 Three_model 路径配置给故障检测可视化器
             visualizer = FaultDetectionVisualizer(self.three_model_dir)  # 直接使用 Three_model 路径
             # 传递映射后的配置，确保键名与可视化器期望的一致
-            visualizer.model_paths = self.get_mapped_model_paths()  # 传递映射后的路径配置
-            visualizer.model_file_patterns = self.get_mapped_file_patterns()  # 传递映射后的文件名模式配置
+            visualizer.model_paths = self.model_paths  # 传递模型路径配置
+            visualizer.model_file_patterns = self.model_file_patterns  # 传递文件名模式配置
             visualizer.model_name_mapping = self.model_name_mapping  # 传递名称映射关系
             
             # 加载检测结果
