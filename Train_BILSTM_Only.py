@@ -185,6 +185,10 @@ BILSTM_EPOCH = 800  # 与Transformer保持一致的完整训练轮数
 BILSTM_BATCH_SIZE_TARGET = 512  # 与Transformer保持一致的批次大小
 WARMUP_EPOCHS = 50  # 与Transformer保持一致的预热轮数
 
+# 数据处理参数
+TIME_STEP = 600  # 时间步长（与原始训练保持一致）
+INPUT_SIZE = 6   # 输入特征数量（X, Y, Z, 时间戳, SOC, 温度）
+
 print(f"🔧 BiLSTM训练参数:")
 print(f"   学习率: {BILSTM_LR}")
 print(f"   训练轮数: {BILSTM_EPOCH}")
