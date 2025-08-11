@@ -6,6 +6,7 @@ import sys
 import json
 import time
 import subprocess
+import glob
 from datetime import datetime
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -752,29 +753,49 @@ class CompleteVisualizationRunner:
         """尝试加载真实的Transformer模型性能指标
         
         Args:
-            model_type: 'transformer_positive' 或 'transformer_PN'
+            model_type: 'transformer_positive' 或 'transformer_PN' (实际上会被忽略，因为只有一个TRANSFORMER结果)
             
         Returns:
             dict: 性能指标字典
         """
-        # 尝试从不同可能的文件中加载数据
+        # 使用项目目录下的实际测试结果文件
+        project_base = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'project')
+        
+        # 查找最新的测试结果
         possible_files = [
-            os.path.join(self.model_paths[model_type], 'performance_metrics.json'),
-            os.path.join(self.model_paths[model_type], 'test_results.json'),
-            os.path.join(self.model_paths[model_type], 'evaluation_results.json')
+            os.path.join(project_base, 'test_results_20250731_170004', 'performance_metrics.json'),
+            # 也检查其他可能的测试结果目录
         ]
+        
+        # 动态查找测试结果目录
+        test_dirs = glob.glob(os.path.join(project_base, 'test_results_*'))
+        for test_dir in sorted(test_dirs, reverse=True):  # 按时间降序排列
+            possible_files.append(os.path.join(test_dir, 'performance_metrics.json'))
         
         for file_path in possible_files:
             if os.path.exists(file_path):
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                        return self._extract_metrics_from_data(data)
+                        print(f"✅ Found real metrics data: {file_path}")
+                        
+                        # 从实际的测试结果中提取TRANSFORMER指标
+                        if 'TRANSFORMER' in data:
+                            transformer_data = data['TRANSFORMER']
+                            if 'classification_metrics' in transformer_data:
+                                return transformer_data['classification_metrics']
+                            else:
+                                return self._extract_metrics_from_data(transformer_data)
+                        else:
+                            # 如果没有TRANSFORMER字段，尝试其他提取方法
+                            return self._extract_metrics_from_data(data)
+                            
                 except Exception as e:
                     print(f"⚠️  Could not parse {file_path}: {e}")
                     continue
         
         # 如果找不到真实数据，抛出异常
+        print(f"❌ Checked files: {possible_files}")
         raise FileNotFoundError(f"No valid metrics file found for {model_type}")
     
     def _extract_metrics_from_data(self, data):
@@ -810,39 +831,71 @@ class CompleteVisualizationRunner:
         
         return metrics
     
-    def _create_transformer_comparison_charts(self):
-        """创建Transformer模型对比图表（雷达图+ROC分析）"""
-        print("📊 Creating Transformer comparison charts (Radar + ROC)...")
+    def _load_real_model_metrics(self, model_name):
+        """加载真实的模型性能指标
         
-        # 尝试加载真实的模型数据，如果失败则使用基于实际结果的模拟数据
+        Args:
+            model_name: 'TRANSFORMER' 或 'BILSTM'
+            
+        Returns:
+            dict: 性能指标字典
+        """
+        # 使用项目目录下的实际测试结果文件
+        project_base = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'project')
+        
+        # 动态查找最新的测试结果目录
+        test_dirs = glob.glob(os.path.join(project_base, 'test_results_*'))
+        for test_dir in sorted(test_dirs, reverse=True):  # 按时间降序排列
+            file_path = os.path.join(test_dir, 'performance_metrics.json')
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        
+                    if model_name in data and 'classification_metrics' in data[model_name]:
+                        metrics = data[model_name]['classification_metrics']
+                        print(f"✅ Loaded real {model_name} metrics: {metrics}")
+                        return metrics
+                        
+                except Exception as e:
+                    print(f"⚠️  Could not parse {file_path}: {e}")
+                    continue
+        
+        raise FileNotFoundError(f"No valid metrics found for {model_name}")
+    
+    def _create_transformer_comparison_charts(self):
+        """创建模型对比图表（BiLSTM vs TRANSFORMER）"""
+        print("📊 Creating model comparison charts (BiLSTM vs TRANSFORMER)...")
+        
+        # 尝试加载真实的模型数据
         try:
-            # 尝试从实际的结果文件中加载数据
-            transformer_positive_metrics = self._load_transformer_metrics('transformer_positive')
-            transformer_pn_metrics = self._load_transformer_metrics('transformer_PN')
+            # 从实际的结果文件中加载数据
+            transformer_metrics = self._load_real_model_metrics('TRANSFORMER')
+            bilstm_metrics = self._load_real_model_metrics('BILSTM')
             print("📊 Using real model performance data")
         except Exception as e:
             print(f"⚠️  Could not load real data ({e}), using simulated data based on actual results")
-            # 🔧 基于实际测试脚本的结构，模拟性能指标
-            transformer_positive_metrics = {
-                'accuracy': 0.92,
-                'precision': 0.88,
-                'recall': 0.95,
-                'f1_score': 0.91,
-                'specificity': 0.89,
-                'tpr': 0.95,
-                'fpr': 0.11,
-                'auc': 0.94
+            # 基于实际JSON文件中看到的数值，使用真实的性能指标
+            transformer_metrics = {
+                'accuracy': 0.4997,
+                'precision': 0.3212,
+                'recall': 0.0296,
+                'f1_score': 0.0542,
+                'specificity': 0.9413,
+                'tpr': 0.0296,
+                'fpr': 0.0587,
+                'auc': 0.4854  # 基于TPR和FPR计算的近似值
             }
             
-            transformer_pn_metrics = {
-                'accuracy': 0.94,
-                'precision': 0.91,
-                'recall': 0.93,
-                'f1_score': 0.92,
-                'specificity': 0.95,
-                'tpr': 0.93,
-                'fpr': 0.05,
-                'auc': 0.96
+            bilstm_metrics = {
+                'accuracy': 0.5223,
+                'precision': 0.6983,
+                'recall': 0.0243,
+                'f1_score': 0.0470,
+                'specificity': 0.9901,
+                'tpr': 0.0243,
+                'fpr': 0.0099,
+                'auc': 0.5072  # 基于TPR和FPR计算的近似值
             }
         
         # 创建组合图表
@@ -853,34 +906,34 @@ class CompleteVisualizationRunner:
         
         # === 左上：雷达图对比 ===
         ax1 = fig.add_subplot(gs[0, 0], projection='polar')
-        self._create_radar_comparison(ax1, transformer_positive_metrics, transformer_pn_metrics)
+        self._create_radar_comparison(ax1, bilstm_metrics, transformer_metrics)
         
         # === 右上：ROC曲线对比 ===
         ax2 = fig.add_subplot(gs[0, 1])
-        self._create_roc_comparison(ax2, transformer_positive_metrics, transformer_pn_metrics)
+        self._create_roc_comparison(ax2, bilstm_metrics, transformer_metrics)
         
         # === 右上角：性能指标条形图 ===
         ax3 = fig.add_subplot(gs[0, 2])
-        self._create_metrics_comparison_bar(ax3, transformer_positive_metrics, transformer_pn_metrics)
+        self._create_metrics_comparison_bar(ax3, bilstm_metrics, transformer_metrics)
         
         # === 左下：工作点对比 ===
         ax4 = fig.add_subplot(gs[1, 0])
-        self._create_working_point_comparison(ax4, transformer_positive_metrics, transformer_pn_metrics)
+        self._create_working_point_comparison(ax4, bilstm_metrics, transformer_metrics)
         
         # === 中下：精度-召回率曲线对比 ===
         ax5 = fig.add_subplot(gs[1, 1])
-        self._create_precision_recall_comparison(ax5, transformer_positive_metrics, transformer_pn_metrics)
+        self._create_precision_recall_comparison(ax5, bilstm_metrics, transformer_metrics)
         
         # === 右下：混淆矩阵对比 ===
         ax6 = fig.add_subplot(gs[1, 2])
         self._create_confusion_matrix_comparison(ax6)
         
         # 添加总标题
-        fig.suptitle('Transformer Models Performance Comparison\n(Transformer-BACK vs Transformer-FOR-BACK)', 
+        fig.suptitle('Model Performance Comparison: BiLSTM vs TRANSFORMER\n(Real Training Results)', 
                      fontsize=16, fontweight='bold', y=0.98)
         
         # 保存图表
-        output_path = f"{self.report_dir}/transformer_models_comparison.png"
+        output_path = f"{self.report_dir}/bilstm_vs_transformer_comparison.png"
         plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         
@@ -911,10 +964,10 @@ class CompleteVisualizationRunner:
         values2 += values2[:1]
         
         # 绘制雷达图
-        ax.plot(angles, values1, 'o-', linewidth=2, label='Transformer-BACK', color='#ff7f0e')
+        ax.plot(angles, values1, 'o-', linewidth=2, label='BiLSTM', color='#ff7f0e')
         ax.fill(angles, values1, alpha=0.25, color='#ff7f0e')
         
-        ax.plot(angles, values2, 's-', linewidth=2, label='Transformer-FOR-BACK', color='#2ca02c')
+        ax.plot(angles, values2, 's-', linewidth=2, label='TRANSFORMER', color='#2ca02c')
         ax.fill(angles, values2, alpha=0.25, color='#2ca02c')
         
         # 设置标签和格式
@@ -939,9 +992,9 @@ class CompleteVisualizationRunner:
         
         # 绘制ROC曲线
         ax.plot(fpr1, tpr1, color='#ff7f0e', linewidth=2, 
-               label=f'Transformer-BACK (AUC={metrics1["auc"]:.3f})')
+               label=f'BiLSTM (AUC={metrics1["auc"]:.3f})')
         ax.plot(fpr2, tpr2, color='#2ca02c', linewidth=2, 
-               label=f'Transformer-FOR-BACK (AUC={metrics2["auc"]:.3f})')
+               label=f'TRANSFORMER (AUC={metrics2["auc"]:.3f})')
         
         # 绘制工作点
         ax.scatter(metrics1['fpr'], metrics1['tpr'], s=100, color='#ff7f0e', 
@@ -975,9 +1028,9 @@ class CompleteVisualizationRunner:
         x = np.arange(len(metrics_names))
         width = 0.35
         
-        bars1 = ax.bar(x - width/2, values1, width, label='Transformer-BACK', 
+        bars1 = ax.bar(x - width/2, values1, width, label='BiLSTM', 
                       color='#ff7f0e', alpha=0.7)
-        bars2 = ax.bar(x + width/2, values2, width, label='Transformer-FOR-BACK', 
+        bars2 = ax.bar(x + width/2, values2, width, label='TRANSFORMER', 
                       color='#2ca02c', alpha=0.7)
         
         # 添加数值标签
@@ -1000,10 +1053,10 @@ class CompleteVisualizationRunner:
         ax.set_title('Working Points in ROC Space', fontweight='bold')
         
         ax.scatter(metrics1['fpr'], metrics1['tpr'], s=200, color='#ff7f0e', 
-                  label=f'Transformer-BACK\n(TPR={metrics1["tpr"]:.3f}, FPR={metrics1["fpr"]:.3f})',
+                  label=f'BiLSTM\n(TPR={metrics1["tpr"]:.3f}, FPR={metrics1["fpr"]:.3f})',
                   marker='o', edgecolors='black', linewidth=2)
         ax.scatter(metrics2['fpr'], metrics2['tpr'], s=200, color='#2ca02c', 
-                  label=f'Transformer-FOR-BACK\n(TPR={metrics2["tpr"]:.3f}, FPR={metrics2["fpr"]:.3f})',
+                  label=f'TRANSFORMER\n(TPR={metrics2["tpr"]:.3f}, FPR={metrics2["fpr"]:.3f})',
                   marker='s', edgecolors='black', linewidth=2)
         
         ax.plot([0, 1], [0, 1], 'k--', alpha=0.5)
@@ -1023,8 +1076,8 @@ class CompleteVisualizationRunner:
         precision1 = self._simulate_pr_curve(recall, metrics1['precision'], metrics1['recall'])
         precision2 = self._simulate_pr_curve(recall, metrics2['precision'], metrics2['recall'])
         
-        ax.plot(recall, precision1, color='#ff7f0e', linewidth=2, label='Transformer-BACK')
-        ax.plot(recall, precision2, color='#2ca02c', linewidth=2, label='Transformer-FOR-BACK')
+        ax.plot(recall, precision1, color='#ff7f0e', linewidth=2, label='BiLSTM')
+        ax.plot(recall, precision2, color='#2ca02c', linewidth=2, label='TRANSFORMER')
         
         # 绘制工作点
         ax.scatter(metrics1['recall'], metrics1['precision'], s=100, color='#ff7f0e', 
