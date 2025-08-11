@@ -404,6 +404,18 @@ class ThreeModelComparator:
         for model_name, data in self.model_data.items():
             performance = data['performance']
             
+            # Debug: Print performance data structure
+            print(f"\n🔍 Debug - {model_name} performance structure:")
+            if isinstance(performance, dict):
+                print(f"   Keys: {list(performance.keys())}")
+                for key, value in performance.items():
+                    if isinstance(value, dict):
+                        print(f"   {key}: {list(value.keys())}")
+                    else:
+                        print(f"   {key}: {type(value)} = {value}")
+            else:
+                print(f"   Type: {type(performance)}")
+            
             # Handle different performance data structures
             if 'classification_metrics' in performance:
                 # BiLSTM format: nested structure
@@ -492,6 +504,14 @@ class ThreeModelComparator:
             config = data['config']
             
             models.append(model_name)
+            
+            # Debug: Print performance data structure for bar chart
+            print(f"\n🔍 Bar Chart Debug - {model_name} performance structure:")
+            if isinstance(performance, dict):
+                print(f"   Keys: {list(performance.keys())}")
+                for key, value in performance.items():
+                    if isinstance(value, dict):
+                        print(f"   {key}: {list(value.keys())}")
             
             # Handle different performance data structures
             if 'classification_metrics' in performance:
