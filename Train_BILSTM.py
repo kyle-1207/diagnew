@@ -105,16 +105,15 @@ def load_train_samples():
     try:
         import pandas as pd
         # Linux路径格式
-        data_base_dir = '/mnt/bz25t/bzhy/data/QAS'
-        labels_path = os.path.join(data_base_dir, 'Labels.xls')
+        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
         df = pd.read_excel(labels_path)
         
-        # 提取0-200范围的样本
+        # 提取0-100范围的样本
         all_samples = df['Num'].tolist()
-        train_samples = [i for i in all_samples if 0 <= i <= 200]
+        train_samples = [i for i in all_samples if 0 <= i <= 100]
         
         print(f"📋 从Labels.xls加载训练样本:")
-        print(f"   训练样本范围: 0-200")
+        print(f"   训练样本范围: 0-100")
         print(f"   实际可用样本: {len(train_samples)} 个")
         print(f"   样本ID: {train_samples[:10]}..." if len(train_samples) > 10 else f"   样本ID: {train_samples}")
         
@@ -128,7 +127,7 @@ train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
 # 统一的路径配置 - Linux环境
-data_dir = '/mnt/bz25t/bzhy/data/QAS'  # 数据目录
+data_dir = '/mnt/bz25t/bzhy/zhanglikang/project/QAS'  # 数据目录
 save_dir = '/mnt/bz25t/bzhy/datasave/BILSTM_train'  # 模型保存目录
 
 # 创建保存目录
@@ -350,23 +349,53 @@ print(f"   学习率: {BILSTM_LR} (针对A100优化)")
 print(f"   训练轮数: {BILSTM_EPOCH} (充分训练)")
 print(f"   目标批次大小: {BILSTM_BATCH_SIZE_TARGET} (将动态调整)")
 
-# 使用第一个样本的vin_1数据进行BILSTM训练
-first_sample_id = train_samples[0]
-print(f"\n使用样本 {first_sample_id} 的vin_1数据进行BILSTM训练")
+# 加载所有样本的vin_1数据进行BILSTM训练
+print(f"\n🔄 加载所有{len(train_samples)}个样本的vin_1数据进行BILSTM训练")
 
-# 加载vin_1数据
-vin_1_file = os.path.join(data_dir, f'vin_{first_sample_id}', 'vin_1.pkl')
-if os.path.exists(vin_1_file):
-    with open(vin_1_file, 'rb') as file:
-        test_X = pickle.load(file)
-    print(f"✅ 成功加载vin_1数据，形状: {test_X.shape}")
+# 收集所有样本的数据
+all_train_X = []
+all_train_y = []
+valid_samples = []
+
+for idx, sample_id in enumerate(train_samples):
+    vin_1_file = os.path.join(data_dir, f'{sample_id}', 'vin_1.pkl')
+    if os.path.exists(vin_1_file):
+        try:
+            with open(vin_1_file, 'rb') as file:
+                sample_data = pickle.load(file)
+            
+            # 使用源代码的prepare_training_data函数
+            sample_train_X, sample_train_y = prepare_training_data(sample_data, INPUT_SIZE, TIME_STEP, device)
+            
+            all_train_X.append(sample_train_X)
+            all_train_y.append(sample_train_y)
+            valid_samples.append(sample_id)
+            
+            if (idx + 1) % 10 == 0:
+                print(f"   ✓ 已加载 {idx + 1}/{len(train_samples)} 个样本")
+                
+        except Exception as e:
+            print(f"   ❌ 样本 {sample_id} 加载失败: {e}")
+            continue
+    else:
+        print(f"   ⚠️  样本 {sample_id} 的vin_1.pkl文件不存在")
+
+if len(all_train_X) > 0:
+    # 合并所有样本的数据
+    train_X = torch.cat(all_train_X, dim=0)
+    train_y = torch.cat(all_train_y, dim=0)
     
-    # 使用源代码的prepare_training_data函数
-    train_X, train_y = prepare_training_data(test_X, INPUT_SIZE, TIME_STEP, device)
-    print(f"训练数据准备完成:")
+    print(f"✅ 成功加载 {len(valid_samples)} 个样本的数据")
+    print(f"   有效样本ID: {valid_samples}")
+    print(f"   合并后训练数据形状:")
     print(f"   输入形状 (train_X): {train_X.shape}")
     print(f"   目标形状 (train_y): {train_y.shape}")
     print(f"   预测目标: 下一时刻索引5和6的数据")
+else:
+    print("❌ 未能加载任何有效的训练数据")
+    print("跳过BILSTM训练步骤")
+
+if len(all_train_X) > 0:
     
     # 创建BILSTM模型（用于批次大小计算）
     bilstm_model = LSTM().to(device)
@@ -527,19 +556,35 @@ if os.path.exists(vin_1_file):
     # 执行训练
     loss_train_100 = bilstm_training_loop()
     
-    # 保存BILSTM模型和Loss记录
-    bilstm_model_path = os.path.join(save_dir, f'bilstm_model_sample_{first_sample_id}.pth')
-    bilstm_loss_path = os.path.join(save_dir, f'bilstm_loss_record_sample_{first_sample_id}.pkl')
+    # 保存BILSTM模型和Loss记录（基于所有样本训练）
+    bilstm_model_path = os.path.join(save_dir, 'bilstm_model_all_samples.pth')
+    bilstm_loss_path = os.path.join(save_dir, 'bilstm_loss_record_all_samples.pkl')
     
     torch.save(bilstm_model.state_dict(), bilstm_model_path)
     with open(bilstm_loss_path, 'wb') as f:
         pickle.dump(loss_train_100, f)
     
+    # 保存训练信息
+    training_info = {
+        'valid_samples': valid_samples,
+        'total_samples': len(valid_samples),
+        'train_data_shape': (train_X.shape, train_y.shape),
+        'training_epochs': BILSTM_EPOCH,
+        'learning_rate': BILSTM_LR,
+        'final_loss': loss_train_100[-1] if loss_train_100 else None
+    }
+    
+    training_info_path = os.path.join(save_dir, 'bilstm_training_info.pkl')
+    with open(training_info_path, 'wb') as f:
+        pickle.dump(training_info, f)
+    
     print(f"✅ BILSTM模型已保存: {bilstm_model_path}")
     print(f"✅ Loss记录已保存: {bilstm_loss_path}")
-    
+    print(f"✅ 训练信息已保存: {training_info_path}")
+    print(f"✅ 模型基于 {len(valid_samples)} 个样本训练完成")
+
 else:
-    print(f"❌ 未找到vin_1数据文件: {vin_1_file}")
+    print("❌ 未能加载任何有效的训练数据")
     print("跳过BILSTM训练步骤")
 
 print("\n" + "="*50)
@@ -1351,7 +1396,7 @@ for epoch in range(EPOCH):
         with torch.cuda.amp.autocast():
             recon_im, recon_p = net(x, z, q)
             loss_u = loss_f(y, recon_im)
-        
+                
         # 检查损失值是否为NaN
         if torch.isnan(loss_u) or torch.isinf(loss_u):
             print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
@@ -1360,10 +1405,10 @@ for epoch in range(EPOCH):
             print(f"损失值: {loss_u.item()}")
             print("跳过此批次，不进行反向传播")
             continue
-        
+            
         total_loss += loss_u.item()
         num_batches += 1
-        
+            
         optimizer.zero_grad()
         
         # 使用混合精度训练
@@ -1409,14 +1454,14 @@ for epoch in range(EPOCH):
             print("跳过此批次并重置scaler状态")
             # 重置scaler状态
             scaler.update()
-                continue
+            continue
         
         # 及时释放不需要的张量
         del x, y, z, q, recon_im, recon_p, loss_u
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
-        if epoch % 50 == 0:
+    if epoch % 50 == 0:
         print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
 
 # 中文注释：全量推理，获得重构误差
@@ -1427,7 +1472,7 @@ for iteration, (x, y, z, q) in enumerate(train_loader2):
     z = z.to(device)
     q = q.to(device)
     with torch.cuda.amp.autocast():
-    recon_imtest, recon = net(x, z, q)
+        recon_imtest, recon = net(x, z, q)
 AA = recon_imtest.cpu().detach().numpy()
 yTrainU = y_recovered.cpu().detach().numpy()
 ERRORU = AA - yTrainU
@@ -1469,10 +1514,10 @@ for epoch in range(EPOCH):
     clear_gpu_cache()
     
     for iteration, (x, y, z, q) in enumerate(train_loader_soc):
-            x = x.to(device)
-            y = y.to(device)
-            z = z.to(device)
-            q = q.to(device)
+        x = x.to(device)
+        y = y.to(device)
+        z = z.to(device)
+        q = q.to(device)
             
         # 内存监控 - 定期检查内存使用情况
         if iteration % MEMORY_CHECK_INTERVAL == 0:
@@ -1493,12 +1538,12 @@ for epoch in range(EPOCH):
             clear_gpu_cache()
         
         # 使用混合精度训练
-            with torch.cuda.amp.autocast():
-                recon_im, z = netx(x, z, q)
-                loss_x = loss_f(y, recon_im)
+        with torch.cuda.amp.autocast():
+            recon_im, z = netx(x, z, q)
+            loss_x = loss_f(y, recon_im)
                 
-                    # 检查损失值是否为NaN
-            if torch.isnan(loss_x) or torch.isinf(loss_x):
+        # 检查损失值是否为NaN
+        if torch.isnan(loss_x) or torch.isinf(loss_x):
             print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
             print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
@@ -1511,12 +1556,12 @@ for epoch in range(EPOCH):
             print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
             print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-                continue
+            continue
             
-            total_loss += loss_x.item()
-            num_batches += 1
+        total_loss += loss_x.item()
+        num_batches += 1
         optimizer.zero_grad()
-            scaler2.scale(loss_x).backward()
+        scaler2.scale(loss_x).backward()
             
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
@@ -1558,7 +1603,7 @@ for epoch in range(EPOCH):
             print("跳过此批次并重置scaler状态")
             # 重置scaler状态
             scaler2.update()
-                continue
+            continue
         
         # 及时释放不需要的张量
         del x, y, z, q, recon_im, loss_x
@@ -1566,7 +1611,7 @@ for epoch in range(EPOCH):
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
     train_losses_mcae2.append(avg_loss)
-        if epoch % 50 == 0:
+    if epoch % 50 == 0:
         print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
 
 train_loaderx2 = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=len(x_recovered2), shuffle=False)
@@ -1576,7 +1621,7 @@ for iteration, (x, y, z, q) in enumerate(train_loaderx2):
     z = z.to(device)
     q = q.to(device)
     with torch.cuda.amp.autocast():
-    recon_imtestx, z = netx(x, z, q)
+        recon_imtestx, z = netx(x, z, q)
 
 BB = recon_imtestx.cpu().detach().numpy()
 yTrainX = y_recovered2.cpu().detach().numpy()
@@ -1656,9 +1701,9 @@ print(f"✅ BiLSTM训练结果图已保存: {result_dir}/bilstm_training_results
 # 结果目录已在前面创建，无需重复检查
 
 # 2. 保存诊断特征DataFrame
-            df_data.to_excel(f'{result_dir}/diagnosis_feature_bilstm_baseline.xlsx', index=False)
-            df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
-            print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.xlsx/csv")
+df_data.to_excel(f'{result_dir}/diagnosis_feature_bilstm_baseline.xlsx', index=False)
+df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
+print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.xlsx/csv")
 
 # 3. 保存PCA分析主要结果
 np.save(f'{result_dir}/v_I_bilstm_baseline.npy', v_I)
