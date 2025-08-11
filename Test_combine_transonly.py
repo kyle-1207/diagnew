@@ -63,11 +63,11 @@ def safe_get_nested(dictionary, keys, default=None):
 def safe_load_model(model, model_path, model_name):
     """安全加载模型，处理DataParallel前缀问题"""
     try:
-        print(f"   正在加载{model_name}模型: {model_path}")
+        print(f"   Loading {model_name} model: {model_path}")
         
         # 检查文件是否存在
         if not os.path.exists(model_path):
-            print(f"   ❌ 模型文件不存在: {model_path}")
+            print(f"   ❌ Model file not found: {model_path}")
             return False
         
         state_dict = torch.load(model_path, map_location=device)
@@ -75,7 +75,7 @@ def safe_load_model(model, model_path, model_name):
         # 检查是否需要移除module前缀
         has_module_prefix = any(key.startswith('module.') for key in state_dict.keys())
         if has_module_prefix:
-            print(f"   检测到DataParallel前缀，正在移除...")
+            print(f"   Detected DataParallel prefix, removing...")
             state_dict = remove_module_prefix(state_dict)
         
         # 检查模型结构匹配
@@ -99,12 +99,12 @@ def safe_load_model(model, model_path, model_name):
         
         # 尝试加载
         model.load_state_dict(state_dict, strict=False)
-        print(f"   ✅ {model_name}模型加载成功")
+        print(f"   ✅ {model_name} model loaded successfully")
         return True
         
     except Exception as e:
-        print(f"   ❌ {model_name}模型加载失败: {e}")
-        print(f"   错误类型: {type(e).__name__}")
+        print(f"   ❌ {model_name} model loading failed: {e}")
+        print(f"   Error type: {type(e).__name__}")
         return False
 
 # 设置设备
@@ -112,107 +112,37 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 # GPU配置检查
-print("🖥️ GPU配置检查:")
-print(f"   CUDA可用: {torch.cuda.is_available()}")
-print(f"   GPU数量: {torch.cuda.device_count()}")
-print(f"   当前设备: {device}")
+print("🖥️ GPU Configuration Check:")
+print(f"   CUDA Available: {torch.cuda.is_available()}")
+print(f"   GPU Count: {torch.cuda.device_count()}")
+print(f"   Current Device: {device}")
 
 if torch.cuda.is_available():
-    print("   GPU详细信息:")
+    print("   GPU Details:")
     for i in range(torch.cuda.device_count()):
         props = torch.cuda.get_device_properties(i)
         print(f"     GPU {i}: {props.name}")
-        print(f"       显存: {props.total_memory/1024**3:.1f}GB")
+        print(f"       Memory: {props.total_memory/1024**3:.1f}GB")
         print(f"       计算能力: {props.major}.{props.minor}")
 else:
-    print("   ⚠️ 使用CPU模式")
+    print("   ⚠️ Using CPU mode")
 
 # 忽略警告
 warnings.filterwarnings('ignore')
 
-# 设置中文字体显示
-import matplotlib.font_manager as fm
+# 设置默认英文字体显示
 from matplotlib import rcParams
-import platform
 
-# 全局变量：标记是否支持中文显示
-CHINESE_FONT_AVAILABLE = False
-
-def setup_chinese_fonts_strict():
-    """Linux服务器环境中文字体配置（增强版）"""
-    global CHINESE_FONT_AVAILABLE
-    import subprocess
-    import os
-    
-    # 1. 尝试安装中文字体包（仅Linux）
-    if platform.system() == "Linux":
-        try:
-            # 检查是否有管理员权限安装字体
-            result = subprocess.run(['which', 'apt-get'], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                print("🔧 正在尝试安装中文字体包...")
-                subprocess.run(['sudo', 'apt-get', 'update'], capture_output=True, timeout=30)
-                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'fonts-noto-cjk', 'fonts-wqy-microhei', 'fonts-arphic-ukai'], capture_output=True, timeout=60)
-        except Exception as e:
-            print(f"⚠️ 字体安装失败（可能需要管理员权限）: {e}")
-    
-    # 2. 扩展候选字体列表
-    candidates = [
-        # Linux优先字体
-        'Noto Sans CJK SC Regular',
-        'Noto Sans CJK SC',
-        'WenQuanYi Micro Hei',
-        'WenQuanYi Zen Hei',
-        'Source Han Sans CN',
-        'Source Han Sans SC',
-        'AR PL UKai CN',
-        'AR PL UMing CN',
-        # 通用字体
-        'Droid Sans Fallback',
-        'Liberation Sans',
-        # Windows兜底
-        'Microsoft YaHei',
-        'SimHei',
-        'SimSun',
-        # 最终兜底
-        'DejaVu Sans',
-        'Liberation Sans'
-    ]
-
-    chosen = None
-    for name in candidates:
-        try:
-            font_path = fm.findfont(name, fallback_to_default=False)
-            if font_path and 'DejaVu' not in font_path and os.path.exists(font_path):
-                chosen = name
-                CHINESE_FONT_AVAILABLE = True
-                print(f"🔍 找到字体: {name} -> {font_path}")
-                break
-        except Exception:
-            continue
-
-    # 3. 如果没找到合适字体，尝试系统字体扫描
-    if chosen is None:
-        print("🔍 进行系统字体扫描...")
-        all_fonts = [f.name for f in fm.fontManager.ttflist]
-        chinese_fonts = [f for f in all_fonts if any(keyword in f.lower() for keyword in ['cjk', 'han', 'hei', 'kai', 'ming', 'noto', 'wenquanyi'])]
-        if chinese_fonts:
-            chosen = chinese_fonts[0]
-            CHINESE_FONT_AVAILABLE = True
-            print(f"🔍 通过扫描找到中文字体: {chosen}")
-        else:
-            chosen = 'DejaVu Sans'
-            CHINESE_FONT_AVAILABLE = False
-            print("⚠️ 未找到中文字体，使用DejaVu Sans")
-
-    # 4. 增强的全局渲染参数
+def setup_english_fonts():
+    """设置英文字体配置"""
+    # 使用默认英文字体配置
     rcParams['font.family'] = 'sans-serif'
-    rcParams['font.sans-serif'] = [chosen, 'DejaVu Sans', 'Liberation Sans']
+    rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Liberation Sans']
     rcParams['axes.unicode_minus'] = False
     rcParams['pdf.fonttype'] = 42
     rcParams['ps.fonttype'] = 42
     rcParams['savefig.dpi'] = 300
-    rcParams['figure.dpi'] = 100  # 降低以提高兼容性
+    rcParams['figure.dpi'] = 100
     rcParams['figure.autolayout'] = False
     rcParams['axes.titlesize'] = 12
     rcParams['axes.labelsize'] = 10
@@ -220,41 +150,8 @@ def setup_chinese_fonts_strict():
     rcParams['xtick.labelsize'] = 9
     rcParams['ytick.labelsize'] = 9
     
-    # 5. 强制字体缓存重建
-    try:
-        fm._rebuild()
-        # 额外清理缓存
-        cache_dir = os.path.expanduser('~/.cache/matplotlib')
-        if os.path.exists(cache_dir):
-            import shutil
-            shutil.rmtree(cache_dir, ignore_errors=True)
-    except Exception as e:
-        print(f"⚠️ 字体缓存清理失败: {e}")
-
-    print(f"✅ 最终使用字体: {chosen}")
-    
-    # 6. 测试中文显示
-    try:
-        plt.figure(figsize=(1, 1))
-        plt.text(0.5, 0.5, get_chart_label('测试中文'), fontsize=10)
-        plt.close()
-        if CHINESE_FONT_AVAILABLE:
-            print("✅ 中文字体测试通过，将使用中文标签")
-        else:
-            print("⚠️ 中文字体测试未通过，将使用英文标签")
-    except Exception as e:
-        print(f"⚠️ 中文字体测试失败: {e}")
-        # 降级到安全模式
-        rcParams['font.sans-serif'] = ['DejaVu Sans']
-        CHINESE_FONT_AVAILABLE = False
-        print("🔄 已切换到安全模式（英文标签）")
-    
-    return CHINESE_FONT_AVAILABLE
-
-def get_label_text(chinese_text, english_text):
-    """根据字体支持情况返回合适的标签文本"""
-    global CHINESE_FONT_AVAILABLE
-    return chinese_text if CHINESE_FONT_AVAILABLE else english_text
+    print("✅ Using English fonts configuration")
+    return True
 
 # 常用图表标签字典（中英文对照）
 CHART_LABELS = {
@@ -297,15 +194,11 @@ CHART_LABELS = {
 }
 
 def get_chart_label(chinese_key):
-    """获取图表标签（自动中英文切换）"""
-    global CHINESE_FONT_AVAILABLE
-    if CHINESE_FONT_AVAILABLE:
-        return chinese_key
-    else:
-        return CHART_LABELS.get(chinese_key, chinese_key)  # 如果没有对应的英文，返回原文
+    """返回英文图表标签"""
+    return CHART_LABELS.get(chinese_key, chinese_key)  # 始终返回英文标签
 
-# 执行字体配置（更稳健）
-CHINESE_FONT_AVAILABLE = setup_chinese_fonts_strict()
+# 执行英文字体配置
+setup_english_fonts()
 
 #----------------------------------------数据预处理函数------------------------------
 def physics_based_data_processing_silent(data, feature_type='general'):
@@ -459,7 +352,7 @@ def physics_based_data_processing_silent(data, feature_type='general'):
 
 #----------------------------------------测试配置------------------------------
 print("="*60)
-print("🔬 电池故障诊断系统 - Transformer模型测试（混合反馈版本）")
+print("🔬 Battery Fault Diagnosis System - Transformer Model Testing (Hybrid Feedback Version)")
 print("="*60)
 
 TEST_MODE = "TRANSFORMER_ONLY"  # 固定为Transformer单模型测试
@@ -480,7 +373,7 @@ def load_test_samples():
         test_normal_samples = [str(i) for i in range(10, 21)]  # 正常样本：10-20
         test_fault_samples = [str(i) for i in range(340, 351)]  # 故障样本：340-350
         
-        print(f"📋 从Labels.xls加载测试样本:")
+        print(f"📋 Loading test samples from Labels.xls:")
         print(f"   测试正常样本: {test_normal_samples}")
         print(f"   测试故障样本: {test_fault_samples}")
         
@@ -2437,7 +2330,7 @@ def create_single_sample_timeline(sample_result, save_path):
         return
     
     # 设置字体
-    setup_chinese_fonts_strict()
+    setup_english_fonts()
     
     # 创建图表
     fig, axes = plt.subplots(3, 1, figsize=(15, 12), constrained_layout=True)
@@ -2526,7 +2419,7 @@ def create_single_sample_three_window(sample_result, save_path):
         return
     
     # 设置字体
-    setup_chinese_fonts_strict()
+    setup_english_fonts()
     
     # 创建主图和子图
     fig = plt.figure(figsize=(16, 10))
