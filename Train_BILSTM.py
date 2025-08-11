@@ -333,14 +333,15 @@ def memory_monitor(func):
     
     return wrapper
 
-# A100优化参数（大规模BILSTM适配版）
-BILSTM_LR = 1e-4  # 大模型适用的学习率（降低以保证稳定性）
-BILSTM_EPOCH = 500  # 增加训练轮数（大模型需要更多训练）
-BILSTM_BATCH_SIZE_TARGET = 1024  # 适中批次大小（平衡内存和性能）
+# A100优化参数（大规模BILSTM适配版 - 稳定训练）
+BILSTM_LR = 5e-5  # 大幅降低学习率，确保训练稳定性
+BILSTM_EPOCH = 800  # 增加训练轮数（大模型+低学习率需要更多训练）
+BILSTM_BATCH_SIZE_TARGET = 512  # 降低批次大小，提高训练稳定性
 
-# 大模型训练的额外参数
-WARMUP_EPOCHS = 20  # 学习率预热轮数（大模型需要预热）
-GRADIENT_CLIP = 1.0  # 梯度裁剪阈值（防止梯度爆炸）
+# 大模型训练的额外参数（保守策略）
+WARMUP_EPOCHS = 50  # 增加预热轮数，让大模型缓慢适应
+GRADIENT_CLIP = 0.5  # 更严格的梯度裁剪，防止梯度爆炸
+WEIGHT_DECAY = 1e-5  # 降低权重衰减，避免过度正则化
 
 print(f"A100单卡GPU优化配置（安全模式）:")
 print(f"   时间步长: {TIME_STEP}")
@@ -370,6 +371,29 @@ if os.path.exists(vin_1_file):
     # 创建BILSTM模型（用于批次大小计算）
     bilstm_model = LSTM().to(device)
     bilstm_model = bilstm_model.double()
+    
+    # 应用专门的大模型权重初始化
+    def initialize_bilstm_weights(model):
+        """大规模BILSTM专用权重初始化"""
+        for name, param in model.named_parameters():
+            if 'weight_ih' in name or 'weight_hh' in name:
+                # LSTM权重使用Xavier初始化，降低方差
+                nn.init.xavier_uniform_(param.data, gain=0.5)
+            elif 'bias' in name:
+                # 偏置初始化为0，forget gate偏置设为1
+                nn.init.zeros_(param.data)
+                if 'bias_hh' in name:
+                    # forget gate偏置设为1，帮助记忆
+                    n = param.size(0)
+                    param.data[n//4:n//2].fill_(1.0)
+            elif 'weight' in name and 'fc' in name:
+                # 全连接层权重
+                nn.init.xavier_uniform_(param.data, gain=0.3)
+            elif 'bias' in name and 'fc' in name:
+                nn.init.zeros_(param.data)
+        print("✅ 应用大规模BILSTM专用权重初始化")
+    
+    initialize_bilstm_weights(bilstm_model)
     
     # 统计模型参数量
     bilstm_params = bilstm_model.count_parameters()
@@ -405,7 +429,9 @@ if os.path.exists(vin_1_file):
     actual_lr = BILSTM_LR  # 不再线性缩放，使用固定学习率
     bilstm_optimizer = torch.optim.AdamW(bilstm_model.parameters(), 
                                         lr=actual_lr, 
-                                        weight_decay=1e-4)  # 添加权重衰减
+                                        weight_decay=WEIGHT_DECAY,  # 使用更保守的权重衰减
+                                        betas=(0.9, 0.999),  # 标准beta值
+                                        eps=1e-8)  # 数值稳定性
     bilstm_loss_func = nn.MSELoss()
     
     # 学习率调度器（支持预热）
@@ -425,15 +451,17 @@ if os.path.exists(vin_1_file):
         lr_lambda=lambda epoch: get_lr_with_warmup(epoch) / actual_lr
     )
     
-    print(f"\n🚀 A100大规模BILSTM训练配置:")
+    print(f"\n🚀 A100大规模BILSTM训练配置 (稳定版):")
     print(f"   模型规模: hidden_size=128, num_layers=3 (匹配Transformer)")
-    print(f"   批次大小: {safe_batch_size}")
-    print(f"   学习率: {actual_lr:.6f} (大模型优化)")
-    print(f"   训练轮数: {BILSTM_EPOCH} (充分训练)")
-print(f"   预热轮数: {WARMUP_EPOCHS}")
-    print(f"   梯度裁剪: {GRADIENT_CLIP}")
-    print(f"   优化器: AdamW with weight_decay=1e-4")
-    print(f"   学习率调度: Warmup + CosineAnnealing")
+    print(f"   批次大小: {safe_batch_size} (降低以提高稳定性)")
+    print(f"   学习率: {actual_lr:.6f} (大幅降低，确保稳定)")
+    print(f"   训练轮数: {BILSTM_EPOCH} (增加以补偿低学习率)")
+    print(f"   预热轮数: {WARMUP_EPOCHS} (长预热期)")
+    print(f"   梯度裁剪: {GRADIENT_CLIP} (严格控制)")
+    print(f"   权重衰减: {WEIGHT_DECAY} (保守正则化)")
+    print(f"   优化器: AdamW (数值稳定配置)")
+    print(f"   学习率调度: 长预热 + CosineAnnealing")
+    print(f"   权重初始化: 专用大模型初始化")
     print(f"   数据加载进程: 8")
     
     # 内存监控的BILSTM训练函数
