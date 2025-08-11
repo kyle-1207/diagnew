@@ -104,11 +104,19 @@ class CompleteVisualizationRunner:
     
     def get_mapped_model_paths(self):
         """获取映射后的模型路径配置（用于可视化器）"""
-        return {self.model_name_mapping[k]: v for k, v in self.model_paths.items()}
+        # 创建反向映射：从显示名到内部配置名的映射
+        reverse_mapping = {v: k for k, v in self.model_name_mapping.items()}
+        # 返回以显示名为键的路径配置
+        return {display_name: self.model_paths[internal_name] 
+                for display_name, internal_name in reverse_mapping.items()}
     
     def get_mapped_file_patterns(self):
         """获取映射后的文件模式配置（用于可视化器）"""
-        return {self.model_name_mapping[k]: v for k, v in self.model_file_patterns.items()}
+        # 创建反向映射：从显示名到内部配置名的映射
+        reverse_mapping = {v: k for k, v in self.model_name_mapping.items()}
+        # 返回以显示名为键的文件模式配置
+        return {display_name: self.model_file_patterns[internal_name] 
+                for display_name, internal_name in reverse_mapping.items()}
         
     def run_complete_analysis(self):
         """运行完整的可视化分析"""
