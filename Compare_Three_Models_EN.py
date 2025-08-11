@@ -251,12 +251,22 @@ class ThreeModelComparator:
                 print(f"      Performance keys: {list(performance.keys()) if isinstance(performance, dict) else 'N/A'}")
                 print(f"      Detailed data type: {type(detailed)}")
                 
-                # Method 1: Extract from performance metrics (BiLSTM format)
+                # Method 1: Extract from performance metrics 
+                # Check for direct roc_data (BiLSTM format)
                 if isinstance(performance, dict) and 'roc_data' in performance:
-                    print(f"      ✅ Found ROC data in performance metrics")
+                    print(f"      ✅ Found ROC data in performance metrics (BiLSTM format)")
                     roc_data = performance['roc_data']
                     all_labels = roc_data.get('true_labels', [])
                     all_probs = roc_data.get('fai_values', [])
+                
+                # Check for Transformer format: performance["TRANSFORMER"]["roc_data"]
+                elif isinstance(performance, dict) and 'TRANSFORMER' in performance:
+                    transformer_data = performance['TRANSFORMER']
+                    if isinstance(transformer_data, dict) and 'roc_data' in transformer_data:
+                        print(f"      ✅ Found ROC data in performance metrics (Transformer format)")
+                        roc_data = transformer_data['roc_data']
+                        all_labels = roc_data.get('true_labels', [])
+                        all_probs = roc_data.get('fai_values', [])
                 
                 # Method 2: Try different detailed data structures
                 elif isinstance(detailed, dict):
@@ -325,6 +335,9 @@ class ThreeModelComparator:
                     # Store AUC in performance data for later use
                     if 'classification_metrics' in data['performance']:
                         data['performance']['classification_metrics']['auc'] = roc_auc
+                    elif 'TRANSFORMER' in data['performance']:
+                        # Transformer format
+                        data['performance']['TRANSFORMER']['classification_metrics']['auc'] = roc_auc
                     else:
                         data['performance']['auc'] = roc_auc
                     
@@ -472,6 +485,15 @@ class ThreeModelComparator:
                 recall_scores.append(class_metrics.get('recall', 0))
                 f1_scores.append(class_metrics.get('f1_score', 0))
                 auc_scores.append(performance.get('auc', class_metrics.get('auc', 0)))
+            elif 'TRANSFORMER' in performance:
+                # Transformer format: performance["TRANSFORMER"]["classification_metrics"]
+                transformer_data = performance['TRANSFORMER']
+                class_metrics = transformer_data.get('classification_metrics', {})
+                accuracy_scores.append(class_metrics.get('accuracy', 0))
+                precision_scores.append(class_metrics.get('precision', 0))
+                recall_scores.append(class_metrics.get('recall', 0))
+                f1_scores.append(class_metrics.get('f1_score', 0))
+                auc_scores.append(class_metrics.get('auc', 0))
             else:
                 # Flat structure
                 accuracy_scores.append(performance.get('accuracy', 0))
