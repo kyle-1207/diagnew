@@ -208,16 +208,16 @@ print(f"   - Pin memory: {pin_memory_enabled}")
 print(f"   - Persistent workers: {use_persistent}")
 print("   - 批次大小: 已优化为安全级别")
 
-# A100优化的MC-AE训练参数（安全版本）
-EPOCH = 500  # 增加训练轮数，充分利用A100性能
-INIT_LR = 2e-5  # 适度提升初始学习率
-MAX_LR = 1e-4   # 提升最大学习率，配合大批次训练
+# MC-AE训练参数（与Transformer保持一致）
+EPOCH = 500  # 与Transformer保持一致的MC-AE训练轮数
+INIT_LR = 2e-5  # 与Transformer保持一致的初始学习率
+MAX_LR = 1e-4   # 与Transformer保持一致的最大学习率
 
 # 根据GPU内存动态调整批次大小 - A100优化（更保守的设置）
 if cuda_available:
     gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
     if gpu_memory_gb >= 80:  # A100 80GB
-        BATCHSIZE = 2000  # 减小批次大小，避免CUDA初始化问题
+        BATCHSIZE = 2000  # 与Transformer保持一致的MC-AE批次大小
     elif gpu_memory_gb >= 40:  # A100 40GB
         BATCHSIZE = 1000
     elif gpu_memory_gb >= 24:  # A100 24GB
@@ -231,7 +231,7 @@ else:
     BATCHSIZE = 50  # CPU模式使用更小的批次
     print("⚠️  CPU模式，批次大小: 50")
 
-WARMUP_EPOCHS = 10  # 增加学习率预热轮数
+WARMUP_EPOCHS = 50  # 与Transformer保持一致的预热轮数
 
 # 添加梯度裁剪
 MAX_GRAD_NORM = 1.0  # 调整到更合理的梯度裁剪阈值
@@ -404,9 +404,9 @@ def memory_monitor(func):
     return wrapper
 
 # A100优化参数（大规模BILSTM适配版 - 稳定训练）
-BILSTM_LR = 5e-5  # 大幅降低学习率，确保训练稳定性
-BILSTM_EPOCH = 50  # 测试配置：快速验证训练流程（原值：800）
-BILSTM_BATCH_SIZE_TARGET = 512  # 降低批次大小，提高训练稳定性
+BILSTM_LR = 5e-5  # 与Transformer保持一致的学习率
+BILSTM_EPOCH = 800  # 与Transformer保持一致的完整训练轮数
+BILSTM_BATCH_SIZE_TARGET = 512  # 与Transformer保持一致的批次大小
 
 # 大模型训练的额外参数（保守策略）
 WARMUP_EPOCHS = 5  # 测试配置：快速预热（原值：50）
@@ -1500,11 +1500,11 @@ for epoch in range(EPOCH):
     clear_gpu_cache()
     
     for iteration, (x, y, z, q) in enumerate(train_loader_u):
-        x = x.to(device)
-        y = y.to(device)
-        z = z.to(device)
-        q = q.to(device)
-        
+            x = x.to(device)
+            y = y.to(device)
+            z = z.to(device)
+            q = q.to(device)
+            
         # 内存监控 - 定期检查内存使用情况
         if iteration % MEMORY_CHECK_INTERVAL == 0:
             memory_usage = check_gpu_memory()
@@ -1524,16 +1524,16 @@ for epoch in range(EPOCH):
             clear_gpu_cache()
         
         # 检查输入数据范围
-        if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
-            print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
-            continue
+            if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
+                print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
+                continue
             
         # 检查输入数据范围是否合理
         if x.abs().max() > 1000 or y.abs().max() > 1000:
-            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
-            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-            continue
+                print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+                print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+                print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
+                continue
             
         # 使用混合精度训练（带CUDA错误处理）
         try:
@@ -1551,22 +1551,22 @@ for epoch in range(EPOCH):
                 raise e
                 
         # 检查损失值是否为NaN
-        if torch.isnan(loss_u) or torch.isinf(loss_u):
+            if torch.isnan(loss_u) or torch.isinf(loss_u):
             print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
             print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
             print(f"损失值: {loss_u.item()}")
             print("跳过此批次，不进行反向传播")
-            continue
+                continue
             
-        total_loss += loss_u.item()
-        num_batches += 1
-        
+            total_loss += loss_u.item()
+            num_batches += 1
+            
         optimizer.zero_grad()
         
         # 使用混合精度训练
-        scaler.scale(loss_u).backward()
-        
+            scaler.scale(loss_u).backward()
+            
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
         has_grad_issue = False
@@ -1607,14 +1607,14 @@ for epoch in range(EPOCH):
             print("跳过此批次并重置scaler状态")
             # 重置scaler状态
             scaler.update()
-            continue
+                continue
         
         # 及时释放不需要的张量
         del x, y, z, q, recon_im, recon_p, loss_u
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
-    if epoch % 50 == 0:
+        if epoch % 50 == 0:
         print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
 
 # 中文注释：全量推理，获得重构误差
@@ -1625,7 +1625,7 @@ for iteration, (x, y, z, q) in enumerate(train_loader2):
     z = z.to(device)
     q = q.to(device)
     with torch.cuda.amp.autocast():
-        recon_imtest, recon = net(x, z, q)
+    recon_imtest, recon = net(x, z, q)
 AA = recon_imtest.cpu().detach().numpy()
 yTrainU = y_recovered.cpu().detach().numpy()
 ERRORU = AA - yTrainU
@@ -1667,11 +1667,11 @@ for epoch in range(EPOCH):
     clear_gpu_cache()
     
     for iteration, (x, y, z, q) in enumerate(train_loader_soc):
-        x = x.to(device)
-        y = y.to(device)
-        z = z.to(device)
-        q = q.to(device)
-        
+            x = x.to(device)
+            y = y.to(device)
+            z = z.to(device)
+            q = q.to(device)
+            
         # 内存监控 - 定期检查内存使用情况
         if iteration % MEMORY_CHECK_INTERVAL == 0:
             memory_usage = check_gpu_memory()
@@ -1691,12 +1691,12 @@ for epoch in range(EPOCH):
             clear_gpu_cache()
         
         # 使用混合精度训练
-        with torch.cuda.amp.autocast():
-            recon_im, z = netx(x, z, q)
-            loss_x = loss_f(y, recon_im)
+            with torch.cuda.amp.autocast():
+                recon_im, z = netx(x, z, q)
+                loss_x = loss_f(y, recon_im)
                 
         # 检查损失值是否为NaN
-        if torch.isnan(loss_x) or torch.isinf(loss_x):
+            if torch.isnan(loss_x) or torch.isinf(loss_x):
             print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
             print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
@@ -1709,13 +1709,13 @@ for epoch in range(EPOCH):
             print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
             print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-            continue
+                continue
             
-        total_loss += loss_x.item()
-        num_batches += 1
+            total_loss += loss_x.item()
+            num_batches += 1
         optimizer.zero_grad()
-        scaler2.scale(loss_x).backward()
-        
+            scaler2.scale(loss_x).backward()
+            
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
         has_grad_issue = False
@@ -1756,7 +1756,7 @@ for epoch in range(EPOCH):
             print("跳过此批次并重置scaler状态")
             # 重置scaler状态
             scaler2.update()
-            continue
+                continue
         
         # 及时释放不需要的张量
         del x, y, z, q, recon_im, loss_x
@@ -1764,7 +1764,7 @@ for epoch in range(EPOCH):
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
     train_losses_mcae2.append(avg_loss)
-    if epoch % 50 == 0:
+        if epoch % 50 == 0:
         print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
 
 train_loaderx2 = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=len(x_recovered2), shuffle=False)
@@ -1774,7 +1774,7 @@ for iteration, (x, y, z, q) in enumerate(train_loaderx2):
     z = z.to(device)
     q = q.to(device)
     with torch.cuda.amp.autocast():
-        recon_imtestx, z = netx(x, z, q)
+    recon_imtestx, z = netx(x, z, q)
 
 BB = recon_imtestx.cpu().detach().numpy()
 yTrainX = y_recovered2.cpu().detach().numpy()
@@ -1854,9 +1854,9 @@ print(f"✅ BiLSTM训练结果图已保存: {result_dir}/bilstm_training_results
 # 结果目录已在前面创建，无需重复检查
 
 # 2. 保存诊断特征DataFrame
-df_data.to_excel(f'{result_dir}/diagnosis_feature_bilstm_baseline.xlsx', index=False)
-df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
-print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.xlsx/csv")
+            df_data.to_excel(f'{result_dir}/diagnosis_feature_bilstm_baseline.xlsx', index=False)
+            df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
+            print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.xlsx/csv")
 
 # 3. 保存PCA分析主要结果
 np.save(f'{result_dir}/v_I_bilstm_baseline.npy', v_I)
