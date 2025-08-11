@@ -91,7 +91,7 @@ print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
 # 定义训练参数（与源代码Train_.py完全一致）
 EPOCH = 300  # 恢复源代码的300轮训练
-INIT_LR = 8e-4  # 与Transformer统一，大数据量下适当提高学习率  
+INIT_LR = 5e-4  # 与源代码Train_.py一致，更稳定的学习率  
 MAX_LR = 5e-4   # 保持与源代码一致
 BATCHSIZE = 100  # 恢复源代码的100批次大小
 WARMUP_EPOCHS = 5  # 预热轮数
@@ -756,10 +756,10 @@ train_losses_mcae2 = []
 # 中文注释：自定义多输入数据集类（本地定义，非Class_.py中的Dataset）
 class MultiInputDataset(Dataset):
     def __init__(self, x, y, z, q):
-        self.x = x.to(torch.float32)
-        self.y = y.to(torch.float32)
-        self.z = z.to(torch.float32)
-        self.q = q.to(torch.float32)
+        self.x = x.to(torch.double)
+        self.y = y.to(torch.double)
+        self.z = z.to(torch.double)
+        self.q = q.to(torch.double)
     def __len__(self):
         return len(self.x)
     def __getitem__(self, idx):
@@ -768,10 +768,10 @@ class MultiInputDataset(Dataset):
 # 中文注释：用DataLoader批量加载多通道特征数据
 train_loader_u = DataLoader(MultiInputDataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=BATCHSIZE, shuffle=False)
 
-# 中文注释：初始化MC-AE模型（使用float32）
-net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
+# 中文注释：初始化MC-AE模型（使用double精度，与源代码一致）
+net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device)
 
-netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).to(torch.float32)
+netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
 
 # 使用更稳定的权重初始化
 def stable_weight_init(model):

@@ -47,8 +47,8 @@ class ThreeModelComparator:
         if base_path is None:
             # Auto-detect data path
             possible_paths = [
-                "Three_model",
-                "/mnt/bz25t/bzhy/datasave/Three_model",
+                "/mnt/bz25t/bzhy/datasave/Three_model",  # Primary server path
+                "Three_model",                            # Local directory
                 "../Three_model",
                 "../../Three_model"
             ]
@@ -68,21 +68,21 @@ class ThreeModelComparator:
         # Model configurations
         self.model_configs = {
             'BiLSTM': {
-                'folder': 'BiLSTM',
+                'folder': 'BILSTM',  # Match actual directory name
                 'performance_file': 'bilstm_performance_metrics.json',
                 'detailed_file': 'bilstm_detailed_results.pkl',
                 'color': '#FF6B6B',  # Red
                 'marker': 'o'
             },
             'Transformer-PN': {
-                'folder': 'transformer_PN',
+                'folder': 'transformer_PN',  # Match actual directory name
                 'performance_file': 'transformer_performance_metrics.json',
                 'detailed_file': 'transformer_detailed_results.pkl',
                 'color': '#4ECDC4',  # Cyan
                 'marker': 's'
             },
             'Transformer-Positive': {
-                'folder': 'transformer_positive',
+                'folder': 'transformer_positive',  # Match actual directory name
                 'performance_file': 'transformer_performance_metrics.json',
                 'detailed_file': 'transformer_detailed_results.pkl',
                 'color': '#45B7D1',  # Blue
@@ -315,25 +315,189 @@ class ThreeModelComparator:
         
         print(f"✅ ROC comparison chart saved to: {save_path}")
         return save_path
+    
+    def generate_performance_comparison_table(self, save_path="Three_model/performance_comparison_table.png"):
+        """Generate performance metrics comparison table"""
+        print("\n📊 Generating performance metrics comparison table...")
+        
+        # Ensure save directory exists
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        
+        # Collect performance metrics
+        metrics_data = []
+        for model_name, data in self.model_data.items():
+            performance = data['performance']
+            metrics_data.append({
+                'Model': model_name,
+                'Accuracy': f"{performance.get('accuracy', 0):.4f}",
+                'Precision': f"{performance.get('precision', 0):.4f}",
+                'Recall': f"{performance.get('recall', 0):.4f}",
+                'F1-Score': f"{performance.get('f1_score', 0):.4f}",
+                'AUC': f"{performance.get('auc', 0):.4f}"
+            })
+        
+        if not metrics_data:
+            print("❌ No performance data available for comparison table")
+            return None
+        
+        # Create DataFrame
+        df = pd.DataFrame(metrics_data)
+        
+        # Create figure and table
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.axis('tight')
+        ax.axis('off')
+        
+        # Create table
+        table = ax.table(cellText=df.values, colLabels=df.columns,
+                        cellLoc='center', loc='center')
+        
+        # Style the table
+        table.auto_set_font_size(False)
+        table.set_fontsize(11)
+        table.scale(1.2, 2)
+        
+        # Color the header
+        for i in range(len(df.columns)):
+            table[(0, i)].set_facecolor('#4CAF50')
+            table[(0, i)].set_text_props(weight='bold', color='white')
+        
+        # Color rows alternately
+        for i in range(1, len(df) + 1):
+            color = '#f0f0f0' if i % 2 == 0 else 'white'
+            for j in range(len(df.columns)):
+                table[(i, j)].set_facecolor(color)
+        
+        plt.title('Performance Metrics Comparison - Three Models', 
+                 fontsize=16, fontweight='bold', pad=20)
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"✅ Performance comparison table saved to: {save_path}")
+        return save_path
+    
+    def generate_metrics_bar_chart(self, save_path="Three_model/metrics_bar_comparison.png"):
+        """Generate bar chart for metrics comparison"""
+        print("\n📈 Generating metrics bar chart comparison...")
+        
+        # Ensure save directory exists
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        
+        # Collect metrics data
+        models = []
+        accuracy_scores = []
+        precision_scores = []
+        recall_scores = []
+        f1_scores = []
+        auc_scores = []
+        colors = []
+        
+        for model_name, data in self.model_data.items():
+            performance = data['performance']
+            config = data['config']
+            
+            models.append(model_name)
+            accuracy_scores.append(performance.get('accuracy', 0))
+            precision_scores.append(performance.get('precision', 0))
+            recall_scores.append(performance.get('recall', 0))
+            f1_scores.append(performance.get('f1_score', 0))
+            auc_scores.append(performance.get('auc', 0))
+            colors.append(config['color'])
+        
+        if not models:
+            print("❌ No model data available for bar chart")
+            return None
+        
+        # Create subplots
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        fig.suptitle('Performance Metrics Comparison - Three Models', fontsize=16, fontweight='bold')
+        
+        # Flatten axes for easier indexing
+        axes = axes.flatten()
+        
+        # Metrics to plot
+        metrics = [
+            ('Accuracy', accuracy_scores),
+            ('Precision', precision_scores),
+            ('Recall', recall_scores),
+            ('F1-Score', f1_scores),
+            ('AUC', auc_scores)
+        ]
+        
+        for i, (metric_name, scores) in enumerate(metrics):
+            ax = axes[i]
+            bars = ax.bar(models, scores, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
+            ax.set_title(f'{metric_name} Comparison', fontweight='bold')
+            ax.set_ylabel(metric_name)
+            ax.set_ylim(0, 1.1)
+            ax.grid(True, alpha=0.3, axis='y')
+            
+            # Add value labels on bars
+            for bar, score in zip(bars, scores):
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                       f'{score:.3f}', ha='center', va='bottom', fontweight='bold')
+            
+            # Rotate x-axis labels if needed
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        
+        # Remove unused subplot
+        axes[5].remove()
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"✅ Metrics bar chart saved to: {save_path}")
+        return save_path
 
 def main():
     """Main function"""
     print("🚀 Starting Three Models Comparison Analysis")
     print("="*60)
     
-    # Create comparator
-    comparator = ThreeModelComparator()
+    # Create comparator with server path priority
+    server_path = "/mnt/bz25t/bzhy/datasave/Three_model"
+    if os.path.exists(server_path):
+        print(f"🎯 Using server data path: {server_path}")
+        comparator = ThreeModelComparator(base_path=server_path)
+    else:
+        print("🔍 Server path not found, auto-detecting...")
+        comparator = ThreeModelComparator()
     
     # Try to load real data first
     if not comparator.load_all_data():
         print("\n📝 No real data found, creating sample data...")
         comparator.create_sample_data()
     
-    # Generate ROC comparison
+    # Generate all comparison visualizations
     print("\n🎨 Generating comparison visualizations...")
-    comparator.generate_roc_comparison()
     
-    print("\n🎉 Analysis completed!")
+    # Generate ROC curves comparison
+    roc_path = comparator.generate_roc_comparison()
+    
+    # Generate performance metrics table
+    table_path = comparator.generate_performance_comparison_table()
+    
+    # Generate metrics bar chart
+    bar_path = comparator.generate_metrics_bar_chart()
+    
+    # Summary
+    print("\n📋 Generated visualization files:")
+    if roc_path:
+        print(f"   📈 ROC Curves: {roc_path}")
+    if table_path:
+        print(f"   📊 Performance Table: {table_path}")
+    if bar_path:
+        print(f"   📊 Metrics Bar Chart: {bar_path}")
+    
+    print("\n🎉 Three Models Comparison Analysis completed!")
     print("="*60)
 
 if __name__ == "__main__":
