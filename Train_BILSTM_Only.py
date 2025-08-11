@@ -388,14 +388,13 @@ if len(all_train_X) > 0:
         lr_lambda=lambda epoch: get_lr_with_decay(epoch) / BILSTM_LR
     )
     
-    print(f"\n🚀 A100大规模BILSTM训练配置:")
+    print(f"\n🚀 BILSTM训练配置（参照源代码）:")
     print(f"   模型规模: hidden_size=128, num_layers=3")
     print(f"   批次大小: {safe_batch_size}")
     print(f"   学习率: {BILSTM_LR:.6f}")
     print(f"   训练轮数: {BILSTM_EPOCH}")
-    print(f"   预热轮数: {WARMUP_EPOCHS}")
     print(f"   优化器: AdamW")
-    print(f"   学习率调度: 长预热 + CosineAnnealing")
+    print(f"   学习率调度: 每25轮衰减0.9")
     
     # 内存监控的BILSTM训练函数
     @memory_monitor
@@ -515,9 +514,9 @@ if len(all_train_X) > 0:
         'model_parameters': bilstm_params,
         'device_used': str(device),
         'final_loss': loss_train_100[-1] if loss_train_100 else None,
-        'warmup_epochs': WARMUP_EPOCHS,
-        'optimizer': 'AdamW',
-        'scheduler': 'LambdaLR with warmup + cosine annealing'
+        'lr_decay_freq': 25,  # 学习率衰减频率
+        'optimizer': 'AdamW', 
+        'scheduler': 'LambdaLR with decay'
     }
     
     training_info_path = os.path.join(save_dir, 'bilstm_training_info.pkl')
