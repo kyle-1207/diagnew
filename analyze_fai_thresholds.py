@@ -42,14 +42,14 @@ def load_models():
                                activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
     
     # 加载模型权重
-    net_path = "/mnt/bz25t/bzhy/datasave/BILSTM/models/net_model_bilstm_baseline.pth"
-    netx_path = "/mnt/bz25t/bzhy/datasave/BILSTM/models/netx_model_bilstm_baseline.pth"
+    net_path = "/mnt/bz25t/bzhy/datasave/Three_model/BILSTM/net_model_bilstm_baseline.pth"
+    netx_path = "/mnt/bz25t/bzhy/datasave/Three_model/BILSTM/netx_model_bilstm_baseline.pth"
     
     models['net'].load_state_dict(torch.load(net_path, map_location=device), strict=False)
     models['netx'].load_state_dict(torch.load(netx_path, map_location=device), strict=False)
     
     # 加载PCA参数
-    pca_params_path = "/mnt/bz25t/bzhy/datasave/BILSTM/models/pca_params_bilstm_baseline.pkl"
+    pca_params_path = "/mnt/bz25t/bzhy/datasave/Three_model/BILSTM/pca_params_bilstm_baseline.pkl"
     with open(pca_params_path, 'rb') as f:
         models['pca_params'] = pickle.load(f)
     

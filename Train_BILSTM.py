@@ -1032,7 +1032,7 @@ yTrainX = y_recovered2.cpu().detach().numpy()
 ERRORX = BB - yTrainX
 
 # 创建结果目录
-result_dir = '/mnt/bz25t/bzhy/datasave/BILSTM/models'
+result_dir = '/mnt/bz25t/bzhy/datasave/Three_model/BILSTM'
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
     print(f"✅ 创建结果目录: {result_dir}")

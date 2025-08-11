@@ -19,7 +19,7 @@ def test_path_configuration():
     
     # 根据图片显示的实际文件结构，所有模型都在 Three_model 子目录下
     model_paths = {
-        'bilstm': f"{three_model_dir}/BILSTM/models",  # Train_BILSTM.py 的结果
+        'bilstm': f"{three_model_dir}/BILSTM",  # Train_BILSTM.py 的结果（文件直接在BILSTM目录下）
         'transformer_positive': f"{three_model_dir}/transformer_positive",  # Train_Transformer_HybridFeedback.py 的结果
         'transformer_pn': f"{three_model_dir}/transformer_PN"  # Train_Transformer_PN_HybridFeedback.py 的结果
     }
