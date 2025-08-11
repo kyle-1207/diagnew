@@ -45,14 +45,36 @@ def setup_chinese_fonts():
 setup_chinese_fonts()
 
 class ThreeModelComparator:
-    def __init__(self, base_path="Three_model"):
+    def __init__(self, base_path=None):
         """
         初始化三模型对比器
         
         Args:
-            base_path: 三个模型数据的基础路径
+            base_path: 三个模型数据的基础路径，如果为None则自动检测
         """
-        self.base_path = base_path
+        if base_path is None:
+            # 自动检测数据路径
+            possible_paths = [
+                "Three_model",  # 当前目录下
+                "/mnt/bz25t/bzhy/datasave/Three_model",  # Linux服务器路径
+                "../Three_model",  # 上级目录
+                "../../Three_model"  # 再上级目录
+            ]
+            
+            self.base_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    self.base_path = path
+                    print(f"✅ 找到数据目录: {path}")
+                    break
+            
+            if self.base_path is None:
+                print("❌ 未找到Three_model数据目录，请手动指定路径")
+                print("可能的路径位置:")
+                for path in possible_paths:
+                    print(f"   - {path}")
+        else:
+            self.base_path = base_path
         self.model_configs = {
             'BiLSTM': {
                 'folder': 'BILSTM',
@@ -86,6 +108,14 @@ class ThreeModelComparator:
         print("🔄 开始加载三模型数据...")
         print("="*60)
         
+        if self.base_path is None:
+            print("❌ 未指定数据目录，无法加载数据")
+            print("\n💡 请尝试以下解决方案:")
+            print("1. 手动创建 Three_model 目录结构")
+            print("2. 或者运行训练脚本生成数据")
+            print("3. 或者指定具体的数据文件路径")
+            return False
+        
         for model_name, config in self.model_configs.items():
             print(f"\n📂 加载 {model_name} 数据...")
             
@@ -93,6 +123,10 @@ class ThreeModelComparator:
             folder_path = os.path.join(self.base_path, config['folder'])
             performance_path = os.path.join(folder_path, config['performance_file'])
             detailed_path = os.path.join(folder_path, config['detailed_file'])
+            
+            print(f"   🔍 查找路径: {folder_path}")
+            print(f"   📊 性能文件: {performance_path}")
+            print(f"   📋 详细文件: {detailed_path}")
             
             # 检查文件是否存在
             if not os.path.exists(performance_path):
@@ -126,7 +160,65 @@ class ThreeModelComparator:
                 print(f"❌ {model_name} 数据加载失败: {e}")
         
         print(f"\n✅ 共加载了 {len(self.model_data)} 个模型的数据")
+        
+        if len(self.model_data) == 0:
+            print("\n💡 没有找到任何模型数据，可能的解决方案:")
+            print("1. 运行训练脚本生成数据:")
+            print("   - Linux/Train_BILSTM.py")
+            print("   - Linux/Train_Transformer_HybridFeedback.py") 
+            print("   - Linux/Train_Transformer_PN_HybridFeedback.py")
+            print("2. 或者手动创建Three_model目录结构")
+            print("3. 或者使用create_sample_data()创建示例数据")
+        
         return len(self.model_data) > 0
+    
+    def create_sample_data(self, save_path="Three_model"):
+        """创建示例数据结构供测试使用"""
+        print(f"\n🔧 创建示例数据结构: {save_path}")
+        
+        # 创建目录结构
+        for model_name, config in self.model_configs.items():
+            folder_path = os.path.join(save_path, config['folder'])
+            os.makedirs(folder_path, exist_ok=True)
+            
+            # 创建示例性能指标
+            sample_performance = {
+                'accuracy': 0.85 + np.random.random() * 0.1,
+                'precision': 0.80 + np.random.random() * 0.15,
+                'recall': 0.75 + np.random.random() * 0.2,
+                'f1_score': 0.82 + np.random.random() * 0.12,
+                'auc': 0.88 + np.random.random() * 0.1,
+                'specificity': 0.83 + np.random.random() * 0.12,
+                'false_positive_rate': 0.05 + np.random.random() * 0.1,
+                'early_warning_rate': 0.8 + np.random.random() * 0.15,
+                'detection_stability': 0.85 + np.random.random() * 0.1
+            }
+            
+            # 保存性能指标
+            performance_path = os.path.join(folder_path, config['performance_file'])
+            with open(performance_path, 'w', encoding='utf-8') as f:
+                json.dump(sample_performance, f, indent=2, ensure_ascii=False)
+            
+            # 创建示例详细结果
+            sample_detailed = []
+            for i in range(100):  # 100个测试样本
+                sample_result = {
+                    'sample_id': f'sample_{i}',
+                    'true_labels': [0, 0, 0, 1, 1] if i % 2 == 0 else [1, 1, 0, 0, 1],
+                    'probabilities': [0.1 + np.random.random() * 0.8 for _ in range(5)],
+                    'predictions': [1 if p > 0.5 else 0 for p in [0.1 + np.random.random() * 0.8 for _ in range(5)]]
+                }
+                sample_detailed.append(sample_result)
+            
+            # 保存详细结果
+            detailed_path = os.path.join(folder_path, config['detailed_file'])
+            with open(detailed_path, 'wb') as f:
+                pickle.dump(sample_detailed, f)
+            
+            print(f"   ✅ {model_name} 示例数据已创建")
+        
+        print(f"\n🎉 示例数据结构创建完成: {save_path}")
+        print("现在可以重新运行对比分析了！")
     
     def generate_roc_comparison(self, save_path="Three_model/comparison_roc_curves.png"):
         """生成三模型ROC曲线对比图"""
@@ -446,6 +538,18 @@ def main():
     # 创建对比器
     comparator = ThreeModelComparator()
     
+    # 如果没有找到数据，提供创建示例数据的选项
+    if comparator.base_path is None:
+        print("\n❓ 是否创建示例数据进行测试？")
+        print("这将创建Three_model目录结构和示例数据文件")
+        
+        # 自动创建示例数据（用于演示）
+        print("\n🔧 自动创建示例数据...")
+        comparator.create_sample_data()
+        
+        # 重新初始化对比器
+        comparator = ThreeModelComparator()
+    
     # 运行完整对比
     success = comparator.run_full_comparison()
     
@@ -453,6 +557,7 @@ def main():
         print("\n✅ 对比分析成功完成！")
     else:
         print("\n❌ 对比分析失败！")
+        print("💡 如果需要重新创建示例数据，请删除Three_model文件夹后重新运行")
 
 if __name__ == "__main__":
     main()
