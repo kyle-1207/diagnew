@@ -179,20 +179,20 @@ device, cuda_available = init_cuda_device()
 # 获取安全的DataLoader配置
 dataloader_workers, pin_memory_enabled, use_persistent = get_dataloader_config(device, cuda_available)
 
-# BiLSTM训练参数（与Transformer保持一致）
-# 参照源代码Train_.py的训练参数设置
-BILSTM_LR = 1e-4     # 源代码中的学习率
-BILSTM_EPOCH = 100   # 源代码中的训练轮数
-BILSTM_BATCH_SIZE = 100  # 源代码中的批次大小
+# BiLSTM训练参数（参照Train_Transformer_HybridFeedback.py）
+# 与Transformer模型保持一致的训练参数设置
+BILSTM_LR = 2e-3     # 参照Transformer学习率
+BILSTM_EPOCH = 150   # 参照Transformer总训练轮数
+BILSTM_BATCH_SIZE = 4000  # 参照Transformer批次大小
 
 # 数据处理参数（参照源代码Train_.py）
 TIME_STEP = 1    # 源代码中使用的时间步长
 INPUT_SIZE = 7   # 源代码中使用的输入特征数量
 
-print(f"🔧 BiLSTM训练参数（参照源代码Train_.py）:")
-print(f"   学习率: {BILSTM_LR}")
-print(f"   训练轮数: {BILSTM_EPOCH}")
-print(f"   批次大小: {BILSTM_BATCH_SIZE}")
+print(f"🔧 BiLSTM训练参数（参照Transformer模型）:")
+print(f"   学习率: {BILSTM_LR} (参照Transformer)")
+print(f"   训练轮数: {BILSTM_EPOCH} (参照Transformer)")
+print(f"   批次大小: {BILSTM_BATCH_SIZE} (参照Transformer)")
 print(f"   时间步长: {TIME_STEP}")
 print(f"   输入特征数: {INPUT_SIZE}")
 
@@ -367,34 +367,26 @@ if len(all_train_X) > 0:
         persistent_workers=use_persistent
     )
     
-    # 优化器配置（大模型适配版）
-    bilstm_optimizer = torch.optim.AdamW(bilstm_model.parameters(), 
-                                        lr=BILSTM_LR, 
-                                        weight_decay=1e-5,
-                                        betas=(0.9, 0.999),
-                                        eps=1e-8)
+    # 优化器配置（参照Transformer使用Adam）
+    bilstm_optimizer = torch.optim.Adam(bilstm_model.parameters(), 
+                                       lr=BILSTM_LR)
     bilstm_loss_func = nn.MSELoss()
     
-    # 简化学习率调度器（参照源代码Train_.py）
-    def get_lr_with_decay(epoch):
-        # 使用源代码中的简单学习率衰减
-        lr_decay_freq = 25  # 源代码中的衰减频率
-        decay_factor = 0.9
-        return BILSTM_LR * (decay_factor ** (epoch // lr_decay_freq))
-    
-    # 手动学习率调度（参照源代码）
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
+    # 学习率调度器（参照Transformer的StepLR）
+    lr_decay_freq = 20  # 参照Transformer的衰减频率
+    scheduler = torch.optim.lr_scheduler.StepLR(
         bilstm_optimizer, 
-        lr_lambda=lambda epoch: get_lr_with_decay(epoch) / BILSTM_LR
+        step_size=lr_decay_freq, 
+        gamma=0.9
     )
     
-    print(f"\n🚀 BILSTM训练配置（参照源代码）:")
+    print(f"\n🚀 BILSTM训练配置（参照Transformer模型）:")
     print(f"   模型规模: hidden_size=128, num_layers=3")
-    print(f"   批次大小: {safe_batch_size}")
-    print(f"   学习率: {BILSTM_LR:.6f}")
-    print(f"   训练轮数: {BILSTM_EPOCH}")
-    print(f"   优化器: AdamW")
-    print(f"   学习率调度: 每25轮衰减0.9")
+    print(f"   批次大小: {safe_batch_size} (参照Transformer: 4000)")
+    print(f"   学习率: {BILSTM_LR} (参照Transformer)")
+    print(f"   训练轮数: {BILSTM_EPOCH} (参照Transformer)")
+    print(f"   优化器: Adam (参照Transformer)")
+    print(f"   学习率调度: 每{lr_decay_freq}轮衰减0.9 (参照Transformer)")
     
     # 内存监控的BILSTM训练函数
     @memory_monitor
