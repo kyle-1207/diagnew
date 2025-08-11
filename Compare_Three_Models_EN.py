@@ -45,10 +45,11 @@ class ThreeModelComparator:
             base_path: Base path for three model data, auto-detect if None
         """
         if base_path is None:
-            # Auto-detect data path
+            # Auto-detect data path - all models are under test_results directory
             possible_paths = [
-                "/mnt/bz25t/bzhy/datasave/Three_model",  # Primary server path
-                "Three_model",                            # Local directory
+                "/mnt/bz25t/bzhy/datasave/Three_model",          # Primary server path where all models are stored
+                "/mnt/bz25t/bzhy/datasave/BILSTM/test_results",  # Fallback path
+                "Three_model",                                    # Local directory
                 "../Three_model",
                 "../../Three_model"
             ]
@@ -66,25 +67,26 @@ class ThreeModelComparator:
             self.base_path = base_path
         
         # Model configurations
+        # All models are stored under /mnt/bz25t/bzhy/datasave/Three_model/
         self.model_configs = {
             'BiLSTM': {
-                'folder': 'BILSTM',  # Match actual directory name
-                'performance_file': 'bilstm_performance_metrics.json',
-                'detailed_file': 'bilstm_detailed_results.pkl',
+                'folder': 'BiLSTM',  # BiLSTM results directory
+                'performance_file': 'performance_metrics.json',
+                'detailed_file': 'detailed_results.pkl',
                 'color': '#FF6B6B',  # Red
                 'marker': 'o'
             },
             'Transformer-PN': {
-                'folder': 'transformer_PN',  # Match actual directory name
-                'performance_file': 'transformer_performance_metrics.json',
-                'detailed_file': 'transformer_detailed_results.pkl',
+                'folder': 'transformer_PN',  # transformer_PN results directory  
+                'performance_file': 'performance_metrics.json',
+                'detailed_file': 'detailed_results.pkl',
                 'color': '#4ECDC4',  # Cyan
                 'marker': 's'
             },
             'Transformer-Positive': {
-                'folder': 'transformer_positive',  # Match actual directory name
-                'performance_file': 'transformer_performance_metrics.json',
-                'detailed_file': 'transformer_detailed_results.pkl',
+                'folder': 'transformer_positive',  # transformer_positive results directory
+                'performance_file': 'performance_metrics.json',
+                'detailed_file': 'detailed_results.pkl',
                 'color': '#45B7D1',  # Blue
                 'marker': '^'
             }
@@ -110,7 +112,7 @@ class ThreeModelComparator:
         for model_name, config in self.model_configs.items():
             print(f"\n📂 Loading {model_name} data...")
             
-            # Build file paths
+            # Build file paths - all models use the same base path structure
             folder_path = os.path.join(self.base_path, config['folder'])
             performance_path = os.path.join(folder_path, config['performance_file'])
             detailed_path = os.path.join(folder_path, config['detailed_file'])
