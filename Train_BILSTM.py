@@ -1,5 +1,4 @@
 # 中文注释：导入常用库和自定义模块
-#注意路径
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numpy as np
@@ -30,96 +29,492 @@ from torchvision import transforms as tfs
 import scipy.stats as stats
 import seaborn as sns
 import pickle
+import psutil  # 系统内存监控
 
-# GPU设备配置（指定使用GPU2）
+# GPU设备配置 - A100环境
 import os
-# 使用指定的GPU设备（GPU2和GPU3可用，当前使用GPU2）
+# 使用指定的GPU设备（A100环境）
 os.environ['CUDA_VISIBLE_DEVICES'] = '2'  # 只使用GPU2
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')  # 这里的cuda:0实际上是物理GPU2
 
 # 打印GPU信息
 if torch.cuda.is_available():
-    print("\n🖥️ GPU配置信息:")
+    print("\n🖥️ A100 GPU配置信息:")
     print(f"   可用GPU数量: {torch.cuda.device_count()}")
     for i in range(torch.cuda.device_count()):
         props = torch.cuda.get_device_properties(i)
         print(f"\n   GPU {i} ({props.name}):")
         print(f"      总显存: {props.total_memory/1024**3:.1f}GB")
-    print(f"\n   当前使用: 仅GPU2 (101样本训练，单卡优化)")
+    print(f"\n   当前使用: 仅GPU2 (A100 80GB优化)")
     print(f"   主GPU设备: cuda:0 (物理GPU2)")
-    print(f"   备注: GPU2和GPU3可用，样本更多时考虑跨卡训练")
+    print(f"   备注: 单卡A100优化，充分利用80GB显存")
 else:
     print("⚠️  未检测到GPU，使用CPU训练")
 
 # 中文注释：忽略警告信息
 warnings.filterwarnings('ignore')
 
-#----------------------------------------BiLSTM统一训练配置------------------------------
+# Linux环境matplotlib配置
+import matplotlib
+matplotlib.use('Agg')  # 使用非交互式后端
+
+# Linux环境字体设置 - 修复中文显示问题
+import matplotlib.font_manager as fm
+
+# 尝试多种字体方案
+font_options = [
+    'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
+    'DejaVu Sans', 'Liberation Sans', 'Arial Unicode MS'
+]
+
+# 检查可用字体
+available_fonts = []
+for font in font_options:
+    try:
+        fm.findfont(font)
+        available_fonts.append(font)
+    except:
+        continue
+
+# 设置字体
+if available_fonts:
+    plt.rcParams['font.sans-serif'] = available_fonts
+    print(f"✅ Linux字体配置完成，使用字体: {available_fonts[0]}")
+else:
+    # 如果都不可用，使用英文标签
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    print("⚠️  未找到中文字体，将使用英文标签")
+
+plt.rcParams['axes.unicode_minus'] = False
+
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.size'] = 10
+
+#----------------------------------------BiLSTM A100优化训练配置------------------------------
 print("="*50)
-print("BiLSTM统一训练模式（与Transformer脚本对齐）")
+print("BiLSTM A100优化训练模式")
 print("直接使用原始vin_2[x[0]]和vin_3[x[0]]数据")
 print("跳过Transformer训练，直接进行MC-AE训练")
-print("统一配置：大数据量 + 混合精度训练 + 单卡GPU2优化")
+print("启用A100 80GB优化和混合精度训练")
 print("="*50)
 
 #----------------------------------------数据加载------------------------------
 # 从Labels.xls加载训练样本ID（0-200号）
 def load_train_samples():
-    """从Labels.xls加载训练样本ID（与Transformer统一版本）"""
+    """从Labels.xls加载训练样本ID"""
     try:
         import pandas as pd
-        labels_path = '/mnt/bz25t/bzhy/zhanglikang/project/QAS/Labels.xls'
+        # Linux路径格式
+        data_base_dir = '/mnt/bz25t/bzhy/data/QAS'
+        labels_path = os.path.join(data_base_dir, 'Labels.xls')
         df = pd.read_excel(labels_path)
         
-        # 提取0-100范围的样本作为训练数据（与Transformer统一）
+        # 提取0-200范围的样本
         all_samples = df['Num'].tolist()
-        train_samples = [i for i in all_samples if 0 <= i <= 100]
+        train_samples = [i for i in all_samples if 0 <= i <= 200]
         
-        print(f"📋 从Labels.xls加载训练样本（与Transformer统一）:")
-        print(f"   训练样本范围: 0-100")
+        print(f"📋 从Labels.xls加载训练样本:")
+        print(f"   训练样本范围: 0-200")
         print(f"   实际可用样本: {len(train_samples)} 个")
-        print(f"   样本ID: {train_samples[:10]}{'...' if len(train_samples) > 10 else ''}")
+        print(f"   样本ID: {train_samples[:10]}..." if len(train_samples) > 10 else f"   样本ID: {train_samples}")
         
         return train_samples
     except Exception as e:
         print(f"❌ 加载Labels.xls失败: {e}")
-        print("⚠️  使用默认样本范围 0-100")
-        return list(range(101))
+        print("⚠️  使用默认样本范围 0-20")
+        return list(range(21))
 
 train_samples = load_train_samples()
 print(f"使用QAS目录中的{len(train_samples)}个样本进行训练")
 
-# 定义训练参数（与源代码Train_.py完全一致）
-EPOCH = 300  # 恢复源代码的300轮训练
-INIT_LR = 5e-4  # 与源代码Train_.py一致，更稳定的学习率  
-MAX_LR = 5e-4   # 保持与源代码一致
-BATCHSIZE = 100  # 恢复源代码的100批次大小
-WARMUP_EPOCHS = 5  # 预热轮数
+# 统一的路径配置 - Linux环境
+data_dir = '/mnt/bz25t/bzhy/data/QAS'  # 数据目录
+save_dir = '/mnt/bz25t/bzhy/datasave/BILSTM_train'  # 模型保存目录
 
-# 梯度裁剪参数优化（混合精度下更保守的设置）
-MAX_GRAD_NORM = 0.5  # 混合精度下使用更小的梯度阈值
-MIN_GRAD_NORM = 0.001  # 降低最小梯度阈值，减少梯度过小警告
+# 创建保存目录
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"✅ 创建模型保存目录: {save_dir}")
+else:
+    print(f"✅ 模型保存目录已存在: {save_dir}")
 
-# 学习率调度函数（参考源代码，使用固定学习率）
+# A100优化的MC-AE训练参数（安全版本）
+EPOCH = 500  # 增加训练轮数，充分利用A100性能
+INIT_LR = 2e-5  # 适度提升初始学习率
+MAX_LR = 1e-4   # 提升最大学习率，配合大批次训练
+
+# 根据GPU内存动态调整批次大小 - A100优化
+if torch.cuda.is_available():
+    gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    if gpu_memory_gb >= 80:  # A100 80GB
+        BATCHSIZE = 6000  # 单卡A100 80GB，可以使用更大批次
+    elif gpu_memory_gb >= 40:  # A100 40GB
+        BATCHSIZE = 3000
+    elif gpu_memory_gb >= 24:  # A100 24GB
+        BATCHSIZE = 1500
+    elif gpu_memory_gb >= 16:  # V100 16GB
+        BATCHSIZE = 800
+    else:  # 其他GPU
+        BATCHSIZE = 400
+    print(f"🖥️  检测到GPU显存: {gpu_memory_gb:.1f}GB，设置批次大小: {BATCHSIZE}")
+    print(f"🖥️  单卡A100优化，充分利用{gpu_memory_gb:.1f}GB显存")
+else:
+    BATCHSIZE = 100  # CPU模式使用更小的批次
+
+WARMUP_EPOCHS = 10  # 增加学习率预热轮数
+
+# 添加梯度裁剪
+MAX_GRAD_NORM = 1.0  # 调整到更合理的梯度裁剪阈值
+MIN_GRAD_NORM = 0.1  # 最小梯度范数阈值
+
+# A100 80GB内存优化参数
+MEMORY_CHECK_INTERVAL = 25  # 更频繁检查内存（每25个批次）
+CLEAR_CACHE_INTERVAL = 50   # 更频繁清理缓存（每50个批次）
+MAX_MEMORY_THRESHOLD = 0.85  # 内存使用率超过85%时采取措施（A100单卡保守策略）
+EMERGENCY_MEMORY_THRESHOLD = 0.95  # 内存使用率超过95%时紧急处理
+
+# 学习率预热函数
 def get_lr(epoch):
-    return INIT_LR  # 使用固定学习率，参考源代码
+    if epoch < WARMUP_EPOCHS:
+        return INIT_LR + (MAX_LR - INIT_LR) * epoch / WARMUP_EPOCHS
+    return MAX_LR * (0.9 ** (epoch // 50))  # 每50个epoch衰减到90%
 
-# 显示训练参数（与源代码Train_.py对齐）
-print(f"\n⚙️  BiLSTM训练参数（与Transformer脚本统一）:")
-print(f"   训练样本: 0-100 (共{len(train_samples)}个样本) - 与Transformer统一")
-print(f"   训练轮数: {EPOCH} (源代码: 300)")
-print(f"   学习率: {INIT_LR} (与Transformer统一: 8e-4)")
-print(f"   批次大小: {BATCHSIZE} (源代码: 100)")
+# 内存监控函数
+def check_gpu_memory():
+    """检查GPU内存使用情况"""
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            allocated = torch.cuda.memory_allocated(i) / 1024**3
+            cached = torch.cuda.memory_reserved(i) / 1024**3
+            total = torch.cuda.get_device_properties(i).total_memory / 1024**3
+            usage_ratio = allocated / total
+            print(f"   GPU {i}: {allocated:.1f}GB / {cached:.1f}GB / {total:.1f}GB (已用/缓存/总计) - {usage_ratio*100:.1f}%")
+            return usage_ratio
+    return 0.0
+
+def clear_gpu_cache():
+    """清理GPU缓存"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        print("   🧹 GPU缓存已清理")
+
+# 显示优化后的训练参数
+print(f"\n⚙️  BiLSTM训练参数（A100单卡优化版本）:")
+print(f"   批次大小: {BATCHSIZE} (充分利用A100 80GB显存)")
+print(f"   训练轮数: {EPOCH}")
+print(f"   初始学习率: {INIT_LR}")
+print(f"   最大学习率: {MAX_LR}")
+print(f"   GPU配置: 单卡A100 80GB (GPU2)")
+print(f"   混合精度: 启用 (AMP)")
+print(f"   内存监控: 启用 (每{MEMORY_CHECK_INTERVAL}批次检查)")
+print(f"   缓存清理: 启用 (每{CLEAR_CACHE_INTERVAL}批次清理)")
+print(f"   内存阈值: {MAX_MEMORY_THRESHOLD*100:.0f}% (A100单卡保守策略)")
+
+#----------------------------------------BILSTM训练（观察Loss下降）------------------------
+print("="*50)
+print("阶段0: BILSTM训练（观察Loss下降情况）")
+print("="*50)
+
+# A100 GPU优化参数配置（安全版本）
+TIME_STEP = 1  # rnn time step
+INPUT_SIZE = 7  # rnn input size
+
+# 显存和内存安全监控函数
+def get_gpu_memory_info():
+    """获取GPU显存信息"""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+        reserved = torch.cuda.memory_reserved() / 1024**3    # GB
+        total = torch.cuda.get_device_properties(0).total_memory / 1024**3  # GB
+        return allocated, reserved, total
+    return 0, 0, 0
+
+def get_system_memory_info():
+    """获取系统内存信息"""
+    import psutil
+    memory = psutil.virtual_memory()
+    used_gb = memory.used / 1024**3
+    total_gb = memory.total / 1024**3
+    return used_gb, total_gb
+
+def safe_batch_size_calculator(model, sample_data, max_batch_size=4096, safety_margin=0.2):
+    """安全的批次大小计算器"""
+    print(f"\n🔍 正在计算安全的批次大小...")
+    
+    # 获取当前显存状态
+    allocated_before, reserved_before, total_gpu = get_gpu_memory_info()
+    print(f"   当前显存: {allocated_before:.1f}GB / {total_gpu:.1f}GB")
+    
+    # 二分法查找最大安全批次大小
+    min_batch = 32
+    max_batch = max_batch_size
+    safe_batch = min_batch
+    
+    while min_batch <= max_batch:
+        test_batch = (min_batch + max_batch) // 2
+        try:
+            # 创建测试批次
+            if len(sample_data.shape) == 3:  # (samples, time, features)
+                test_input = sample_data[:test_batch].clone().to(device)
+            else:  # 其他形状
+                test_input = sample_data[:test_batch].clone().to(device)
+            
+            # 测试前向传播
+            with torch.no_grad():
+                model.eval()
+                _ = model(test_input)
+            
+            # 检查显存使用
+            allocated_after, _, _ = get_gpu_memory_info()
+            memory_usage = allocated_after / total_gpu
+            
+            if memory_usage < (1.0 - safety_margin):  # 安全阈值
+                safe_batch = test_batch
+                min_batch = test_batch + 1
+                print(f"   ✅ 批次 {test_batch}: 显存使用 {memory_usage*100:.1f}% - 安全")
+            else:
+                max_batch = test_batch - 1
+                print(f"   ⚠️  批次 {test_batch}: 显存使用 {memory_usage*100:.1f}% - 超限")
+            
+            # 清理测试数据
+            del test_input
+            torch.cuda.empty_cache()
+            
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                max_batch = test_batch - 1
+                print(f"   ❌ 批次 {test_batch}: 显存溢出")
+                torch.cuda.empty_cache()
+            else:
+                raise e
+        except Exception as e:
+            print(f"   ⚠️  批次 {test_batch}: 测试失败 - {str(e)}")
+            max_batch = test_batch - 1
+    
+    return safe_batch
+
+# 内存监控装饰器
+def memory_monitor(func):
+    """内存监控装饰器"""
+    def wrapper(*args, **kwargs):
+        # 训练前检查
+        gpu_alloc, gpu_reserved, gpu_total = get_gpu_memory_info()
+        sys_used, sys_total = get_system_memory_info()
+        
+        print(f"\n📊 训练前内存状态:")
+        print(f"   GPU显存: {gpu_alloc:.1f}GB / {gpu_total:.1f}GB ({gpu_alloc/gpu_total*100:.1f}%)")
+        print(f"   系统内存: {sys_used:.1f}GB / {sys_total:.1f}GB ({sys_used/sys_total*100:.1f}%)")
+        
+        # 安全检查
+        if gpu_alloc/gpu_total > 0.85:
+            print("⚠️  警告: GPU显存使用率过高，建议清理缓存")
+            torch.cuda.empty_cache()
+        
+        if sys_used/sys_total > 0.90:
+            print("⚠️  警告: 系统内存使用率过高")
+        
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                print("❌ 显存不足，正在清理缓存...")
+                torch.cuda.empty_cache()
+                raise e
+            else:
+                raise e
+        finally:
+            # 训练后状态
+            gpu_alloc_after, _, _ = get_gpu_memory_info()
+            sys_used_after, _ = get_system_memory_info()
+            print(f"\n📊 训练后内存状态:")
+            print(f"   GPU显存: {gpu_alloc_after:.1f}GB / {gpu_total:.1f}GB")
+            print(f"   系统内存: {sys_used_after:.1f}GB / {sys_total:.1f}GB")
+    
+    return wrapper
+
+# A100优化参数（大规模BILSTM适配版）
+BILSTM_LR = 1e-4  # 大模型适用的学习率（降低以保证稳定性）
+BILSTM_EPOCH = 500  # 增加训练轮数（大模型需要更多训练）
+BILSTM_BATCH_SIZE_TARGET = 1024  # 适中批次大小（平衡内存和性能）
+
+# 大模型训练的额外参数
+WARMUP_EPOCHS = 20  # 学习率预热轮数（大模型需要预热）
+GRADIENT_CLIP = 1.0  # 梯度裁剪阈值（防止梯度爆炸）
+
+print(f"A100单卡GPU优化配置（安全模式）:")
+print(f"   时间步长: {TIME_STEP}")
+print(f"   输入维度: {INPUT_SIZE}")
+print(f"   学习率: {BILSTM_LR} (针对A100优化)")
+print(f"   训练轮数: {BILSTM_EPOCH} (充分训练)")
+print(f"   目标批次大小: {BILSTM_BATCH_SIZE_TARGET} (将动态调整)")
+
+# 使用第一个样本的vin_1数据进行BILSTM训练
+first_sample_id = train_samples[0]
+print(f"\n使用样本 {first_sample_id} 的vin_1数据进行BILSTM训练")
+
+# 加载vin_1数据
+vin_1_file = os.path.join(data_dir, f'vin_{first_sample_id}', 'vin_1.pkl')
+if os.path.exists(vin_1_file):
+    with open(vin_1_file, 'rb') as file:
+        test_X = pickle.load(file)
+    print(f"✅ 成功加载vin_1数据，形状: {test_X.shape}")
+    
+    # 使用源代码的prepare_training_data函数
+    train_X, train_y = prepare_training_data(test_X, INPUT_SIZE, TIME_STEP, device)
+    print(f"训练数据准备完成:")
+    print(f"   输入形状 (train_X): {train_X.shape}")
+    print(f"   目标形状 (train_y): {train_y.shape}")
+    print(f"   预测目标: 下一时刻索引5和6的数据")
+    
+    # 创建BILSTM模型（用于批次大小计算）
+    bilstm_model = LSTM().to(device)
+    bilstm_model = bilstm_model.double()
+    
+    # 统计模型参数量
+    bilstm_params = bilstm_model.count_parameters()
+    print(f"\n📊 BILSTM模型参数统计:")
+    print(f"   总参数量: {bilstm_params:,}")
+    print(f"   模型规模: {bilstm_params/1e6:.2f}M 参数")
+    print(f"   对比Transformer: 约 {bilstm_params/920000:.2f}x 规模")
+    
+    # 打印模型结构
+    print(f"   架构: BiLSTM(input=7, hidden=128, layers=3) + FC(256→128→64→2)")
+    print(f"   匹配目标: Transformer(d_model=128, layers=3) ≈ 0.92M参数")
+    
+    # 安全计算最优批次大小
+    safe_batch_size = safe_batch_size_calculator(bilstm_model, train_X, BILSTM_BATCH_SIZE_TARGET, safety_margin=0.2)
+    print(f"\n🎯 确定安全批次大小: {safe_batch_size}")
+    print(f"   原目标: {BILSTM_BATCH_SIZE_TARGET}")
+    print(f"   实际使用: {safe_batch_size}")
+    
+    # 创建数据集和数据加载器（使用优化参数）
+    train_dataset = MyDataset(train_X, train_y)
+    bilstm_train_loader = DataLoader(
+        train_dataset, 
+        batch_size=safe_batch_size, 
+        shuffle=True,
+        num_workers=8,  # 多进程加载
+        pin_memory=True,  # 固定内存
+        persistent_workers=True,  # 持久化工作进程
+        prefetch_factor=2  # 预取因子
+    )
+    
+    # 优化器配置（大模型适配版）
+    # 为大模型使用更保守的学习率策略
+    actual_lr = BILSTM_LR  # 不再线性缩放，使用固定学习率
+    bilstm_optimizer = torch.optim.AdamW(bilstm_model.parameters(), 
+                                        lr=actual_lr, 
+                                        weight_decay=1e-4)  # 添加权重衰减
+    bilstm_loss_func = nn.MSELoss()
+    
+    # 学习率调度器（支持预热）
+    def get_lr_with_warmup(epoch):
+        if epoch < WARMUP_EPOCHS:
+            # 预热阶段：从0线性增加到目标学习率
+            return actual_lr * (epoch + 1) / WARMUP_EPOCHS
+        else:
+            # 余弦退火阶段
+            cos_epoch = epoch - WARMUP_EPOCHS
+            cos_max = BILSTM_EPOCH - WARMUP_EPOCHS
+            return actual_lr * 0.5 * (1 + np.cos(np.pi * cos_epoch / cos_max))
+    
+    # 手动学习率调度（更精确控制）
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        bilstm_optimizer, 
+        lr_lambda=lambda epoch: get_lr_with_warmup(epoch) / actual_lr
+    )
+    
+    print(f"\n🚀 A100大规模BILSTM训练配置:")
+    print(f"   模型规模: hidden_size=128, num_layers=3 (匹配Transformer)")
+    print(f"   批次大小: {safe_batch_size}")
+    print(f"   学习率: {actual_lr:.6f} (大模型优化)")
+    print(f"   训练轮数: {BILSTM_EPOCH} (充分训练)")
 print(f"   预热轮数: {WARMUP_EPOCHS}")
-print(f"   最大梯度阈值: {MAX_GRAD_NORM}")
-print(f"   最小梯度阈值: {MIN_GRAD_NORM}")
-print(f"   学习率调度: 固定学习率 (与源代码一致)")
-print(f"   GPU配置: 固定GPU2 (单卡优化，样本更多时考虑跨卡)")
-print(f"   混合精度: 启用 (与Transformer统一)")
-print(f"   数据路径: 绝对路径 (与Transformer统一)")
-print(f"   数据类型: float32 (与源代码一致)")
-print(f"   激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid (与源代码一致)")
-print(f"   梯度处理: 简化版本 (与源代码一致)")
+    print(f"   梯度裁剪: {GRADIENT_CLIP}")
+    print(f"   优化器: AdamW with weight_decay=1e-4")
+    print(f"   学习率调度: Warmup + CosineAnnealing")
+    print(f"   数据加载进程: 8")
+    
+    # 内存监控的BILSTM训练函数
+    @memory_monitor
+    def bilstm_training_loop():
+        print(f"\n🏋️ 开始BILSTM训练 (A100优化版本)...")
+        loss_train_100 = []
+        bilstm_model.train()
+        
+        # 训练循环
+        for epoch in range(BILSTM_EPOCH):
+            epoch_losses = []
+            
+            # 每个epoch开始前检查内存
+            if epoch % 50 == 0:
+                gpu_alloc, _, gpu_total = get_gpu_memory_info()
+                print(f"   Epoch {epoch}: GPU显存使用 {gpu_alloc/gpu_total*100:.1f}%")
+            
+            for step, (b_x, b_y) in enumerate(bilstm_train_loader):
+                try:
+                    # 前向传播
+                    output = bilstm_model(b_x)
+                    loss = bilstm_loss_func(b_y, output)
+                    
+                    # 反向传播
+                    bilstm_optimizer.zero_grad()
+                    loss.backward()
+                    
+                    # 梯度裁剪（防止梯度爆炸）
+                    torch.nn.utils.clip_grad_norm_(bilstm_model.parameters(), max_norm=GRADIENT_CLIP)
+                    
+                    bilstm_optimizer.step()
+                    
+                    # 记录损失
+                    if step % 20 == 0:  # 更频繁的记录
+                        loss_train_100.append(loss.cpu().detach().numpy())
+                        epoch_losses.append(loss.item())
+                    
+                    # 定期清理缓存
+                    if step % 100 == 0:
+                        torch.cuda.empty_cache()
+                        
+                except RuntimeError as e:
+                    if "out of memory" in str(e).lower():
+                        print(f"   ⚠️  Epoch {epoch}, Step {step}: 显存不足，清理缓存后继续")
+                        torch.cuda.empty_cache()
+                        continue
+                    else:
+                        raise e
+            
+            # 更新学习率
+            scheduler.step()
+            
+            # 定期输出训练状态
+            if epoch % 20 == 0:
+                avg_loss = np.mean(epoch_losses) if epoch_losses else 0
+                current_lr = scheduler.get_last_lr()[0]
+                print(f"   Epoch {epoch:3d}/{BILSTM_EPOCH}: Loss={avg_loss:.6f}, LR={current_lr:.6f}")
+        
+        print(f"✅ BILSTM训练完成，共记录 {len(loss_train_100)} 个Loss值")
+        return loss_train_100
+    
+    # 执行训练
+    loss_train_100 = bilstm_training_loop()
+    
+    # 保存BILSTM模型和Loss记录
+    bilstm_model_path = os.path.join(save_dir, f'bilstm_model_sample_{first_sample_id}.pth')
+    bilstm_loss_path = os.path.join(save_dir, f'bilstm_loss_record_sample_{first_sample_id}.pkl')
+    
+    torch.save(bilstm_model.state_dict(), bilstm_model_path)
+    with open(bilstm_loss_path, 'wb') as f:
+        pickle.dump(loss_train_100, f)
+    
+    print(f"✅ BILSTM模型已保存: {bilstm_model_path}")
+    print(f"✅ Loss记录已保存: {bilstm_loss_path}")
+    
+else:
+    print(f"❌ 未找到vin_1数据文件: {vin_1_file}")
+    print("跳过BILSTM训练步骤")
+
+print("\n" + "="*50)
 
 #----------------------------------------MC-AE训练数据准备（直接使用原始数据）------------------------
 print("="*50)
@@ -632,8 +1027,8 @@ print("📥 开始数据加载和质量检查")
 print("="*60)
 
 for sample_id in train_samples:
-    vin2_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_2.pkl'
-    vin3_path = f'/mnt/bz25t/bzhy/zhanglikang/project/QAS/{sample_id}/vin_3.pkl'
+    vin2_path = os.path.join(data_dir, str(sample_id), 'vin_2.pkl')
+    vin3_path = os.path.join(data_dir, str(sample_id), 'vin_3.pkl')
     
     # 加载原始vin_2数据
     try:
@@ -754,24 +1149,100 @@ train_losses_mcae1 = []
 train_losses_mcae2 = []
 
 # 中文注释：自定义多输入数据集类（本地定义，非Class_.py中的Dataset）
-class MultiInputDataset(Dataset):
+class Dataset(Dataset):
     def __init__(self, x, y, z, q):
-        self.x = x.to(torch.double)
-        self.y = y.to(torch.double)
-        self.z = z.to(torch.double)
-        self.q = q.to(torch.double)
+        self.x = x.to(torch.float32)
+        self.y = y.to(torch.float32)
+        self.z = z.to(torch.float32)
+        self.q = q.to(torch.float32)
     def __len__(self):
         return len(self.x)
     def __getitem__(self, idx):
         return self.x[idx], self.y[idx], self.z[idx], self.q[idx]
 
-# 中文注释：用DataLoader批量加载多通道特征数据
-train_loader_u = DataLoader(MultiInputDataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=BATCHSIZE, shuffle=False)
+# A100安全批次大小计算（MC-AE1）
+print(f"\n🔍 MC-AE1: 计算安全批次大小...")
+print(f"   原设定批次大小: {BATCHSIZE}")
 
-# 中文注释：初始化MC-AE模型（使用double精度，与源代码一致）
-net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device)
+# 创建临时模型用于批次大小测试
+temp_net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
 
-netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device)
+# 创建测试数据样本
+test_sample_size = min(BATCHSIZE, len(x_recovered))
+sample_x = x_recovered[:test_sample_size]
+sample_y = y_recovered[:test_sample_size] 
+sample_z = z_recovered[:test_sample_size]
+sample_q = q_recovered[:test_sample_size]
+
+# 使用安全批次大小计算器（修改版本适配MC-AE）
+def safe_mcae_batch_calculator(model, x, y, z, q, max_batch_size, safety_margin=0.2):
+    """MC-AE专用安全批次大小计算器"""
+    print(f"   正在测试MC-AE批次大小...")
+    
+    allocated_before, _, total_gpu = get_gpu_memory_info()
+    print(f"   当前显存: {allocated_before:.1f}GB / {total_gpu:.1f}GB")
+    
+    min_batch = 32
+    max_batch = min(max_batch_size, len(x))
+    safe_batch = min_batch
+    
+    while min_batch <= max_batch:
+        test_batch = (min_batch + max_batch) // 2
+        try:
+            # 创建测试批次
+            test_x = x[:test_batch].to(device)
+            test_y = y[:test_batch].to(device)
+            test_z = z[:test_batch].to(device)
+            test_q = q[:test_batch].to(device)
+            
+            # 测试前向传播
+            with torch.no_grad():
+                model.eval()
+                _, _ = model(test_x, test_z, test_q)
+            
+            # 检查显存使用
+            allocated_after, _, _ = get_gpu_memory_info()
+            memory_usage = allocated_after / total_gpu
+            
+            if memory_usage < (1.0 - safety_margin):
+                safe_batch = test_batch
+                min_batch = test_batch + 1
+                print(f"   ✅ 批次 {test_batch}: 显存 {memory_usage*100:.1f}% - 安全")
+            else:
+                max_batch = test_batch - 1
+                print(f"   ⚠️  批次 {test_batch}: 显存 {memory_usage*100:.1f}% - 超限")
+            
+            # 清理
+            del test_x, test_y, test_z, test_q
+            torch.cuda.empty_cache()
+            
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                max_batch = test_batch - 1
+                print(f"   ❌ 批次 {test_batch}: 显存溢出")
+                torch.cuda.empty_cache()
+            else:
+                raise e
+    
+    return safe_batch
+
+# 计算MC-AE1的安全批次大小
+safe_mcae1_batch = safe_mcae_batch_calculator(temp_net, sample_x, sample_y, sample_z, sample_q, BATCHSIZE, safety_margin=0.25)
+print(f"🎯 MC-AE1 安全批次大小: {safe_mcae1_batch}")
+
+# 清理临时模型
+del temp_net
+torch.cuda.empty_cache()
+
+# 中文注释：用DataLoader批量加载多通道特征数据（使用安全批次大小）
+train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), 
+                           batch_size=safe_mcae1_batch, shuffle=False, 
+                           num_workers=8, pin_memory=True)  # A100优化配置
+
+# 中文注释：初始化MC-AE模型（使用float32）
+net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
+
+netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).to(torch.float32)
 
 # 使用更稳定的权重初始化
 def stable_weight_init(model):
@@ -788,220 +1259,310 @@ stable_weight_init(net)
 stable_weight_init(netx)
 print("✅ 应用稳定的权重初始化")
 
-# 单GPU优化模式（小样本训练，避免跨卡通信开销）
-print("🔧 单GPU优化模式：避免数据并行开销，专注于小样本训练")
+# A100单卡优化配置
+print("✅ 使用单卡A100优化模式")
+print(f"   GPU设备: {device}")
+print(f"   显存优化: 针对80GB显存特别优化")
 
 optimizer = torch.optim.Adam(net.parameters(), lr=INIT_LR)
 l1_lambda = 0.01
 loss_f = nn.MSELoss()
 
-# 启用混合精度训练（与Transformer统一）
-scaler = torch.cuda.amp.GradScaler(enabled=True)
+# 启用混合精度训练
+scaler = torch.cuda.amp.GradScaler()
 print("✅ 启用混合精度训练 (AMP)")
-
-# 启用CUDA性能优化
-torch.backends.cudnn.benchmark = True
-torch.backends.cudnn.deterministic = False
-print("✅ 启用CUDA性能优化 (cudnn.benchmark)")
 for epoch in range(EPOCH):
     total_loss = 0
     num_batches = 0
-    grad_too_small_count = 0  # 初始化梯度过小统计
-    grad_norms = []  # 收集梯度范数用于监控
     
     # 更新学习率
     current_lr = get_lr(epoch)
     for param_group in optimizer.param_groups:
         param_group['lr'] = current_lr
     
+    # 每个epoch开始时清理缓存
+    clear_gpu_cache()
+    
     for iteration, (x, y, z, q) in enumerate(train_loader_u):
-        try:
             x = x.to(device)
             y = y.to(device)
             z = z.to(device)
             q = q.to(device)
             
-            # 检查输入数据范围（更严格的检查）
+        # 内存监控 - 定期检查内存使用情况
+        if iteration % MEMORY_CHECK_INTERVAL == 0:
+            memory_usage = check_gpu_memory()
+            if memory_usage > EMERGENCY_MEMORY_THRESHOLD:
+                print(f"🚨  内存使用率过高 ({memory_usage*100:.1f}%)，紧急清理缓存...")
+                clear_gpu_cache()
+                torch.cuda.synchronize()  # 强制同步
+                if memory_usage > 0.98:  # 如果仍然过高，跳过此批次
+                    print(f"🚨  内存使用率仍然过高，跳过此批次")
+                    continue
+            elif memory_usage > MAX_MEMORY_THRESHOLD:
+                print(f"⚠️  内存使用率较高 ({memory_usage*100:.1f}%)，清理缓存...")
+                clear_gpu_cache()
+        
+        # 定期清理缓存
+        if iteration % CLEAR_CACHE_INTERVAL == 0:
+            clear_gpu_cache()
+        
+        # 检查输入数据范围
             if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
                 print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
                 continue
             
-            # 检查输入数据范围是否合理（更严格的限制）
-            if x.abs().max() > 100 or y.abs().max() > 100:
+        # 检查输入数据范围是否合理
+        if x.abs().max() > 1000 or y.abs().max() > 1000:
                 print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
                 print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
                 print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
                 continue
             
-            # 使用混合精度训练（与Transformer统一）
-            optimizer.zero_grad()
-            
-            net = net.double()  # 与源代码一致，使用double精度
-            recon_im, recon_p = net(x, z, q)
-            loss_u = loss_f(y, recon_im)
+        # 使用混合精度训练
+            with torch.cuda.amp.autocast():
+                recon_im, recon_p = net(x, z, q)
+                loss_u = loss_f(y, recon_im)
                 
-            # 简化损失检查（参考源代码）
+                    # 检查损失值是否为NaN
             if torch.isnan(loss_u) or torch.isinf(loss_u):
-                print(f"警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
+            print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
+            print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+            print(f"损失值: {loss_u.item()}")
+            print("跳过此批次，不进行反向传播")
+            continue
+        
+        # 检查输入数据范围是否合理
+        if x.abs().max() > 1000 or y.abs().max() > 1000:
+            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
                 continue
             
             total_loss += loss_u.item()
             num_batches += 1
+        optimizer.zero_grad()
             
-            # 标准反向传播（与源代码一致）
-            loss_u.backward()
-            optimizer.step()
+        # 使用混合精度训练
+            scaler.scale(loss_u).backward()
             
-        except RuntimeError as e:
-            if "unscale_" in str(e):
-                print(f"警告：第{epoch}轮第{iteration}批次混合精度scaler错误，重置并继续: {e}")
-                optimizer.zero_grad()
-                scaler = torch.cuda.amp.GradScaler(enabled=True)  # 重新初始化scaler
+        # 检查梯度是否为NaN或无穷大
+        grad_norm = 0
+        has_grad_issue = False
+        
+        # 安全地处理梯度
+        try:
+            # 在检查梯度前unscale
+            scaler.unscale_(optimizer)
+            
+            for name, param in net.named_parameters():
+                if param.grad is not None:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                        has_grad_issue = True
+                        break
+                    grad_norm += param.grad.data.norm(2).item() ** 2
+            
+            if has_grad_issue:
+                # 重置scaler状态
+                scaler.update()
                 continue
-            else:
-                print(f"警告：第{epoch}轮第{iteration}批次训练错误: {e}")
+            
+            grad_norm = grad_norm ** 0.5
+            
+            # 渐进式梯度裁剪 - 只显示异常情况
+            if grad_norm > MAX_GRAD_NORM:
+                torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
+                print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
+            elif grad_norm < MIN_GRAD_NORM:
+                print(f"⚠️  梯度过小: {grad_norm:.4f} < {MIN_GRAD_NORM}")
+            
+            # 执行优化器步骤
+            scaler.step(optimizer)
+            scaler.update()
+            
+        except Exception as e:
+            print(f"优化器步骤失败: {e}")
+            print("跳过此批次并重置scaler状态")
+            # 重置scaler状态
+            scaler.update()
                 continue
+        
+        # 及时释放不需要的张量
+        del x, y, z, q, recon_im, recon_p, loss_u
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
-    
-    # 梯度统计总结
-    avg_grad_norm = np.mean(grad_norms) if grad_norms else 0
-    if grad_too_small_count > 0:
-        grad_percentage = (grad_too_small_count / num_batches) * 100
-        print(f'MC-AE1 Epoch: {epoch:2d} | Average Loss: {avg_loss:.6f} | 梯度过小: {grad_too_small_count}/{num_batches} ({grad_percentage:.1f}%) | 平均梯度范数: {avg_grad_norm:.4f}')
-    else:
         if epoch % 50 == 0:
-            print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f} | 平均梯度范数: {:.4f}'.format(epoch, avg_loss, avg_grad_norm))
-        elif epoch % 10 == 0:  # 每10个epoch输出一次进度
-            print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f} | 平均梯度范数: {:.4f}'.format(epoch, avg_loss, avg_grad_norm))
-            # GPU利用率监控
-            if torch.cuda.is_available():
-                gpu_memory_used = torch.cuda.memory_allocated() / 1024**3
-                gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
+        print('MC-AE1 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
 
 # 中文注释：全量推理，获得重构误差
-train_loader2 = DataLoader(MultiInputDataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=len(x_recovered), shuffle=False)
+train_loader2 = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_recovered), batch_size=len(x_recovered), shuffle=False)
 for iteration, (x, y, z, q) in enumerate(train_loader2):
     x = x.to(device)
     y = y.to(device)
     z = z.to(device)
     q = q.to(device)
-    net = net.float()
+    with torch.cuda.amp.autocast():
     recon_imtest, recon = net(x, z, q)
 AA = recon_imtest.cpu().detach().numpy()
 yTrainU = y_recovered.cpu().detach().numpy()
 ERRORU = AA - yTrainU
 
-# 中文注释：第二组特征的MC-AE训练
-train_loader_soc = DataLoader(MultiInputDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=BATCHSIZE, shuffle=False)
+# A100安全批次大小计算（MC-AE2）
+print(f"\n🔍 MC-AE2: 计算安全批次大小...")
+
+# 计算MC-AE2的安全批次大小
+test_sample_size2 = min(BATCHSIZE, len(x_recovered2))
+sample_x2 = x_recovered2[:test_sample_size2]
+sample_y2 = y_recovered2[:test_sample_size2]
+sample_z2 = z_recovered2[:test_sample_size2]
+sample_q2 = q_recovered2[:test_sample_size2]
+
+safe_mcae2_batch = safe_mcae_batch_calculator(netx, sample_x2, sample_y2, sample_z2, sample_q2, BATCHSIZE, safety_margin=0.25)
+print(f"🎯 MC-AE2 安全批次大小: {safe_mcae2_batch}")
+
+# 中文注释：第二组特征的MC-AE训练（使用安全批次大小）
+train_loader_soc = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), 
+                             batch_size=safe_mcae2_batch, shuffle=False,
+                             num_workers=8, pin_memory=True)  # A100优化配置
 optimizer = torch.optim.Adam(netx.parameters(), lr=INIT_LR)
 loss_f = nn.MSELoss()
 
-# 启用混合精度训练（与Transformer统一）
-scaler2 = torch.cuda.amp.GradScaler(enabled=True)
+# 为第二个模型创建新的scaler
+scaler2 = torch.cuda.amp.GradScaler()
 
 avg_loss_list_x = []
 for epoch in range(EPOCH):
     total_loss = 0
     num_batches = 0
-    grad_too_small_count_x = 0  # 初始化第二个模型的梯度过小统计
-    grad_norms_x = []  # 收集第二个模型的梯度范数
     
     # 更新学习率
     current_lr = get_lr(epoch)
     for param_group in optimizer.param_groups:
         param_group['lr'] = current_lr
     
+    # 每个epoch开始时清理缓存
+    clear_gpu_cache()
+    
     for iteration, (x, y, z, q) in enumerate(train_loader_soc):
-        try:
             x = x.to(device)
             y = y.to(device)
             z = z.to(device)
             q = q.to(device)
             
-            # MC-AE2输入数据检查（更严格）
-            if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
-                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
+        # 内存监控 - 定期检查内存使用情况
+        if iteration % MEMORY_CHECK_INTERVAL == 0:
+            memory_usage = check_gpu_memory()
+            if memory_usage > EMERGENCY_MEMORY_THRESHOLD:
+                print(f"🚨  内存使用率过高 ({memory_usage*100:.1f}%)，紧急清理缓存...")
+                clear_gpu_cache()
+                torch.cuda.synchronize()  # 强制同步
+                if memory_usage > 0.98:  # 如果仍然过高，跳过此批次
+                    print(f"🚨  内存使用率仍然过高，跳过此批次")
                 continue
-            
-            # 检查输入数据范围是否合理（更严格的限制）
-            if x.abs().max() > 100 or y.abs().max() > 100:
-                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
-                print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
-                print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-                continue
-            
-            # 使用混合精度训练（与Transformer统一）
-            optimizer.zero_grad()
-            
-            netx = netx.double()  # 与源代码一致，使用double精度
-            recon_im, z = netx(x, z, q)
-            loss_x = loss_f(y, recon_im)
+            elif memory_usage > MAX_MEMORY_THRESHOLD:
+                print(f"⚠️  内存使用率较高 ({memory_usage*100:.1f}%)，清理缓存...")
+                clear_gpu_cache()
+        
+        # 定期清理缓存
+        if iteration % CLEAR_CACHE_INTERVAL == 0:
+            clear_gpu_cache()
+        
+        # 使用混合精度训练
+            with torch.cuda.amp.autocast():
+                recon_im, z = netx(x, z, q)
+                loss_x = loss_f(y, recon_im)
                 
-            # 简化损失检查（参考源代码）
+                    # 检查损失值是否为NaN
             if torch.isnan(loss_x) or torch.isinf(loss_x):
-                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次检测到异常损失值，跳过此批次")
+            print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
+            print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+            print(f"损失值: {loss_x.item()}")
+            print("跳过此批次，不进行反向传播")
+            continue
+        
+        # 检查输入数据范围是否合理
+        if x.abs().max() > 1000 or y.abs().max() > 1000:
+            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
                 continue
             
             total_loss += loss_x.item()
             num_batches += 1
+        optimizer.zero_grad()
+            scaler2.scale(loss_x).backward()
             
-            # 标准反向传播（与源代码一致）
-            loss_x.backward()
-            optimizer.step()
+        # 检查梯度是否为NaN或无穷大
+        grad_norm = 0
+        has_grad_issue = False
+        
+        # 安全地处理梯度
+        try:
+            # 在检查梯度前unscale
+            scaler2.unscale_(optimizer)
             
-        except RuntimeError as e:
-            if "unscale_" in str(e):
-                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次混合精度scaler错误，重置并继续: {e}")
-                optimizer.zero_grad()
-                scaler2 = torch.cuda.amp.GradScaler(enabled=True)  # 重新初始化scaler
+            for name, param in netx.named_parameters():
+                if param.grad is not None:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                        has_grad_issue = True
+                        break
+                    grad_norm += param.grad.data.norm(2).item() ** 2
+            
+            if has_grad_issue:
+                # 重置scaler状态
+                scaler2.update()
                 continue
-            else:
-                print(f"MC-AE2警告：第{epoch}轮第{iteration}批次训练错误: {e}")
+            
+            grad_norm = grad_norm ** 0.5
+            
+            # 渐进式梯度裁剪 - 只显示异常情况
+            if grad_norm > MAX_GRAD_NORM:
+                torch.nn.utils.clip_grad_norm_(netx.parameters(), MAX_GRAD_NORM)
+                print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
+            elif grad_norm < MIN_GRAD_NORM:
+                print(f"⚠️  梯度过小: {grad_norm:.4f} < {MIN_GRAD_NORM}")
+            
+            # 执行优化器步骤
+            scaler2.step(optimizer)
+            scaler2.update()
+            
+        except Exception as e:
+            print(f"优化器步骤失败: {e}")
+            print("跳过此批次并重置scaler状态")
+            # 重置scaler状态
+            scaler2.update()
                 continue
+        
+        # 及时释放不需要的张量
+        del x, y, z, q, recon_im, loss_x
     
     avg_loss = total_loss / num_batches
     avg_loss_list_x.append(avg_loss)
     train_losses_mcae2.append(avg_loss)
-    
-    # 梯度统计总结
-    avg_grad_norm_x = np.mean(grad_norms_x) if grad_norms_x else 0
-    if grad_too_small_count_x > 0:
-        grad_percentage_x = (grad_too_small_count_x / num_batches) * 100
-        print(f'MC-AE2 Epoch: {epoch:2d} | Average Loss: {avg_loss:.6f} | 梯度过小: {grad_too_small_count_x}/{num_batches} ({grad_percentage_x:.1f}%) | 平均梯度范数: {avg_grad_norm_x:.4f}')
-    else:
         if epoch % 50 == 0:
-            print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f} | 平均梯度范数: {:.4f}'.format(epoch, avg_loss, avg_grad_norm_x))
-        elif epoch % 10 == 0:  # 每10个epoch输出一次进度
-            print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f} | 平均梯度范数: {:.4f}'.format(epoch, avg_loss, avg_grad_norm_x))
-            # GPU利用率监控
-            if torch.cuda.is_available():
-                gpu_memory_used = torch.cuda.memory_allocated() / 1024**3
-                gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                print(f"   GPU显存: {gpu_memory_used:.1f}GB / {gpu_memory_total:.1f}GB ({gpu_memory_used/gpu_memory_total*100:.1f}%)")
+        print('MC-AE2 Epoch: {:2d} | Average Loss: {:.6f}'.format(epoch, avg_loss))
 
-train_loaderx2 = DataLoader(MultiInputDataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=len(x_recovered2), shuffle=False)
+train_loaderx2 = DataLoader(Dataset(x_recovered2, y_recovered2, z_recovered2, q_recovered2), batch_size=len(x_recovered2), shuffle=False)
 for iteration, (x, y, z, q) in enumerate(train_loaderx2):
     x = x.to(device)
     y = y.to(device)
     z = z.to(device)
     q = q.to(device)
-    netx = netx.double()
+    with torch.cuda.amp.autocast():
     recon_imtestx, z = netx(x, z, q)
 
 BB = recon_imtestx.cpu().detach().numpy()
 yTrainX = y_recovered2.cpu().detach().numpy()
 ERRORX = BB - yTrainX
 
-# 创建结果目录
-result_dir = '/mnt/bz25t/bzhy/datasave/Three_model/BILSTM'
-if not os.path.exists(result_dir):
-    os.makedirs(result_dir)
-    print(f"✅ 创建结果目录: {result_dir}")
-else:
-    print(f"✅ 使用现有结果目录: {result_dir}")
+# 使用统一的保存目录
+result_dir = save_dir
+print(f"📁 结果保存目录: {result_dir}")
 
 # 中文注释：诊断特征提取与PCA分析
 df_data = DiagnosisFeature(ERRORU,ERRORX)
@@ -1015,42 +1576,6 @@ print("="*50)
 
 # 绘制训练结果
 print("📈 绘制BiLSTM训练曲线...")
-
-# Linux环境matplotlib配置
-import matplotlib
-matplotlib.use('Agg')  # 使用非交互式后端
-
-# Linux环境字体设置 - 修复中文显示问题
-import matplotlib.font_manager as fm
-import os
-
-# 尝试多种字体方案
-font_options = [
-    'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
-    'DejaVu Sans', 'Liberation Sans', 'Arial Unicode MS'
-]
-
-# 检查可用字体
-available_fonts = []
-for font in font_options:
-    try:
-        fm.findfont(font)
-        available_fonts.append(font)
-    except:
-        continue
-
-# 设置字体
-if available_fonts:
-    plt.rcParams['font.sans-serif'] = available_fonts
-    print(f"✅ 使用字体: {available_fonts[0]}")
-else:
-    # 如果都不可用，使用英文标签
-    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
-    print("⚠️  未找到中文字体，将使用英文标签")
-
-plt.rcParams['axes.unicode_minus'] = False
-plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['font.size'] = 10
 
 # 创建图表
 fig, axes = plt.subplots(2, 2, figsize=(15, 10))
@@ -1106,40 +1631,12 @@ plt.close()
 
 print(f"✅ BiLSTM训练结果图已保存: {result_dir}/bilstm_training_results.png")
 
-# 确保结果目录存在（已在前面创建）
+# 结果目录已在前面创建，无需重复检查
 
-# 2. 保存诊断特征DataFrame（避免Excel文件过大）
-try:
-    # 检查DataFrame大小
-    rows, cols = df_data.shape
-    print(f"📊 诊断特征DataFrame大小: {rows}行 x {cols}列")
-    
-    if rows > 1000000:  # 如果超过100万行，只保存CSV
-        print(f"⚠️  DataFrame过大({rows}行)，跳过Excel保存，只保存CSV文件")
-        df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
-        print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.csv")
-    else:
-        # 尝试保存Excel，如果失败则只保存CSV
-        try:
+# 2. 保存诊断特征DataFrame
             df_data.to_excel(f'{result_dir}/diagnosis_feature_bilstm_baseline.xlsx', index=False)
             df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
             print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.xlsx/csv")
-        except ValueError as e:
-            print(f"⚠️  Excel保存失败: {e}")
-            print("   只保存CSV文件")
-            df_data.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline.csv', index=False)
-            print(f"✓ 保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline.csv")
-except Exception as e:
-    print(f"❌ 保存诊断特征失败: {e}")
-    # 尝试分块保存
-    try:
-        chunk_size = 500000  # 50万行一个文件
-        for i in range(0, len(df_data), chunk_size):
-            chunk = df_data.iloc[i:i+chunk_size]
-            chunk.to_csv(f'{result_dir}/diagnosis_feature_bilstm_baseline_part_{i//chunk_size+1}.csv', index=False)
-        print(f"✓ 分块保存诊断特征: {result_dir}/diagnosis_feature_bilstm_baseline_part_*.csv")
-    except Exception as e2:
-        print(f"❌ 分块保存也失败: {e2}")
 
 # 3. 保存PCA分析主要结果
 np.save(f'{result_dir}/v_I_bilstm_baseline.npy', v_I)
@@ -1176,7 +1673,7 @@ training_history = {
     'mcae2_reconstruction_error_std': np.std(np.abs(ERRORX)),
     'training_samples': len(train_samples),
     'epochs': EPOCH,
-    'learning_rate': INIT_LR,
+    'learning_rate': INIT_LR, # Changed from LR to INIT_LR
     'batch_size': BATCHSIZE
 }
 
@@ -1186,26 +1683,17 @@ with open(f'{result_dir}/bilstm_training_history.pkl', 'wb') as f:
 print(f"✓ 保存训练历史: {result_dir}/bilstm_training_history.pkl")
 
 print("="*50)
-print("🎉 BiLSTM基线训练完成！")
+print("🎉 BiLSTM基准训练完成！")
 print("="*50)
-print("BiLSTM基线训练模式总结（与源代码Train_.py对齐）：")
+print("BiLSTM基准模式总结：")
 print("1. ✅ 跳过Transformer训练阶段")
 print("2. ✅ 直接使用原始vin_2[x[0]]和vin_3[x[0]]数据")
 print("3. ✅ 保持Pack Modeling输出vin_2[x[1]]和vin_3[x[1]]不变")
 print("4. ✅ MC-AE使用原始BiLSTM数据进行训练")
-print("5. ✅ 使用0-9样本进行训练（共{len(train_samples)}个样本）")
-print("6. ✅ 所有模型和结果文件添加'_bilstm_baseline'后缀")
+print("5. ✅ 所有模型和结果文件添加'_bilstm_baseline'后缀")
 print("")
-print("🔧 与源代码一致的关键参数：")
-print(f"   - 训练轮数: {EPOCH} (源代码: 300)")
-print(f"   - 学习率: {INIT_LR} (源代码: 5e-4)")
-print(f"   - 批次大小: {BATCHSIZE} (源代码: 100)")
-print("   - 激活函数: MC-AE1用custom_activation, MC-AE2用sigmoid")
-print("   - 数据类型: float32, 梯度处理: 简化版本")
-print("")
-print(f"📁 结果保存路径: {result_dir}")
-print("   - 训练结果图: bilstm_training_results.png")
-print("   - 诊断特征: diagnosis_feature_bilstm_baseline.csv")
-print("   - 模型参数: net_model_bilstm_baseline.pth, netx_model_bilstm_baseline.pth")
-print("   - PCA分析结果: *_bilstm_baseline.npy")
-print("   - 训练历史: bilstm_training_history.pkl") 
+print("📊 比对说明：")
+print("   - 此模式建立BiLSTM基准性能")
+print("   - 可与Transformer模式进行公平对比")
+print("   - 便于评估Transformer替换的效果")
+print("   - 训练时间更短，适合快速验证") 

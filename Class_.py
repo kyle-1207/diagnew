@@ -48,35 +48,77 @@ class MyDataset(torch.utils.data.Dataset):
 
 # 定义LSTM模型
 class LSTM(nn.Module):
-    # 初始化LSTM模型
+    # 初始化LSTM模型 - 升级版：参数量匹配Transformer规模
     def __init__(self):
         super(LSTM, self).__init__()
-        # 定义LSTM层
+        
+        # 模型配置 - 匹配Transformer规模
+        self.input_size = INPUT_SIZE  # 7维输入特征
+        self.hidden_size = 128        # 隐藏层维度（匹配Transformer的d_model=128）
+        self.num_layers = 3           # LSTM层数（匹配Transformer的num_layers=3）
+        self.output_size = 2          # 输出维度（电压+SOC）
+        
+        # 定义双向LSTM层 - 大规模架构
         self.lstm = nn.LSTM(
-            # LSTM输入特征维度
-            input_size=INPUT_SIZE,
-            # LSTM隐藏层维度
-            hidden_size=18,  # rnn hidden unit
-            # LSTM层数
-            num_layers=1,  # number of rnn layer
-            # 输入和输出是否包含批次维度
-            batch_first=True,  # input & output will has batch size as 1s dimension. e.g. (batch, time_step, input_size)
-            # 是否为双向LSTM
-            bidirectional=True
+            input_size=self.input_size,      # 7维输入特征
+            hidden_size=self.hidden_size,    # 128隐藏单元（匹配Transformer）
+            num_layers=self.num_layers,      # 3层LSTM（匹配Transformer）
+            batch_first=True,                # 批次维度优先
+            bidirectional=True,              # 双向LSTM
+            dropout=0.1                      # 防止过拟合
         )
-        # 定义输出层
-        self.out = nn.Linear(36, 2)
-    # 前向传播
+        
+        # 定义多层输出网络 - 匹配Transformer复杂度
+        self.fc1 = nn.Linear(self.hidden_size * 2, self.hidden_size)  # 256 -> 128
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(0.1)
+        self.fc2 = nn.Linear(self.hidden_size, self.hidden_size // 2)  # 128 -> 64
+        self.fc3 = nn.Linear(self.hidden_size // 2, self.output_size)  # 64 -> 2
+        
+        # 权重初始化
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Xavier权重初始化 - 匹配Transformer初始化方式"""
+        for name, param in self.lstm.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                nn.init.zeros_(param.data)
+        
+        for module in [self.fc1, self.fc2, self.fc3]:
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                nn.init.zeros_(module.bias)
+    
     def forward(self, x):
-        # 获取LSTM的输出和隐状态
-        r_out, (hidden_state1, hidden_state2) = self.lstm(x, None) 
-        # 存储每个时间步的输出
-        outs = []  
-        # 遍历LSTM的输出，获取每个时间步的预测结果
-        for time_step in range(r_out.size(1)):  
-            outs.append(self.out(r_out[:, time_step, :]))
-        # 将所有时间步的预测结果堆叠成一个张量
-        return torch.stack(outs, dim=1)
+        # x shape: [batch_size, seq_len, input_size=7]
+        
+        # 通过LSTM层
+        lstm_out, (hidden_state, cell_state) = self.lstm(x)  # [batch_size, seq_len, hidden_size*2]
+        
+        # 取最后一个时间步的输出（用于预测）
+        last_output = lstm_out[:, -1, :]  # [batch_size, hidden_size*2=256]
+        
+        # 通过多层全连接网络
+        output = self.fc1(last_output)    # [batch_size, 128]
+        output = self.activation(output)
+        output = self.dropout(output)
+        
+        output = self.fc2(output)         # [batch_size, 64]
+        output = self.activation(output)
+        output = self.dropout(output)
+        
+        output = self.fc3(output)         # [batch_size, 2]
+        
+        # 返回2维输出：[batch_size, output_size=2]
+        return output
+    
+    def count_parameters(self):
+        """统计模型参数量"""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
     
 # 定义数据集类
 class Dataset(Dataset): 
