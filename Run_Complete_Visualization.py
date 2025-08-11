@@ -36,6 +36,30 @@ class CompleteVisualizationRunner:
             'transformer_pn': f"{self.three_model_dir}/transformer_PN"  # 对应 Train_Transformer_PN_HybridFeedback.py 的结果
         }
         
+        # 实际文件名映射配置（基于实际保存的文件名）
+        self.model_file_patterns = {
+            'bilstm': {
+                'model': 'bilstm_model.pth',
+                'results': 'bilstm_training_results.png'
+            },
+            'transformer_positive': {
+                'transformer_model': 'transformer_model_hybrid_feedback.pth',
+                'net_model': 'net_model_hybrid_feedback.pth', 
+                'netx_model': 'netx_model_hybrid_feedback.pth',
+                'pca_params': 'pca_params_hybrid_feedback.pkl',
+                'results': 'hybrid_feedback_training_results.png'
+            },
+            'transformer_pn': {
+                'transformer_model': 'transformer_model_pn.pth',
+                'net_model': 'net_model_pn.pth',
+                'netx_model': 'netx_model_pn.pth', 
+                'pca_params': 'pca_params_pn.pkl',
+                'results': 'pn_training_results.png',
+                'summary': 'training_summary_pn.json',
+                'report': 'training_report_pn.md'
+            }
+        }
+        
         # 创建报告目录
         os.makedirs(self.report_dir, exist_ok=True)
         
@@ -43,6 +67,33 @@ class CompleteVisualizationRunner:
         for model_name, path in self.model_paths.items():
             exists = "✅" if os.path.exists(path) else "❌"
             print(f"   {model_name}: {path} {exists}")
+            
+        print(f"🔧 验证关键模型文件:")
+        self._verify_model_files()
+    
+    def _verify_model_files(self):
+        """验证模型文件是否存在"""
+        for model_name, file_patterns in self.model_file_patterns.items():
+            model_dir = self.model_paths[model_name]
+            if not os.path.exists(model_dir):
+                print(f"   ❌ {model_name}: 目录不存在 {model_dir}")
+                continue
+                
+            print(f"   📁 {model_name}:")
+            for file_type, filename in file_patterns.items():
+                file_path = os.path.join(model_dir, filename)
+                exists = "✅" if os.path.exists(file_path) else "❌"
+                print(f"      {file_type}: {filename} {exists}")
+    
+    def get_model_file_path(self, model_name, file_type):
+        """获取模型文件的完整路径"""
+        if model_name not in self.model_file_patterns:
+            return None
+        if file_type not in self.model_file_patterns[model_name]:
+            return None
+            
+        filename = self.model_file_patterns[model_name][file_type]
+        return os.path.join(self.model_paths[model_name], filename)
         
     def run_complete_analysis(self):
         """运行完整的可视化分析"""
@@ -116,6 +167,7 @@ class CompleteVisualizationRunner:
             # 传递 Three_model 路径配置给可视化器
             visualizer = ModelComparisonVisualizer(self.three_model_dir)  # 直接使用 Three_model 路径
             visualizer.model_paths = self.model_paths  # 传递实际路径配置
+            visualizer.model_file_patterns = self.model_file_patterns  # 传递文件名模式配置
             
             # 加载模型结果
             if visualizer.load_model_results():
@@ -151,6 +203,7 @@ class CompleteVisualizationRunner:
             # 传递 Three_model 路径配置给故障检测可视化器
             visualizer = FaultDetectionVisualizer(self.three_model_dir)  # 直接使用 Three_model 路径
             visualizer.model_paths = self.model_paths  # 传递实际路径配置
+            visualizer.model_file_patterns = self.model_file_patterns  # 传递文件名模式配置
             
             # 加载检测结果
             if visualizer.load_detection_results():
