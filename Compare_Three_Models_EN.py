@@ -416,9 +416,9 @@ class ThreeModelComparator:
             else:
                 print(f"   Type: {type(performance)}")
             
-            # Handle different performance data structures
+            # Handle different performance data structures  
             if 'classification_metrics' in performance:
-                # BiLSTM format: nested structure
+                # Direct classification_metrics structure
                 class_metrics = performance['classification_metrics']
                 metrics_data.append({
                     'Model': model_name,
@@ -428,8 +428,44 @@ class ThreeModelComparator:
                     'F1-Score': f"{class_metrics.get('f1_score', 0):.4f}",
                     'AUC': f"{performance.get('auc', class_metrics.get('auc', 0)):.4f}"
                 })
+            elif 'TRANSFORMER' in performance:
+                # Nested Transformer format: performance["TRANSFORMER"]["classification_metrics"]
+                transformer_data = performance['TRANSFORMER']
+                class_metrics = transformer_data.get('classification_metrics', {})
+                metrics_data.append({
+                    'Model': model_name,
+                    'Accuracy': f"{class_metrics.get('accuracy', 0):.4f}",
+                    'Precision': f"{class_metrics.get('precision', 0):.4f}",
+                    'Recall': f"{class_metrics.get('recall', 0):.4f}",
+                    'F1-Score': f"{class_metrics.get('f1_score', 0):.4f}",
+                    'AUC': f"{class_metrics.get('auc', 0):.4f}"
+                })
+            elif model_name in performance:
+                # Model name as key: performance["BiLSTM"]["classification_metrics"]
+                model_data = performance[model_name]
+                if 'classification_metrics' in model_data:
+                    class_metrics = model_data['classification_metrics']
+                    metrics_data.append({
+                        'Model': model_name,
+                        'Accuracy': f"{class_metrics.get('accuracy', 0):.4f}",
+                        'Precision': f"{class_metrics.get('precision', 0):.4f}",
+                        'Recall': f"{class_metrics.get('recall', 0):.4f}",
+                        'F1-Score': f"{class_metrics.get('f1_score', 0):.4f}",
+                        'AUC': f"{model_data.get('auc', class_metrics.get('auc', 0)):.4f}"
+                    })
+                else:
+                    print(f"   ⚠️ No classification_metrics in {model_name} data, using N/A")
+                    metrics_data.append({
+                        'Model': model_name,
+                        'Accuracy': "N/A",
+                        'Precision': "N/A",
+                        'Recall': "N/A",
+                        'F1-Score': "N/A",
+                        'AUC': f"{model_data.get('auc', 0):.4f}" if 'auc' in model_data else "N/A"
+                    })
             else:
-                # Flat structure
+                # Flat structure or unknown format
+                print(f"   ⚠️ Unknown structure for {model_name}, trying flat access...")
                 metrics_data.append({
                     'Model': model_name,
                     'Accuracy': f"{performance.get('accuracy', 0):.4f}",
@@ -515,7 +551,7 @@ class ThreeModelComparator:
             
             # Handle different performance data structures
             if 'classification_metrics' in performance:
-                # BiLSTM format: nested structure
+                # Direct classification_metrics structure
                 class_metrics = performance['classification_metrics']
                 accuracy_scores.append(class_metrics.get('accuracy', 0))
                 precision_scores.append(class_metrics.get('precision', 0))
@@ -523,7 +559,7 @@ class ThreeModelComparator:
                 f1_scores.append(class_metrics.get('f1_score', 0))
                 auc_scores.append(performance.get('auc', class_metrics.get('auc', 0)))
             elif 'TRANSFORMER' in performance:
-                # Transformer format: performance["TRANSFORMER"]["classification_metrics"]
+                # Nested Transformer format: performance["TRANSFORMER"]["classification_metrics"]
                 transformer_data = performance['TRANSFORMER']
                 class_metrics = transformer_data.get('classification_metrics', {})
                 accuracy_scores.append(class_metrics.get('accuracy', 0))
@@ -531,8 +567,26 @@ class ThreeModelComparator:
                 recall_scores.append(class_metrics.get('recall', 0))
                 f1_scores.append(class_metrics.get('f1_score', 0))
                 auc_scores.append(class_metrics.get('auc', 0))
+            elif model_name in performance:
+                # Model name as key: performance["BiLSTM"]["classification_metrics"]
+                model_data = performance[model_name]
+                if 'classification_metrics' in model_data:
+                    class_metrics = model_data['classification_metrics']
+                    accuracy_scores.append(class_metrics.get('accuracy', 0))
+                    precision_scores.append(class_metrics.get('precision', 0))
+                    recall_scores.append(class_metrics.get('recall', 0))
+                    f1_scores.append(class_metrics.get('f1_score', 0))
+                    auc_scores.append(model_data.get('auc', class_metrics.get('auc', 0)))
+                else:
+                    print(f"   ⚠️ No classification_metrics found in {model_name} model data")
+                    accuracy_scores.append(0)
+                    precision_scores.append(0)
+                    recall_scores.append(0)
+                    f1_scores.append(0)
+                    auc_scores.append(0)
             else:
-                # Flat structure
+                # Flat structure or try to extract from available keys
+                print(f"   ⚠️ Unknown structure for {model_name}, trying flat access...")
                 accuracy_scores.append(performance.get('accuracy', 0))
                 precision_scores.append(performance.get('precision', 0))
                 recall_scores.append(performance.get('recall', 0))
