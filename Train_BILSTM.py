@@ -1312,11 +1312,11 @@ for epoch in range(EPOCH):
     clear_gpu_cache()
     
     for iteration, (x, y, z, q) in enumerate(train_loader_u):
-            x = x.to(device)
-            y = y.to(device)
-            z = z.to(device)
-            q = q.to(device)
-            
+        x = x.to(device)
+        y = y.to(device)
+        z = z.to(device)
+        q = q.to(device)
+        
         # 内存监控 - 定期检查内存使用情况
         if iteration % MEMORY_CHECK_INTERVAL == 0:
             memory_usage = check_gpu_memory()
@@ -1336,24 +1336,24 @@ for epoch in range(EPOCH):
             clear_gpu_cache()
         
         # 检查输入数据范围
-            if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
-                print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
-                continue
+        if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
+            print(f"警告：第{epoch}轮第{iteration}批次输入数据包含NaN/Inf，跳过此批次")
+            continue
             
         # 检查输入数据范围是否合理
         if x.abs().max() > 1000 or y.abs().max() > 1000:
-                print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
-                print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
-                print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-                continue
+            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
+            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
+            continue
             
         # 使用混合精度训练
-            with torch.cuda.amp.autocast():
-                recon_im, recon_p = net(x, z, q)
-                loss_u = loss_f(y, recon_im)
-                
-                    # 检查损失值是否为NaN
-            if torch.isnan(loss_u) or torch.isinf(loss_u):
+        with torch.cuda.amp.autocast():
+            recon_im, recon_p = net(x, z, q)
+            loss_u = loss_f(y, recon_im)
+        
+        # 检查损失值是否为NaN
+        if torch.isnan(loss_u) or torch.isinf(loss_u):
             print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
             print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
             print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
@@ -1361,19 +1361,13 @@ for epoch in range(EPOCH):
             print("跳过此批次，不进行反向传播")
             continue
         
-        # 检查输入数据范围是否合理
-        if x.abs().max() > 1000 or y.abs().max() > 1000:
-            print(f"警告：第{epoch}轮第{iteration}批次输入数据范围过大，跳过此批次")
-            print(f"x范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
-                continue
-            
-            total_loss += loss_u.item()
-            num_batches += 1
+        total_loss += loss_u.item()
+        num_batches += 1
+        
         optimizer.zero_grad()
-            
+        
         # 使用混合精度训练
-            scaler.scale(loss_u).backward()
+        scaler.scale(loss_u).backward()
             
         # 检查梯度是否为NaN或无穷大
         grad_norm = 0
