@@ -35,7 +35,13 @@ import psutil  # 系统内存监控
 import os
 # 使用指定的GPU设备（A100环境）
 os.environ['CUDA_VISIBLE_DEVICES'] = '2'  # 只使用GPU2
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')  # 这里的cuda:0实际上是物理GPU2
+
+# 启用CUDA调试功能（帮助诊断CUDA初始化错误）
+os.environ['TORCH_USE_CUDA_DSA'] = '1'  # 启用设备端断言
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # 启用同步CUDA操作，便于调试
+print("🔧 已启用CUDA调试模式")
+
+# device将在init_cuda_device()函数中初始化
 
 # 打印GPU信息
 if torch.cuda.is_available():
@@ -137,28 +143,65 @@ if not os.path.exists(save_dir):
 else:
     print(f"✅ 模型保存目录已存在: {save_dir}")
 
+# CUDA设备检查和初始化
+def init_cuda_device():
+    """安全的CUDA设备初始化"""
+    try:
+        if not torch.cuda.is_available():
+            print("⚠️  CUDA不可用，将使用CPU模式")
+            return torch.device('cpu'), False
+        
+        # 检查CUDA设备数量
+        device_count = torch.cuda.device_count()
+        print(f"🚀 检测到 {device_count} 个CUDA设备")
+        
+        # 设置默认设备
+        torch.cuda.set_device(0)
+        device = torch.device('cuda:0')
+        
+        # 测试CUDA初始化
+        test_tensor = torch.zeros(1).cuda()
+        del test_tensor
+        torch.cuda.empty_cache()
+        
+        # 获取设备信息
+        props = torch.cuda.get_device_properties(0)
+        memory_gb = props.total_memory / 1024**3
+        print(f"🖥️  GPU: {props.name}")
+        print(f"💾 GPU内存: {memory_gb:.1f}GB")
+        
+        return device, True
+        
+    except Exception as e:
+        print(f"❌ CUDA初始化失败: {e}")
+        print("🔄 回退到CPU模式")
+        return torch.device('cpu'), False
+
+# 初始化CUDA设备
+device, cuda_available = init_cuda_device()
+
 # A100优化的MC-AE训练参数（安全版本）
 EPOCH = 500  # 增加训练轮数，充分利用A100性能
 INIT_LR = 2e-5  # 适度提升初始学习率
 MAX_LR = 1e-4   # 提升最大学习率，配合大批次训练
 
-# 根据GPU内存动态调整批次大小 - A100优化
-if torch.cuda.is_available():
+# 根据GPU内存动态调整批次大小 - A100优化（更保守的设置）
+if cuda_available:
     gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
     if gpu_memory_gb >= 80:  # A100 80GB
-        BATCHSIZE = 6000  # 单卡A100 80GB，可以使用更大批次
+        BATCHSIZE = 2000  # 减小批次大小，避免CUDA初始化问题
     elif gpu_memory_gb >= 40:  # A100 40GB
-        BATCHSIZE = 3000
+        BATCHSIZE = 1000
     elif gpu_memory_gb >= 24:  # A100 24GB
-        BATCHSIZE = 1500
+        BATCHSIZE = 500
     elif gpu_memory_gb >= 16:  # V100 16GB
-        BATCHSIZE = 800
+        BATCHSIZE = 300
     else:  # 其他GPU
-        BATCHSIZE = 400
-    print(f"🖥️  检测到GPU显存: {gpu_memory_gb:.1f}GB，设置批次大小: {BATCHSIZE}")
-    print(f"🖥️  单卡A100优化，充分利用{gpu_memory_gb:.1f}GB显存")
+        BATCHSIZE = 150
+    print(f"🖥️  设置批次大小: {BATCHSIZE}")
 else:
-    BATCHSIZE = 100  # CPU模式使用更小的批次
+    BATCHSIZE = 50  # CPU模式使用更小的批次
+    print("⚠️  CPU模式，批次大小: 50")
 
 WARMUP_EPOCHS = 10  # 增加学习率预热轮数
 
@@ -398,8 +441,21 @@ else:
 if len(all_train_X) > 0:
     
     # 创建BILSTM模型（用于批次大小计算）
-    bilstm_model = LSTM().to(device)
-    bilstm_model = bilstm_model.double()
+    try:
+        bilstm_model = LSTM()
+        if cuda_available:
+            bilstm_model = bilstm_model.to(device)
+        bilstm_model = bilstm_model.double()
+        print(f"✅ BILSTM模型已移动到设备: {device}")
+    except RuntimeError as e:
+        if "CUDA" in str(e):
+            print(f"❌ CUDA设备错误: {e}")
+            print("🔄 自动切换到CPU模式")
+            device = torch.device('cpu')
+            cuda_available = False
+            bilstm_model = LSTM().to(device).double()
+        else:
+            raise e
     
     # 应用专门的大模型权重初始化
     def initialize_bilstm_weights(model):
@@ -1313,9 +1369,32 @@ train_loader_u = DataLoader(Dataset(x_recovered, y_recovered, z_recovered, q_rec
                            num_workers=8, pin_memory=True)  # A100优化配置
 
 # 中文注释：初始化MC-AE模型（使用float32）
-net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
-
-netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).to(torch.float32)
+try:
+    net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True)
+    if cuda_available:
+        net = net.to(device)
+    net = net.to(torch.float32)
+    print(f"✅ MC-AE1模型已移动到设备: {device}")
+    
+    netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True)
+    if cuda_available:
+        netx = netx.to(device)
+    netx = netx.to(torch.float32)
+    print(f"✅ MC-AE2模型已移动到设备: {device}")
+    
+except RuntimeError as e:
+    if "CUDA" in str(e):
+        print(f"❌ MC-AE模型CUDA初始化失败: {e}")
+        print("🔄 自动切换到CPU模式")
+        device = torch.device('cpu')
+        cuda_available = False
+        
+        # 重新创建模型到CPU
+        net = CombinedAE(input_size=2, encode2_input_size=3, output_size=110, activation_fn=custom_activation, use_dx_in_forward=True).to(device).to(torch.float32)
+        netx = CombinedAE(input_size=2, encode2_input_size=4, output_size=110, activation_fn=torch.sigmoid, use_dx_in_forward=True).to(device).to(torch.float32)
+        print("✅ MC-AE模型已移动到CPU设备")
+    else:
+        raise e
 
 # 使用更稳定的权重初始化
 def stable_weight_init(model):
@@ -1392,10 +1471,20 @@ for epoch in range(EPOCH):
             print(f"y范围: [{y.min():.4f}, {y.max():.4f}]")
             continue
             
-        # 使用混合精度训练
-        with torch.cuda.amp.autocast():
-            recon_im, recon_p = net(x, z, q)
-            loss_u = loss_f(y, recon_im)
+        # 使用混合精度训练（带CUDA错误处理）
+        try:
+            with torch.cuda.amp.autocast():
+                recon_im, recon_p = net(x, z, q)
+                loss_u = loss_f(y, recon_im)
+        except RuntimeError as e:
+            if "CUDA" in str(e):
+                print(f"🚨 CUDA运行时错误: {e}")
+                print("尝试清理GPU缓存并继续...")
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                continue
+            else:
+                raise e
                 
         # 检查损失值是否为NaN
         if torch.isnan(loss_u) or torch.isinf(loss_u):
