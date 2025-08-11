@@ -331,7 +331,22 @@ class ThreeModelComparator:
                 if len(all_probs) > 0 and len(all_labels) > 0:
                     # Calculate ROC curve
                     from sklearn.metrics import roc_curve, auc
-                    fpr, tpr, _ = roc_curve(all_labels, all_probs)
+                    import numpy as np
+                    
+                    # Debug: check label distribution
+                    unique_labels = np.unique(all_labels)
+                    print(f"      🔍 Unique labels in {model_name}: {unique_labels}")
+                    print(f"      📊 Label distribution: {[(label, list(all_labels).count(label)) for label in unique_labels]}")
+                    
+                    # Handle multiclass case - convert to binary classification
+                    if len(unique_labels) > 2:
+                        print(f"      ⚠️ {model_name}: Multiclass detected ({len(unique_labels)} classes), converting to binary (normal=0 vs fault=1+)")
+                        # Convert to binary: 0 = normal, 1+ = fault
+                        binary_labels = [0 if label == 0 else 1 for label in all_labels]
+                        fpr, tpr, _ = roc_curve(binary_labels, all_probs)
+                    else:
+                        fpr, tpr, _ = roc_curve(all_labels, all_probs)
+                    
                     roc_auc = auc(fpr, tpr)
                     
                     # Store AUC in performance data for later use
