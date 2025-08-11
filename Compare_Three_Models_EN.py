@@ -70,23 +70,23 @@ class ThreeModelComparator:
         # All models are stored under /mnt/bz25t/bzhy/datasave/Three_model/
         self.model_configs = {
             'BiLSTM': {
-                'folder': 'BiLSTM',  # BiLSTM results directory
-                'performance_file': 'performance_metrics.json',
-                'detailed_file': 'detailed_results.pkl',
+                'folder': 'BILSTM',  # BILSTM results directory
+                'performance_file': 'bilstm_performance_metrics.json',
+                'detailed_file': 'bilstm_detailed_results.pkl',
                 'color': '#FF6B6B',  # Red
                 'marker': 'o'
             },
             'Transformer-PN': {
                 'folder': 'transformer_PN',  # transformer_PN results directory  
-                'performance_file': 'performance_metrics.json',
-                'detailed_file': 'detailed_results.pkl',
+                'performance_file': 'transformer_performance_metrics.json',
+                'detailed_file': 'transformer_detailed_results.pkl',
                 'color': '#4ECDC4',  # Cyan
                 'marker': 's'
             },
             'Transformer-Positive': {
                 'folder': 'transformer_positive',  # transformer_positive results directory
-                'performance_file': 'performance_metrics.json',
-                'detailed_file': 'detailed_results.pkl',
+                'performance_file': 'transformer_performance_metrics.json',
+                'detailed_file': 'transformer_detailed_results.pkl',
                 'color': '#45B7D1',  # Blue
                 'marker': '^'
             }
