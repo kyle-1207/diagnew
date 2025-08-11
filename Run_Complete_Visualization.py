@@ -759,9 +759,9 @@ class CompleteVisualizationRunner:
         """
         # 尝试从不同可能的文件中加载数据
         possible_files = [
-            os.path.join(self.model_dirs[model_type], 'performance_metrics.json'),
-            os.path.join(self.model_dirs[model_type], 'test_results.json'),
-            os.path.join(self.model_dirs[model_type], 'evaluation_results.json')
+            os.path.join(self.model_paths[model_type], 'performance_metrics.json'),
+            os.path.join(self.model_paths[model_type], 'test_results.json'),
+            os.path.join(self.model_paths[model_type], 'evaluation_results.json')
         ]
         
         for file_path in possible_files:
