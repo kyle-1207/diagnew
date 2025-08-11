@@ -2379,8 +2379,8 @@ print("\n🎯 生成特定样本的详细可视化图表...")
 
 # 指定要生成详细图表的样本
 target_samples = {
-    'normal': [5, 6, 7],      # 正常样本
-    'fault': [340, 345, 346]  # 故障样本
+    'normal': [12, 13, 14],      # 正常样本
+    'fault': [340, 345, 346, 347]  # 故障样本
 }
 
 def create_sample_specific_visualizations(test_results, target_samples, base_dir):
@@ -2703,7 +2703,7 @@ print(f"     - 故障检测时序图: transformer_fault_detection_timeline.png")
 print(f"     - 性能雷达图: transformer_performance_radar.png")
 print(f"     - 三窗口过程图: transformer_three_window_process.png")
 print(f"   • 特定样本可视化: {result_dir}/sample_visualizations")
-print(f"     - 正常样本 (5,6,7) 和故障样本 (340,345,346) 的详细图表")
+print(f"     - 正常样本 (12,13,14) 和故障样本 (340,345,346,347) 的详细图表")
 print(f"     - 文件格式: transformer_*_sample_[样本编号].png")
 print(f"   • 性能指标: transformer_performance_metrics.json")
 print(f"   • Excel报告: transformer_summary.xlsx")
