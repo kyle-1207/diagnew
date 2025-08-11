@@ -15,38 +15,38 @@ import seaborn as sns
 from matplotlib import rcParams
 import matplotlib.font_manager as fm
 
-# 设置matplotlib后端和字体
+# Setup matplotlib backend and fonts
 import matplotlib
-matplotlib.use('Agg')  # 设置非交互式后端
+matplotlib.use('Agg')  # Set non-interactive backend
 
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
 warnings.filterwarnings('ignore', message='Glyph.*missing from current font')
 
-# 设置中文字体
-def setup_chinese_fonts():
-    """配置中文字体显示"""
+# Setup English fonts
+def setup_english_fonts():
+    """Configure English font display"""
     try:
-        # 使用DejaVu Sans作为默认字体（Linux系统通常都有）
+        # Use DejaVu Sans as default font (commonly available on Linux)
         rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'sans-serif']
         rcParams['axes.unicode_minus'] = False
         rcParams['font.family'] = 'sans-serif'
-        print("✅ 字体配置完成")
+        print("✅ Font configuration completed")
     except Exception as e:
-        print(f"⚠️ 字体配置警告: {e}")
-        # 使用最基本的配置
+        print(f"⚠️ Font configuration warning: {e}")
+        # Use basic configuration
         rcParams['font.family'] = 'sans-serif'
 
-# 执行字体配置
-setup_chinese_fonts()
+# Execute font configuration
+setup_english_fonts()
 
 class ThreeModelComparator:
     def __init__(self, base_path=None):
         """
-        初始化三模型对比器
+        Initialize Three Model Comparator
         
         Args:
-            base_path: 三个模型数据的基础路径，如果为None则自动检测
+            base_path: Base path for three model data, auto-detect if None
         """
         if base_path is None:
             # 自动检测数据路径
@@ -238,10 +238,37 @@ class ThreeModelComparator:
                 all_probs = []
                 all_labels = []
                 
-                for sample_result in detailed:
-                    if 'probabilities' in sample_result and 'true_labels' in sample_result:
-                        all_probs.extend(sample_result['probabilities'])
-                        all_labels.extend(sample_result['true_labels'])
+                # 调试：打印数据结构
+                print(f"   📊 {model_name} detailed data keys: {list(detailed.keys()) if isinstance(detailed, dict) else 'Not a dict'}")
+                
+                # 尝试不同的数据结构
+                if isinstance(detailed, dict):
+                    # 如果是字典，尝试提取预测和标签
+                    if 'predictions' in detailed and 'labels' in detailed:
+                        all_probs = detailed['predictions']
+                        all_labels = detailed['labels']
+                    elif 'y_pred_proba' in detailed and 'y_true' in detailed:
+                        all_probs = detailed['y_pred_proba']
+                        all_labels = detailed['y_true']
+                    elif 'probabilities' in detailed and 'true_labels' in detailed:
+                        all_probs = detailed['probabilities']
+                        all_labels = detailed['true_labels']
+                    else:
+                        print(f"   ⚠️ {model_name}: 未找到预期的数据键")
+                        continue
+                elif isinstance(detailed, list):
+                    # 如果是列表，遍历每个样本
+                    for sample_result in detailed:
+                        if isinstance(sample_result, dict):
+                            if 'probabilities' in sample_result and 'true_labels' in sample_result:
+                                all_probs.extend(sample_result['probabilities'])
+                                all_labels.extend(sample_result['true_labels'])
+                            elif 'predictions' in sample_result and 'labels' in sample_result:
+                                all_probs.extend(sample_result['predictions'])
+                                all_labels.extend(sample_result['labels'])
+                else:
+                    print(f"   ⚠️ {model_name}: 数据格式不支持 - {type(detailed)}")
+                    continue
                 
                 if len(all_probs) > 0:
                     # 计算ROC曲线
@@ -271,7 +298,7 @@ class ThreeModelComparator:
         plt.ylim([0.0, 1.05])
         plt.xlabel('False Positive Rate', fontsize=12)
         plt.ylabel('True Positive Rate', fontsize=12)
-        plt.title('三模型ROC曲线对比分析', fontsize=14, fontweight='bold', pad=20)
+        plt.title('ROC Curves Comparison - Three Models', fontsize=14, fontweight='bold', pad=20)
         plt.legend(loc="lower right", fontsize=11)
         plt.grid(True, alpha=0.3)
         
@@ -357,7 +384,7 @@ class ThreeModelComparator:
         ax.grid(True, alpha=0.3)
         
         # 设置标题和图例
-        plt.title('三模型性能指标雷达图对比', fontsize=16, fontweight='bold', pad=30)
+        plt.title('Performance Metrics Radar Chart - Three Models', fontsize=16, fontweight='bold', pad=30)
         plt.legend(loc='upper right', bbox_to_anchor=(1.2, 1.0), fontsize=12)
         
         # 保存图片
