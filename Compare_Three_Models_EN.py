@@ -237,7 +237,8 @@ class ThreeModelComparator:
         
         for model_name, data in self.model_data.items():
             try:
-                # Extract ROC data from detailed results
+                # Extract ROC data - check both performance and detailed results
+                performance = data['performance']
                 detailed = data['detailed']
                 config = data['config']
                 
@@ -246,12 +247,26 @@ class ThreeModelComparator:
                 all_labels = []
                 
                 # Debug: print data structure
-                print(f"   📊 {model_name} detailed data type: {type(detailed)}")
+                print(f"   📊 {model_name} data structure check:")
+                print(f"      Performance keys: {list(performance.keys()) if isinstance(performance, dict) else 'N/A'}")
+                print(f"      Detailed data type: {type(detailed)}")
                 
-                # Try different data structures
-                if isinstance(detailed, dict):
+                # Method 1: Extract from performance metrics (BiLSTM format)
+                if isinstance(performance, dict) and 'roc_data' in performance:
+                    print(f"      ✅ Found ROC data in performance metrics")
+                    roc_data = performance['roc_data']
+                    all_labels = roc_data.get('true_labels', [])
+                    all_probs = roc_data.get('fai_values', [])
+                
+                # Method 2: Try different detailed data structures
+                elif isinstance(detailed, dict):
                     # If it's a dictionary, try to extract predictions and labels
-                    if 'predictions' in detailed and 'labels' in detailed:
+                    if 'roc_data' in detailed:
+                        print(f"      ✅ Found ROC data in detailed results")
+                        roc_data = detailed['roc_data']
+                        all_labels = roc_data.get('true_labels', [])
+                        all_probs = roc_data.get('fai_values', [])
+                    elif 'predictions' in detailed and 'labels' in detailed:
                         all_probs = detailed['predictions']
                         all_labels = detailed['labels']
                     elif 'y_pred_proba' in detailed and 'y_true' in detailed:
@@ -261,19 +276,42 @@ class ThreeModelComparator:
                         all_probs = detailed['probabilities']
                         all_labels = detailed['true_labels']
                     else:
-                        print(f"   ⚠️ {model_name}: Expected data keys not found")
+                        print(f"   ⚠️ {model_name}: Expected data keys not found in detailed dict")
                         print(f"   Available keys: {list(detailed.keys())}")
                         continue
+                        
                 elif isinstance(detailed, list):
+                    print(f"      🔍 Extracting from detailed results list ({len(detailed)} samples)")
                     # If it's a list, iterate through each sample
                     for sample_result in detailed:
                         if isinstance(sample_result, dict):
-                            if 'probabilities' in sample_result and 'true_labels' in sample_result:
+                            # Check for ROC data in sample performance_metrics
+                            perf_metrics = sample_result.get('performance_metrics', {})
+                            if 'roc_data' in perf_metrics:
+                                roc_data = perf_metrics['roc_data']
+                                all_labels.extend(roc_data.get('true_labels', []))
+                                all_probs.extend(roc_data.get('fai_values', []))
+                            elif 'probabilities' in sample_result and 'true_labels' in sample_result:
                                 all_probs.extend(sample_result['probabilities'])
                                 all_labels.extend(sample_result['true_labels'])
                             elif 'predictions' in sample_result and 'labels' in sample_result:
                                 all_probs.extend(sample_result['predictions'])
                                 all_labels.extend(sample_result['labels'])
+                            # Extract from fai values and fault labels
+                            elif 'fai' in sample_result and 'fault_labels' in sample_result:
+                                fai_values = sample_result['fai']
+                                fault_labels = sample_result['fault_labels']
+                                sample_label = sample_result.get('label', 0)
+                                
+                                # Use point-level labels for ROC (consistent with BiLSTM script)
+                                for i, (fai_val, fault_pred) in enumerate(zip(fai_values, fault_labels)):
+                                    if sample_label == 0:  # Normal sample
+                                        point_true_label = 0
+                                    else:  # Fault sample
+                                        point_true_label = fault_pred
+                                    
+                                    all_labels.append(point_true_label)
+                                    all_probs.append(fai_val)
                 else:
                     print(f"   ⚠️ {model_name}: Unsupported data format - {type(detailed)}")
                     continue
@@ -284,12 +322,18 @@ class ThreeModelComparator:
                     fpr, tpr, _ = roc_curve(all_labels, all_probs)
                     roc_auc = auc(fpr, tpr)
                     
+                    # Store AUC in performance data for later use
+                    if 'classification_metrics' in data['performance']:
+                        data['performance']['classification_metrics']['auc'] = roc_auc
+                    else:
+                        data['performance']['auc'] = roc_auc
+                    
                     # Plot ROC curve
                     plt.plot(fpr, tpr, color=config['color'], 
                             linewidth=2, marker=config['marker'], markersize=4, markevery=20,
                             label=f'{model_name} (AUC = {roc_auc:.3f})')
                     
-                    print(f"   ✅ {model_name} ROC curve generated (AUC = {roc_auc:.3f})")
+                    print(f"   ✅ {model_name} ROC curve generated (AUC = {roc_auc:.3f}, data points: {len(all_probs)})")
                 else:
                     print(f"   ❌ {model_name}: No valid data for ROC curve")
                     
@@ -329,14 +373,29 @@ class ThreeModelComparator:
         metrics_data = []
         for model_name, data in self.model_data.items():
             performance = data['performance']
-            metrics_data.append({
-                'Model': model_name,
-                'Accuracy': f"{performance.get('accuracy', 0):.4f}",
-                'Precision': f"{performance.get('precision', 0):.4f}",
-                'Recall': f"{performance.get('recall', 0):.4f}",
-                'F1-Score': f"{performance.get('f1_score', 0):.4f}",
-                'AUC': f"{performance.get('auc', 0):.4f}"
-            })
+            
+            # Handle different performance data structures
+            if 'classification_metrics' in performance:
+                # BiLSTM format: nested structure
+                class_metrics = performance['classification_metrics']
+                metrics_data.append({
+                    'Model': model_name,
+                    'Accuracy': f"{class_metrics.get('accuracy', 0):.4f}",
+                    'Precision': f"{class_metrics.get('precision', 0):.4f}",
+                    'Recall': f"{class_metrics.get('recall', 0):.4f}",
+                    'F1-Score': f"{class_metrics.get('f1_score', 0):.4f}",
+                    'AUC': f"{performance.get('auc', class_metrics.get('auc', 0)):.4f}"
+                })
+            else:
+                # Flat structure
+                metrics_data.append({
+                    'Model': model_name,
+                    'Accuracy': f"{performance.get('accuracy', 0):.4f}",
+                    'Precision': f"{performance.get('precision', 0):.4f}",
+                    'Recall': f"{performance.get('recall', 0):.4f}",
+                    'F1-Score': f"{performance.get('f1_score', 0):.4f}",
+                    'AUC': f"{performance.get('auc', 0):.4f}"
+                })
         
         if not metrics_data:
             print("❌ No performance data available for comparison table")
@@ -403,11 +462,24 @@ class ThreeModelComparator:
             config = data['config']
             
             models.append(model_name)
-            accuracy_scores.append(performance.get('accuracy', 0))
-            precision_scores.append(performance.get('precision', 0))
-            recall_scores.append(performance.get('recall', 0))
-            f1_scores.append(performance.get('f1_score', 0))
-            auc_scores.append(performance.get('auc', 0))
+            
+            # Handle different performance data structures
+            if 'classification_metrics' in performance:
+                # BiLSTM format: nested structure
+                class_metrics = performance['classification_metrics']
+                accuracy_scores.append(class_metrics.get('accuracy', 0))
+                precision_scores.append(class_metrics.get('precision', 0))
+                recall_scores.append(class_metrics.get('recall', 0))
+                f1_scores.append(class_metrics.get('f1_score', 0))
+                auc_scores.append(performance.get('auc', class_metrics.get('auc', 0)))
+            else:
+                # Flat structure
+                accuracy_scores.append(performance.get('accuracy', 0))
+                precision_scores.append(performance.get('precision', 0))
+                recall_scores.append(performance.get('recall', 0))
+                f1_scores.append(performance.get('f1_score', 0))
+                auc_scores.append(performance.get('auc', 0))
+            
             colors.append(config['color'])
         
         if not models:
