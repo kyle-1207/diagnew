@@ -35,11 +35,11 @@ plt.rcParams['axes.unicode_minus'] = False
 class ModelComparisonVisualizer:
     """模型对比可视化类"""
     
-    def __init__(self, result_base_dir='/mnt/bz25t/bzhy/datasave'):
+    def __init__(self, result_base_dir='/mnt/bz25t/bzhy/datasave/Three_model'):
         self.result_base_dir = result_base_dir
         self.model_data = {}
         
-        # 默认模型路径配置（与实际文件结构对应）
+        # 基于 Three_model 目录的模型路径配置
         self.model_paths = {
             'bilstm': f"{result_base_dir}/BILSTM/models",  # Train_BILSTM.py 的结果
             'transformer_positive': f"{result_base_dir}/transformer_positive",  # Train_Transformer_HybridFeedback.py 的结果

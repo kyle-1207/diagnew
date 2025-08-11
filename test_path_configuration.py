@@ -15,16 +15,19 @@ def test_path_configuration():
     
     # 基础路径
     base_dir = '/mnt/bz25t/bzhy/datasave'
+    three_model_dir = f"{base_dir}/Three_model"
     
-    # 根据图片显示的实际文件结构定义路径
+    # 根据图片显示的实际文件结构，所有模型都在 Three_model 子目录下
     model_paths = {
-        'bilstm': f"{base_dir}/BILSTM/models",  # Train_BILSTM.py 的结果
-        'transformer_positive': f"{base_dir}/transformer_positive",  # Train_Transformer_HybridFeedback.py 的结果
-        'transformer_pn': f"{base_dir}/transformer_PN"  # Train_Transformer_PN_HybridFeedback.py 的结果
+        'bilstm': f"{three_model_dir}/BILSTM/models",  # Train_BILSTM.py 的结果
+        'transformer_positive': f"{three_model_dir}/transformer_positive",  # Train_Transformer_HybridFeedback.py 的结果
+        'transformer_pn': f"{three_model_dir}/transformer_PN"  # Train_Transformer_PN_HybridFeedback.py 的结果
     }
     
     print(f"📁 基础路径: {base_dir}")
     print(f"   存在状态: {'✅' if os.path.exists(base_dir) else '❌'}")
+    print(f"📁 Three_model目录: {three_model_dir}")
+    print(f"   存在状态: {'✅' if os.path.exists(three_model_dir) else '❌'}")
     print()
     
     # 测试各模型路径
@@ -72,7 +75,7 @@ def test_path_configuration():
         sys.path.append('.')
         from Run_Complete_Visualization import CompleteVisualizationRunner
         
-        runner = CompleteVisualizationRunner(base_dir)
+        runner = CompleteVisualizationRunner(base_dir)  # 传入基础路径，内部会自动配置 Three_model
         print("   ✅ Run_Complete_Visualization 导入成功")
         print(f"   📁 报告目录: {runner.report_dir}")
         print(f"   📋 模型路径配置: {len(runner.model_paths)} 个")
@@ -97,9 +100,9 @@ def test_path_configuration():
         print("   ✅ Visualize_Model_Comparison 导入成功")
         print("   ✅ Visualize_Fault_Detection 导入成功")
         
-        # 测试初始化
-        model_vis = ModelComparisonVisualizer(base_dir)
-        fault_vis = FaultDetectionVisualizer(base_dir)
+        # 测试初始化（使用 Three_model 路径）
+        model_vis = ModelComparisonVisualizer(three_model_dir)
+        fault_vis = FaultDetectionVisualizer(three_model_dir)
         
         print("   ✅ 可视化模块初始化成功")
         
@@ -110,12 +113,12 @@ def test_path_configuration():
     
     print()
     
-    # 检查图片中显示的其他关键文件
+    # 检查图片中显示的其他关键文件（在 Three_model 目录下）
     print("📄 关键文件检查:")
     key_files_check = [
-        (f"{base_dir}/BILSTM/models/bilstm_training_results.png", "BiLSTM训练结果图"),
-        (f"{base_dir}/transformer_positive/transformer_summary.xlsx", "Transformer Positive汇总"),
-        (f"{base_dir}/transformer_PN/transformer_summary.xlsx", "Transformer PN汇总")
+        (f"{three_model_dir}/BILSTM/models/bilstm_training_results.png", "BiLSTM训练结果图"),
+        (f"{three_model_dir}/transformer_positive/transformer_summary.xlsx", "Transformer Positive汇总"),
+        (f"{three_model_dir}/transformer_PN/transformer_summary.xlsx", "Transformer PN汇总")
     ]
     
     for file_path, description in key_files_check:
@@ -125,11 +128,11 @@ def test_path_configuration():
     
     print()
     print("🎯 测试总结:")
-    print("   1. 路径配置已更新以匹配实际文件结构")
-    print("   2. BILSTM -> BILSTM/models")
-    print("   3. Transformer HybridFeedback -> transformer_positive")  
-    print("   4. Transformer PN HybridFeedback -> transformer_PN")
-    print("   5. 可视化模块已更新相应的路径配置")
+    print("   1. 路径配置已更新：所有模型都在 Three_model 子目录下")
+    print("   2. Three_model/BILSTM/models -> BiLSTM训练结果")
+    print("   3. Three_model/transformer_positive -> Transformer HybridFeedback")  
+    print("   4. Three_model/transformer_PN -> Transformer PN HybridFeedback")
+    print("   5. 可视化模块已更新为基于 Three_model 的路径配置")
     print()
     print("✨ 配置完成！现在可以运行 Run_Complete_Visualization.py")
 

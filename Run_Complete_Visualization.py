@@ -26,11 +26,14 @@ class CompleteVisualizationRunner:
         self.report_dir = f"{base_dir}/Complete_Analysis_Report"
         self.start_time = datetime.now()
         
-        # 根据实际文件结构定义模型结果路径
+        # 所有模型结果都在 Three_model 子目录下
+        self.three_model_dir = f"{base_dir}/Three_model"
+        
+        # 基于 Three_model 目录的模型路径配置
         self.model_paths = {
-            'bilstm': f"{base_dir}/BILSTM/models",  # 对应 Train_BILSTM.py 的结果
-            'transformer_positive': f"{base_dir}/transformer_positive",  # 对应 Train_Transformer_HybridFeedback.py 的结果
-            'transformer_pn': f"{base_dir}/transformer_PN"  # 对应 Train_Transformer_PN_HybridFeedback.py 的结果
+            'bilstm': f"{self.three_model_dir}/BILSTM/models",  # 对应 Train_BILSTM.py 的结果
+            'transformer_positive': f"{self.three_model_dir}/transformer_positive",  # 对应 Train_Transformer_HybridFeedback.py 的结果
+            'transformer_pn': f"{self.three_model_dir}/transformer_PN"  # 对应 Train_Transformer_PN_HybridFeedback.py 的结果
         }
         
         # 创建报告目录
@@ -110,8 +113,8 @@ class CompleteVisualizationRunner:
             sys.path.append(self.script_dir)
             from Visualize_Model_Comparison import ModelComparisonVisualizer
             
-            # 传递路径配置给可视化器
-            visualizer = ModelComparisonVisualizer(self.base_dir)
+            # 传递 Three_model 路径配置给可视化器
+            visualizer = ModelComparisonVisualizer(self.three_model_dir)  # 直接使用 Three_model 路径
             visualizer.model_paths = self.model_paths  # 传递实际路径配置
             
             # 加载模型结果
@@ -145,8 +148,8 @@ class CompleteVisualizationRunner:
         try:
             from Visualize_Fault_Detection import FaultDetectionVisualizer
             
-            # 传递路径配置给故障检测可视化器
-            visualizer = FaultDetectionVisualizer(self.base_dir)
+            # 传递 Three_model 路径配置给故障检测可视化器
+            visualizer = FaultDetectionVisualizer(self.three_model_dir)  # 直接使用 Three_model 路径
             visualizer.model_paths = self.model_paths  # 传递实际路径配置
             
             # 加载检测结果
