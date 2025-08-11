@@ -31,7 +31,7 @@ class CompleteVisualizationRunner:
         
         # 基于 Three_model 目录的模型路径配置
         self.model_paths = {
-            'bilstm': f"{self.three_model_dir}/BILSTM/models",  # 对应 Train_BILSTM.py 的结果
+            'bilstm': f"{self.three_model_dir}/BILSTM",  # 对应 Train_BILSTM.py 的结果（直接在BILSTM目录下）
             'transformer_positive': f"{self.three_model_dir}/transformer_positive",  # 对应 Train_Transformer_HybridFeedback.py 的结果
             'transformer_pn': f"{self.three_model_dir}/transformer_PN"  # 对应 Train_Transformer_PN_HybridFeedback.py 的结果
         }

@@ -116,7 +116,7 @@ def test_path_configuration():
     # 检查图片中显示的其他关键文件（在 Three_model 目录下）
     print("📄 关键文件检查:")
     key_files_check = [
-        (f"{three_model_dir}/BILSTM/models/bilstm_training_results.png", "BiLSTM训练结果图"),
+        (f"{three_model_dir}/BILSTM/bilstm_training_results.png", "BiLSTM训练结果图"),
         (f"{three_model_dir}/transformer_positive/transformer_summary.xlsx", "Transformer Positive汇总"),
         (f"{three_model_dir}/transformer_PN/transformer_summary.xlsx", "Transformer PN汇总")
     ]
@@ -129,7 +129,7 @@ def test_path_configuration():
     print()
     print("🎯 测试总结:")
     print("   1. 路径配置已更新：所有模型都在 Three_model 子目录下")
-    print("   2. Three_model/BILSTM/models -> BiLSTM训练结果")
+    print("   2. Three_model/BILSTM -> BiLSTM训练结果（直接在BILSTM目录下）")
     print("   3. Three_model/transformer_positive -> Transformer HybridFeedback")  
     print("   4. Three_model/transformer_PN -> Transformer PN HybridFeedback")
     print("   5. 可视化模块已更新为基于 Three_model 的路径配置")

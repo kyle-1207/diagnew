@@ -41,7 +41,7 @@ class ModelComparisonVisualizer:
         
         # 基于 Three_model 目录的模型路径配置
         self.model_paths = {
-            'bilstm': f"{result_base_dir}/BILSTM/models",  # Train_BILSTM.py 的结果
+            'bilstm': f"{result_base_dir}/BILSTM",  # Train_BILSTM.py 的结果（直接在BILSTM目录下）
             'transformer_positive': f"{result_base_dir}/transformer_positive",  # Train_Transformer_HybridFeedback.py 的结果
             'transformer_pn': f"{result_base_dir}/transformer_PN"  # Train_Transformer_PN_HybridFeedback.py 的结果
         }
