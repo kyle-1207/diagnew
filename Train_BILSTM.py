@@ -1555,12 +1555,12 @@ def main():
                         
             # 检查损失值是否为NaN
             if torch.isnan(loss_u) or torch.isinf(loss_u):
-            print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
-            print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
-            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
-            print(f"损失值: {loss_u.item()}")
-            print("跳过此批次，不进行反向传播")
-            continue
+                print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
+                print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
+                print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+                print(f"损失值: {loss_u.item()}")
+                print("跳过此批次，不进行反向传播")
+                continue
         
         total_loss += loss_u.item()
         num_batches += 1
