@@ -231,6 +231,11 @@ def standardize_metrics(raw_metrics, model_name):
         else:
             sample_metrics = {}
         
+        # 提取ROC数据
+        roc_data = None
+        if 'roc_data' in model_metrics:
+            roc_data = model_metrics['roc_data']
+        
         # 标准化格式
         standardized = {
             'classification_metrics': {
@@ -243,7 +248,8 @@ def standardize_metrics(raw_metrics, model_name):
                 'fpr': classification.get('fpr', 0.0)
             },
             'confusion_matrix': confusion,
-            'sample_metrics': sample_metrics
+            'sample_metrics': sample_metrics,
+            'roc_data': roc_data
         }
         
         return standardized
@@ -257,7 +263,8 @@ def standardize_metrics(raw_metrics, model_name):
                 'f1_score': 0.0, 'specificity': 0.0, 'tpr': 0.0, 'fpr': 0.0
             },
             'confusion_matrix': {'TP': 0, 'FP': 0, 'TN': 0, 'FN': 0},
-            'sample_metrics': {}
+            'sample_metrics': {},
+            'roc_data': None
         }
 
 def load_all_model_results():
@@ -278,7 +285,7 @@ def load_all_model_results():
 
 #----------------------------------------ROC曲线比较------------------------------
 def create_three_model_roc_comparison(all_results, save_path):
-    """生成三模型ROC曲线比较图"""
+    """生成三模型ROC曲线比较图 - 严格按照Test_combine_transonly.py的方法"""
     print("   📈 生成三模型ROC曲线比较图...")
     
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=PLOT_CONFIG["figsize_large"], constrained_layout=True)
@@ -295,58 +302,117 @@ def create_three_model_roc_comparison(all_results, save_path):
         # 标准化指标
         std_metrics = standardize_metrics(performance_data, model_name)
         
-        # 获取ROC数据（如果存在）
-        roc_data = None
-        if model_name == 'BILSTM' and 'BILSTM' in performance_data:
-            roc_data = performance_data['BILSTM'].get('roc_data', None)
-        elif 'TRANSFORMER' in performance_data:
-            roc_data = performance_data['TRANSFORMER'].get('roc_data', None)
-        
-        if roc_data and 'true_labels' in roc_data and 'fai_values' in roc_data:
-            try:
-                # 使用存储的ROC数据
-                true_labels = np.array(roc_data['true_labels'])
-                fai_values = np.array(roc_data['fai_values'])
+        try:
+            # 按照Test_combine_transonly.py的方法重新计算ROC曲线
+            all_fai = []
+            all_labels = []
+            all_fault_labels = []
+            
+            # 从test_results中提取数据
+            if model_name in performance_data and 'test_results' in performance_data[model_name]:
+                test_results = performance_data[model_name]['test_results']
                 
-                # 确保数据格式正确
-                if len(true_labels) == 0 or len(fai_values) == 0:
-                    print(f"      ⚠️  {model_name}: ROC数据为空，使用工作点")
-                    raise ValueError("Empty ROC data")
+                for sample_result in test_results:
+                    sample_fai = sample_result.get('fai', [])
+                    sample_label = sample_result.get('label', 0)
+                    sample_fault_labels = sample_result.get('fault_labels', [])
+                    
+                    if len(sample_fai) > 0 and len(sample_fault_labels) > 0:
+                        all_fai.extend(sample_fai)
+                        all_labels.extend([sample_label] * len(sample_fai))
+                        all_fault_labels.extend(sample_fault_labels)
+            
+            # 如果没有找到test_results，尝试从roc_data获取
+            elif 'roc_data' in std_metrics and std_metrics['roc_data']:
+                roc_data = std_metrics['roc_data']
+                if 'fai_values' in roc_data and 'true_labels' in roc_data:
+                    all_fai = list(roc_data['fai_values'])
+                    all_labels = list(roc_data['true_labels'])
+                    all_fault_labels = list(roc_data.get('fault_labels', roc_data['true_labels']))
+            
+            if len(all_fai) == 0:
+                raise ValueError("No ROC data available")
+            
+            all_fai = np.array(all_fai)
+            all_labels = np.array(all_labels)
+            all_fault_labels = np.array(all_fault_labels)
+            
+            print(f"      📊 {model_name} ROC数据统计:")
+            print(f"         总数据点: {len(all_fai)}")
+            print(f"         正常样本点: {np.sum(all_labels == 0)}")
+            print(f"         故障样本点: {np.sum(all_labels == 1)}")
+            print(f"         FAI范围: [{np.min(all_fai):.6f}, {np.max(all_fai):.6f}]")
+            
+            # 按照Test_combine_transonly.py的阈值扫描策略
+            fai_p1 = np.percentile(all_fai, 1)
+            fai_p99 = np.percentile(all_fai, 99)
+            threshold_min = np.min(all_fai)
+            threshold_max = fai_p99  # 使用99%分位数
+            
+            # 使用智能阈值扫描
+            if threshold_max > threshold_min * 10:
+                # 混合扫描策略
+                log_min = np.log10(max(threshold_min, 1e-10))
+                log_max = np.log10(threshold_max)
+                log_thresholds = np.logspace(log_min, log_max, 50)
+                linear_thresholds = np.linspace(threshold_min, min(threshold_max, np.median(all_fai)*3), 50)
+                thresholds = np.unique(np.concatenate([linear_thresholds, log_thresholds]))
+                thresholds = np.sort(thresholds)
+            else:
+                thresholds = np.linspace(threshold_min, threshold_max, 100)
+            
+            tpr_list = []
+            fpr_list = []
+            
+            for threshold in thresholds:
+                tp = fp = tn = fn = 0
                 
-                if len(true_labels) != len(fai_values):
-                    print(f"      ⚠️  {model_name}: ROC数据长度不匹配，使用工作点")
-                    raise ValueError("ROC data length mismatch")
+                for fai_val, true_label, fault_pred in zip(all_fai, all_labels, all_fault_labels):
+                    # 按照Test_combine_transonly.py的逻辑设置点级别真实标签
+                    if true_label == 0:  # 正常样本的所有点都是正常的
+                        point_true_label = 0
+                    else:  # 故障样本：使用故障检测算法的结果作为点级别真实标签
+                        point_true_label = fault_pred
+                    
+                    # 预测标签：基于FAI阈值
+                    predicted_label = 1 if fai_val > threshold else 0
+                    
+                    # 统计混淆矩阵
+                    if point_true_label == 0 and predicted_label == 0:
+                        tn += 1
+                    elif point_true_label == 0 and predicted_label == 1:
+                        fp += 1
+                    elif point_true_label == 1 and predicted_label == 0:
+                        fn += 1
+                    elif point_true_label == 1 and predicted_label == 1:
+                        tp += 1
                 
-                # 检查标签是否为二进制
-                unique_labels = np.unique(true_labels)
-                if len(unique_labels) != 2 or not all(label in [0, 1] for label in unique_labels):
-                    print(f"      ⚠️  {model_name}: 标签不是二进制格式，使用工作点")
-                    raise ValueError("Non-binary labels")
+                tpr = tp / (tp + fn) if (tp + fn) > 0 else 0
+                fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
                 
-                # 计算ROC曲线
-                fpr, tpr, _ = roc_curve(true_labels, fai_values)
-                auc_score = auc(fpr, tpr)
-                
-                ax1.plot(fpr, tpr, color=config['color'], linewidth=2.5,
-                        label=f'{config["display_name"]} (AUC={auc_score:.3f})')
-                
-                model_auc_scores[model_name] = auc_score
-                print(f"      ✅ {model_name}: ROC曲线生成成功 (AUC={auc_score:.3f})")
-                
-            except Exception as e:
-                print(f"      ⚠️  {model_name}: ROC数据处理失败 ({str(e)})，使用工作点")
-                # 回退到工作点显示
-                metrics = std_metrics['classification_metrics']
-                fpr_point = metrics['fpr']
-                tpr_point = metrics['tpr']
-                
-                ax1.scatter(fpr_point, tpr_point, s=200, color=config['color'],
-                           label=f'{config["display_name"]} (Working Point)',
-                           marker='o', edgecolors='black', linewidth=2)
-                
-                model_auc_scores[model_name] = 0.5  # 默认AUC
-        else:
-            # 如果没有ROC数据，使用工作点
+                tpr_list.append(tpr)
+                fpr_list.append(fpr)
+            
+            # 确保FPR单调递增来计算AUC
+            combined = list(zip(fpr_list, tpr_list))
+            combined.sort(key=lambda x: x[0])
+            fpr_sorted, tpr_sorted = zip(*combined)
+            
+            auc_score = auc(fpr_sorted, tpr_sorted)
+            
+            print(f"      📊 {model_name} ROC曲线计算结果:")
+            print(f"         AUC得分: {auc_score:.6f}")
+            
+            # 绘制ROC曲线
+            ax1.plot(fpr_sorted, tpr_sorted, color=config['color'], linewidth=2.5,
+                    label=f'{config["display_name"]} (AUC={auc_score:.3f})')
+            
+            model_auc_scores[model_name] = auc_score
+            print(f"      ✅ {model_name}: ROC曲线生成成功 (AUC={auc_score:.3f})")
+            
+        except Exception as e:
+            print(f"      ⚠️  {model_name}: ROC曲线计算失败 ({str(e)})，使用工作点")
+            # 回退到工作点显示
             metrics = std_metrics['classification_metrics']
             fpr_point = metrics['fpr']
             tpr_point = metrics['tpr']
@@ -355,7 +421,9 @@ def create_three_model_roc_comparison(all_results, save_path):
                        label=f'{config["display_name"]} (Working Point)',
                        marker='o', edgecolors='black', linewidth=2)
             
-            model_auc_scores[model_name] = 0.5  # 默认AUC
+            # 计算简单的AUC估计（使用工作点到(1,1)的面积）
+            auc_estimate = 0.5 + (tpr_point - fpr_point) / 2
+            model_auc_scores[model_name] = max(0.5, auc_estimate)
     
     ax1.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='Random Classifier')
     ax1.set_xlabel('False Positive Rate (FPR)')
@@ -365,21 +433,36 @@ def create_three_model_roc_comparison(all_results, save_path):
     ax1.set_xlim([0, 1])
     ax1.set_ylim([0, 1])
     
-    # === 子图2: 工作点比较 ===
-    ax2.set_title('(b) Working Points Comparison', fontsize=14, fontweight='bold')
+    # === 子图2: 工作点比较 - 严格按照Test_combine_transonly.py的方法 ===
+    ax2.set_title('(b) Working Points Comparison\n(Fixed Threshold Performance)', fontsize=14, fontweight='bold')
     
     for model_name, result in all_results.items():
         config = result['config']
         performance_data = result['performance_data']
         
+        # 按照Test_combine_transonly.py的方法重新计算工作点
         std_metrics = standardize_metrics(performance_data, model_name)
-        metrics = std_metrics['classification_metrics']
         
-        ax2.scatter(metrics['fpr'], metrics['tpr'], s=300, color=config['color'],
-                   label=f'{config["display_name"]}\n(TPR={metrics["tpr"]:.3f}, FPR={metrics["fpr"]:.3f})',
-                   marker='o', edgecolors='black', linewidth=2, alpha=0.8)
+        # 使用已计算的性能指标，这些指标应该与Test_combine_transonly.py一致
+        if 'classification_metrics' in std_metrics:
+            metrics = std_metrics['classification_metrics']
+            fpr_point = metrics.get('fpr', 0.0)
+            tpr_point = metrics.get('tpr', 0.0)
+            
+            print(f"      📍 {model_name} 工作点: TPR={tpr_point:.3f}, FPR={fpr_point:.3f}")
+            
+            ax2.scatter(fpr_point, tpr_point, s=300, color=config['color'],
+                       label=f'{config["display_name"]}\n(TPR={tpr_point:.3f}, FPR={fpr_point:.3f})',
+                       marker='o', edgecolors='black', linewidth=2, alpha=0.8)
+            
+            # 添加性能指标文本
+            ax2.annotate(f'TPR: {tpr_point:.3f}\nFPR: {fpr_point:.3f}', 
+                        xy=(fpr_point, tpr_point), 
+                        xytext=(5, 5), textcoords='offset points',
+                        fontsize=8, alpha=0.7,
+                        bbox=dict(boxstyle="round,pad=0.2", facecolor=config['color'], alpha=0.3))
     
-    ax2.plot([0, 1], [0, 1], 'k--', alpha=0.5)
+    ax2.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='Random Classifier')
     ax2.set_xlabel('False Positive Rate (FPR)')
     ax2.set_ylabel('True Positive Rate (TPR)')
     ax2.legend(loc='lower right')
