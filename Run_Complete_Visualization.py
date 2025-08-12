@@ -785,17 +785,17 @@ class CompleteVisualizationRunner:
         Returns:
             dict: 性能指标字典
         """
-        # 使用项目目录下的实际测试结果文件
-        project_base = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'project')
+        # 使用 Three_model 目录下的实际测试结果文件
+        project_base = self.three_model_dir
         
         # 查找最新的测试结果
         possible_files = [
-            os.path.join(project_base, 'test_results_20250731_170004', 'performance_metrics.json'),
+            os.path.join(project_base, 'transformer_positive', 'test_results_*', 'performance_metrics.json'),
             # 也检查其他可能的测试结果目录
         ]
         
         # 动态查找测试结果目录
-        test_dirs = glob.glob(os.path.join(project_base, 'test_results_*'))
+        test_dirs = glob.glob(os.path.join(project_base, 'transformer_positive', 'test_results_*'))
         for test_dir in sorted(test_dirs, reverse=True):  # 按时间降序排列
             possible_files.append(os.path.join(test_dir, 'performance_metrics.json'))
         
@@ -867,11 +867,16 @@ class CompleteVisualizationRunner:
         Returns:
             dict: 性能指标字典
         """
-        # 使用项目目录下的实际测试结果文件
-        project_base = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'project')
+        # 使用 Three_model 目录下的实际测试结果文件
+        project_base = self.three_model_dir
         
-        # 动态查找最新的测试结果目录
-        test_dirs = glob.glob(os.path.join(project_base, 'test_results_*'))
+        # 动态查找最新的测试结果目录 - 根据模型类型查找对应目录
+        if model_name == 'TRANSFORMER':
+            test_dirs = glob.glob(os.path.join(project_base, 'transformer_positive', 'test_results_*'))
+        elif model_name == 'BILSTM':
+            test_dirs = glob.glob(os.path.join(project_base, 'BILSTM', 'test_results_*'))
+        else:
+            test_dirs = []
         for test_dir in sorted(test_dirs, reverse=True):  # 按时间降序排列
             file_path = os.path.join(test_dir, 'performance_metrics.json')
             if os.path.exists(file_path):
