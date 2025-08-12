@@ -104,11 +104,14 @@ METRIC_MAPPING = {
 
 #----------------------------------------数据加载模块------------------------------
 def find_latest_test_results(base_path, pattern='test_results_*'):
-    """查找最新的测试结果目录"""
+    """查找最新的测试结果目录，如果没有子目录则直接返回base_path"""
     search_path = os.path.join(base_path, pattern)
     test_dirs = glob.glob(search_path)
     
     if not test_dirs:
+        # 如果没有找到test_results_*目录，直接使用base_path
+        if os.path.exists(base_path):
+            return base_path
         return None
     
     # 按修改时间排序，返回最新的
@@ -154,11 +157,19 @@ def load_model_results(model_name, config):
     
     print(f"   📂 Found result directory: {latest_dir}")
     
-    # 加载性能指标
+    # 加载性能指标 - 直接从模型目录读取文件
     if model_name == 'BILSTM':
         performance_file = os.path.join(latest_dir, 'bilstm_performance_metrics.json')
-        detailed_file = os.path.join(latest_dir, 'detailed_results', 'bilstm_detailed_results.pkl')
-        metadata_file = os.path.join(latest_dir, 'detailed_results', 'bilstm_test_metadata.json')
+        detailed_file = os.path.join(latest_dir, 'bilstm_detailed_results.pkl')
+        metadata_file = os.path.join(latest_dir, 'bilstm_test_metadata.json')
+    elif model_name == 'TRANSFORMER_POSITIVE':
+        performance_file = os.path.join(latest_dir, 'transformer_performance_metrics.json')
+        detailed_file = os.path.join(latest_dir, 'transformer_detailed_results.pkl')
+        metadata_file = os.path.join(latest_dir, 'transformer_test_metadata.json')
+    elif model_name == 'TRANSFORMER_PN':
+        performance_file = os.path.join(latest_dir, 'transformer_performance_metrics.json')
+        detailed_file = os.path.join(latest_dir, 'transformer_detailed_results.pkl')
+        metadata_file = os.path.join(latest_dir, 'transformer_test_metadata.json')
     else:
         performance_file = os.path.join(latest_dir, 'performance_metrics.json')
         detailed_file = os.path.join(latest_dir, 'detailed_results.pkl')
