@@ -2457,18 +2457,54 @@ def create_single_sample_three_window(sample_result, save_path):
     # 阶段1：触发点
     trigger_points = detection_info.get('trigger_points', [])
     if trigger_points:
-        trigger_indices = [p['index'] for p in trigger_points]
-        ax_main.scatter(trigger_indices, fai_values[trigger_indices], 
-                       color='red', s=30, marker='o', alpha=0.8, 
-                       label=f'{get_chart_label("触发点")}', zorder=5)
+        try:
+            # 🔧 修复：兼容不同数据格式（五点检测为整数，三窗口检测为字典）
+            if len(trigger_points) > 0 and isinstance(trigger_points[0], dict):
+                # 三窗口检测模式：trigger_points为字典列表
+                trigger_indices = [p['index'] for p in trigger_points if 'index' in p]
+            else:
+                # 五点检测模式：trigger_points为整数列表
+                trigger_indices = [idx for idx in trigger_points if isinstance(idx, (int, np.integer))]
+                
+            # 确保索引在有效范围内
+            trigger_indices = [idx for idx in trigger_indices if 0 <= idx < len(fai_values)]
+            
+            if trigger_indices:
+                ax_main.scatter(trigger_indices, fai_values[trigger_indices], 
+                               color='red', s=30, marker='o', alpha=0.8, 
+                               label=f'{get_chart_label("触发点")} ({len(trigger_indices)})', zorder=5)
+        except Exception as e:
+            print(f"   ⚠️ 触发点绘制失败: {e}")
+            # 继续执行，不中断整个绘制过程
     
     # 阶段2：验证点
     verified_points = detection_info.get('verified_points', [])
     if verified_points:
-        verified_indices = [p['index'] for p in verified_points]
-        ax_main.scatter(verified_indices, fai_values[verified_indices], 
-                       color='orange', s=50, marker='^', alpha=0.8, 
-                       label=f'{get_chart_label("验证")}: {len(verified_points)} {get_chart_label("确认点")}', zorder=5)
+        try:
+            # 🔧 修复：兼容不同数据格式
+            verified_indices = []
+            if len(verified_points) > 0:
+                if isinstance(verified_points[0], dict):
+                    # 三窗口检测模式：verified_points为字典列表，包含'point'字段
+                    for p in verified_points:
+                        if 'point' in p:
+                            verified_indices.append(p['point'])
+                        elif 'index' in p:
+                            verified_indices.append(p['index'])
+                else:
+                    # 五点检测模式：verified_points为整数列表（通常为空）
+                    verified_indices = [idx for idx in verified_points if isinstance(idx, (int, np.integer))]
+                    
+                # 确保索引在有效范围内
+                verified_indices = [idx for idx in verified_indices if 0 <= idx < len(fai_values)]
+                
+                if verified_indices:
+                    ax_main.scatter(verified_indices, fai_values[verified_indices], 
+                                   color='orange', s=50, marker='^', alpha=0.8, 
+                                   label=f'{get_chart_label("验证")}: {len(verified_indices)} {get_chart_label("确认点")}', zorder=5)
+        except Exception as e:
+            print(f"   ⚠️ 验证点绘制失败: {e}")
+            # 继续执行，不中断整个绘制过程
     
     # 阶段3：标记窗口 - 故障区域
     fault_regions_plotted = set()  # 避免重复绘制图例
@@ -2521,25 +2557,49 @@ def create_single_sample_three_window(sample_result, save_path):
     
     # 子图3：触发点分布
     ax3 = fig.add_subplot(gs[1, 2])
-    if trigger_points:
-        level_counts = {'Level 1': 0, 'Level 2': 0, 'Level 3': 0}
-        for point in trigger_points:
-            level = point.get('level', 1)
-            level_counts[f'Level {level}'] += 1
-        
-        levels = list(level_counts.keys())
-        counts = list(level_counts.values())
-        colors = ['lightblue', 'orange', 'red']
-        
-        bars = ax3.bar(levels, counts, color=colors, alpha=0.7)
-        # 添加数值标签
-        for bar, value in zip(bars, counts):
-            if value > 0:
-                ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1, 
-                        str(value), ha='center', va='bottom')
-    else:
-        ax3.text(0.5, 0.5, get_chart_label('无数据'), ha='center', va='center', 
-                transform=ax3.transAxes)
+    try:
+        if trigger_points:
+            level_counts = {'Level 1': 0, 'Level 2': 0, 'Level 3': 0}
+            
+            # 🔧 修复：兼容不同数据格式
+            if len(trigger_points) > 0 and isinstance(trigger_points[0], dict):
+                # 三窗口检测模式：触发点为字典，包含level信息
+                for point in trigger_points:
+                    level = point.get('level', 1)
+                    level_counts[f'Level {level}'] += 1
+            else:
+                # 五点检测模式：从detection_stats中获取level统计或标记regions中获取
+                detection_stats = detection_info.get('detection_stats', {})
+                level_statistics = detection_stats.get('level_statistics', {})
+                
+                if level_statistics:
+                    level_counts['Level 1'] = level_statistics.get('level_1_triggers', 0)
+                    level_counts['Level 2'] = level_statistics.get('level_2_triggers', 0)
+                    level_counts['Level 3'] = level_statistics.get('level_3_triggers', 0)
+                else:
+                    # 如果没有level统计，从marked_regions中统计
+                    marked_regions = detection_info.get('marked_regions', [])
+                    for region in marked_regions:
+                        level = region.get('level', 1)
+                        level_counts[f'Level {level}'] += 1
+            
+            levels = list(level_counts.keys())
+            counts = list(level_counts.values())
+            colors = ['lightblue', 'orange', 'red']
+            
+            bars = ax3.bar(levels, counts, color=colors, alpha=0.7)
+            # 添加数值标签
+            for bar, value in zip(bars, counts):
+                if value > 0:
+                    ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1, 
+                            str(value), ha='center', va='bottom')
+        else:
+            ax3.text(0.5, 0.5, get_chart_label('无数据'), ha='center', va='center', 
+                    transform=ax3.transAxes)
+    except Exception as e:
+        print(f"   ⚠️ 触发点分布图绘制失败: {e}")
+        ax3.text(0.5, 0.5, f'绘制失败: {str(e)[:50]}...', ha='center', va='center', 
+                transform=ax3.transAxes, fontsize=8)
     
     ax3.set_ylabel('Trigger Count')
     ax3.set_title('Trigger Level Distribution')
@@ -2574,6 +2634,7 @@ Advantages: Hierarchical detection + neighborhood verification, effective noise 
     try:
         plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
+        print(f"   ✅ 样本 {sample_id} 三窗口过程图已保存: {save_path}")
     except Exception as e:
         print(f"   ❌ 保存样本 {sample_id} 三窗口过程图失败: {e}")
         plt.close()
