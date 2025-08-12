@@ -303,18 +303,48 @@ def create_three_model_roc_comparison(all_results, save_path):
             roc_data = performance_data['TRANSFORMER'].get('roc_data', None)
         
         if roc_data and 'true_labels' in roc_data and 'fai_values' in roc_data:
-            # 使用存储的ROC数据
-            true_labels = np.array(roc_data['true_labels'])
-            fai_values = np.array(roc_data['fai_values'])
-            
-            # 计算ROC曲线
-            fpr, tpr, _ = roc_curve(true_labels, fai_values)
-            auc_score = auc(fpr, tpr)
-            
-            ax1.plot(fpr, tpr, color=config['color'], linewidth=2.5,
-                    label=f'{config["display_name"]} (AUC={auc_score:.3f})')
-            
-            model_auc_scores[model_name] = auc_score
+            try:
+                # 使用存储的ROC数据
+                true_labels = np.array(roc_data['true_labels'])
+                fai_values = np.array(roc_data['fai_values'])
+                
+                # 确保数据格式正确
+                if len(true_labels) == 0 or len(fai_values) == 0:
+                    print(f"      ⚠️  {model_name}: ROC数据为空，使用工作点")
+                    raise ValueError("Empty ROC data")
+                
+                if len(true_labels) != len(fai_values):
+                    print(f"      ⚠️  {model_name}: ROC数据长度不匹配，使用工作点")
+                    raise ValueError("ROC data length mismatch")
+                
+                # 检查标签是否为二进制
+                unique_labels = np.unique(true_labels)
+                if len(unique_labels) != 2 or not all(label in [0, 1] for label in unique_labels):
+                    print(f"      ⚠️  {model_name}: 标签不是二进制格式，使用工作点")
+                    raise ValueError("Non-binary labels")
+                
+                # 计算ROC曲线
+                fpr, tpr, _ = roc_curve(true_labels, fai_values)
+                auc_score = auc(fpr, tpr)
+                
+                ax1.plot(fpr, tpr, color=config['color'], linewidth=2.5,
+                        label=f'{config["display_name"]} (AUC={auc_score:.3f})')
+                
+                model_auc_scores[model_name] = auc_score
+                print(f"      ✅ {model_name}: ROC曲线生成成功 (AUC={auc_score:.3f})")
+                
+            except Exception as e:
+                print(f"      ⚠️  {model_name}: ROC数据处理失败 ({str(e)})，使用工作点")
+                # 回退到工作点显示
+                metrics = std_metrics['classification_metrics']
+                fpr_point = metrics['fpr']
+                tpr_point = metrics['tpr']
+                
+                ax1.scatter(fpr_point, tpr_point, s=200, color=config['color'],
+                           label=f'{config["display_name"]} (Working Point)',
+                           marker='o', edgecolors='black', linewidth=2)
+                
+                model_auc_scores[model_name] = 0.5  # 默认AUC
         else:
             # 如果没有ROC数据，使用工作点
             metrics = std_metrics['classification_metrics']
@@ -773,17 +803,23 @@ def create_comprehensive_comparison_report(all_results, save_dir):
     os.makedirs(vis_dir, exist_ok=True)
     
     # 生成各种比较图表
-    create_three_model_roc_comparison(all_results, 
-                                     os.path.join(vis_dir, 'three_model_roc_comparison.png'))
+    chart_functions = [
+        ('ROC曲线比较图', create_three_model_roc_comparison, 'three_model_roc_comparison.png'),
+        ('雷达图比较', create_three_model_radar_comparison, 'three_model_radar_comparison.png'),
+        ('时间线比较图', create_three_model_timeline_comparison, 'three_model_timeline_comparison.png'),
+        ('混淆矩阵比较图', create_confusion_matrix_comparison, 'three_model_confusion_matrix_comparison.png')
+    ]
     
-    create_three_model_radar_comparison(all_results, 
-                                       os.path.join(vis_dir, 'three_model_radar_comparison.png'))
-    
-    create_three_model_timeline_comparison(all_results, 
-                                          os.path.join(vis_dir, 'three_model_timeline_comparison.png'))
-    
-    create_confusion_matrix_comparison(all_results, 
-                                      os.path.join(vis_dir, 'three_model_confusion_matrix_comparison.png'))
+    successful_charts = []
+    for chart_name, chart_func, filename in chart_functions:
+        try:
+            chart_path = os.path.join(vis_dir, filename)
+            chart_func(all_results, chart_path)
+            successful_charts.append(chart_name)
+            print(f"   ✅ {chart_name}生成成功")
+        except Exception as e:
+            print(f"   ⚠️  {chart_name}生成失败: {str(e)}")
+            continue
     
     # 生成综合分析
     analysis = generate_comprehensive_analysis(all_results)
