@@ -24,76 +24,14 @@ import platform
 # 忽略警告
 warnings.filterwarnings('ignore')
 
-# 设置中文字体显示
-import matplotlib.font_manager as fm
+# 设置英文字体显示
 from matplotlib import rcParams
 
-def setup_chinese_fonts_strict():
-    """Linux服务器环境中文字体配置（增强版）"""
-    import subprocess
-    import os
-    
-    # 1. 尝试安装中文字体包（仅Linux）
-    if platform.system() == "Linux":
-        try:
-            # 检查是否有管理员权限安装字体
-            result = subprocess.run(['which', 'apt-get'], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                print("🔧 正在尝试安装中文字体包...")
-                subprocess.run(['sudo', 'apt-get', 'update'], capture_output=True, timeout=30)
-                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'fonts-noto-cjk', 'fonts-wqy-microhei', 'fonts-arphic-ukai'], capture_output=True, timeout=60)
-        except Exception as e:
-            print(f"⚠️ 字体安装失败（可能需要管理员权限）: {e}")
-    
-    # 2. 扩展候选字体列表
-    candidates = [
-        # Linux优先字体
-        'Noto Sans CJK SC Regular',
-        'Noto Sans CJK SC',
-        'WenQuanYi Micro Hei',
-        'WenQuanYi Zen Hei',
-        'Source Han Sans CN',
-        'Source Han Sans SC',
-        'AR PL UKai CN',
-        'AR PL UMing CN',
-        # 通用字体
-        'Droid Sans Fallback',
-        'Liberation Sans',
-        # Windows兜底
-        'Microsoft YaHei',
-        'SimHei',
-        'SimSun',
-        # 最终兜底
-        'DejaVu Sans',
-        'Liberation Sans'
-    ]
-
-    chosen = None
-    for name in candidates:
-        try:
-            font_path = fm.findfont(name, fallback_to_default=False)
-            if font_path and 'DejaVu' not in font_path and os.path.exists(font_path):
-                chosen = name
-                print(f"🔍 找到字体: {name} -> {font_path}")
-                break
-        except Exception:
-            continue
-
-    # 3. 如果没找到合适字体，尝试系统字体扫描
-    if chosen is None:
-        print("🔍 进行系统字体扫描...")
-        all_fonts = [f.name for f in fm.fontManager.ttflist]
-        chinese_fonts = [f for f in all_fonts if any(keyword in f.lower() for keyword in ['cjk', 'han', 'hei', 'kai', 'ming', 'noto', 'wenquanyi'])]
-        if chinese_fonts:
-            chosen = chinese_fonts[0]
-            print(f"🔍 通过扫描找到中文字体: {chosen}")
-        else:
-            chosen = 'DejaVu Sans'
-            print("⚠️ 未找到中文字体，使用DejaVu Sans")
-
-    # 4. 增强的全局渲染参数
+def setup_english_fonts():
+    """设置英文字体配置"""
+    # 使用标准英文字体
     rcParams['font.family'] = 'sans-serif'
-    rcParams['font.sans-serif'] = [chosen, 'DejaVu Sans', 'Liberation Sans']
+    rcParams['font.sans-serif'] = ['DejaVu Sans', 'Liberation Sans', 'Arial', 'sans-serif']
     rcParams['axes.unicode_minus'] = False
     rcParams['pdf.fonttype'] = 42
     rcParams['ps.fonttype'] = 42
@@ -106,37 +44,16 @@ def setup_chinese_fonts_strict():
     rcParams['xtick.labelsize'] = 9
     rcParams['ytick.labelsize'] = 9
     
-    # 5. 强制字体缓存重建
-    try:
-        fm._rebuild()
-        cache_dir = os.path.expanduser('~/.cache/matplotlib')
-        if os.path.exists(cache_dir):
-            import shutil
-            shutil.rmtree(cache_dir, ignore_errors=True)
-    except Exception as e:
-        print(f"⚠️ 字体缓存清理失败: {e}")
-
-    print(f"✅ 最终使用字体: {chosen}")
-    
-    # 6. 测试中文显示
-    try:
-        plt.figure(figsize=(1, 1))
-        plt.text(0.5, 0.5, 'Font Test', fontsize=10)
-        plt.close()
-        print("✅ 中文字体测试通过")
-    except Exception as e:
-        print(f"⚠️ 中文字体测试失败: {e}")
-        rcParams['font.sans-serif'] = ['DejaVu Sans']
-        print("🔄 已切换到安全模式（英文标签）")
+    print("✅ English font configuration completed")
 
 # 执行字体配置
-setup_chinese_fonts_strict()
+setup_english_fonts()
 
 print("="*80)
-print("🔬 三模型综合比较可视化系统")
+print("🔬 Three-Model Comprehensive Comparison Visualization System")
 print("="*80)
-print("📊 对比模型: BiLSTM vs Transformer_Positive vs Transformer_PN")
-print("📁 数据来源: Three_model目录下各模型的测试结果")
+print("📊 Comparing Models: BiLSTM vs Transformer_Positive vs Transformer_PN")
+print("📁 Data Source: Test results from Three_model directory for each model")
 print("="*80)
 
 #----------------------------------------配置参数------------------------------
@@ -176,13 +93,13 @@ PLOT_CONFIG = {
 
 # 性能指标映射
 METRIC_MAPPING = {
-    'accuracy': '准确率',
-    'precision': '精确率',
-    'recall': '召回率',
-    'f1_score': 'F1分数',
-    'specificity': '特异性',
-    'tpr': '真正率',
-    'fpr': '假正率'
+    'accuracy': 'Accuracy',
+    'precision': 'Precision',
+    'recall': 'Recall',
+    'f1_score': 'F1-Score',
+    'specificity': 'Specificity',
+    'tpr': 'TPR',
+    'fpr': 'FPR'
 }
 
 #----------------------------------------数据加载模块------------------------------
@@ -225,17 +142,17 @@ def safe_load_pickle(file_path, default=None):
         return default
 
 def load_model_results(model_name, config):
-    """加载单个模型的测试结果"""
-    print(f"📁 加载 {config['display_name']} 模型结果...")
+    """Load test results for a single model"""
+    print(f"📁 Loading {config['display_name']} model results...")
     
     # 查找最新的测试结果目录
     latest_dir = find_latest_test_results(config['base_path'], config['result_pattern'])
     
     if latest_dir is None:
-        print(f"   ❌ 未找到 {model_name} 的测试结果目录")
+        print(f"   ❌ No test result directory found for {model_name}")
         return None
     
-    print(f"   📂 找到结果目录: {latest_dir}")
+    print(f"   📂 Found result directory: {latest_dir}")
     
     # 加载性能指标
     if model_name == 'BILSTM':
@@ -254,7 +171,7 @@ def load_model_results(model_name, config):
     
     # 检查数据完整性
     if not performance_data:
-        print(f"   ⚠️ {model_name} 性能数据为空")
+        print(f"   ⚠️ {model_name} performance data is empty")
         return None
     
     result = {
@@ -266,7 +183,7 @@ def load_model_results(model_name, config):
         'result_dir': latest_dir
     }
     
-    print(f"   ✅ {config['display_name']} 数据加载完成")
+    print(f"   ✅ {config['display_name']} data loading completed")
     return result
 
 def standardize_metrics(raw_metrics, model_name):
@@ -333,8 +250,8 @@ def standardize_metrics(raw_metrics, model_name):
         }
 
 def load_all_model_results():
-    """加载所有模型的测试结果"""
-    print("\n🔄 开始加载所有模型的测试结果...")
+    """Load test results for all models"""
+    print("\n🔄 Starting to load test results for all models...")
     
     all_results = {}
     
@@ -343,9 +260,9 @@ def load_all_model_results():
         if result is not None:
             all_results[model_name] = result
         else:
-            print(f"   ⚠️ 跳过 {model_name}，数据加载失败")
+            print(f"   ⚠️ Skipping {model_name}, data loading failed")
     
-    print(f"\n✅ 成功加载 {len(all_results)} 个模型的结果")
+    print(f"\n✅ Successfully loaded results for {len(all_results)} models")
     return all_results
 
 #----------------------------------------ROC曲线比较------------------------------
@@ -394,12 +311,12 @@ def create_three_model_roc_comparison(all_results, save_path):
             tpr_point = metrics['tpr']
             
             ax1.scatter(fpr_point, tpr_point, s=200, color=config['color'],
-                       label=f'{config["display_name"]} (工作点)',
+                       label=f'{config["display_name"]} (Working Point)',
                        marker='o', edgecolors='black', linewidth=2)
             
             model_auc_scores[model_name] = 0.5  # 默认AUC
     
-    ax1.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='随机分类器')
+    ax1.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='Random Classifier')
     ax1.set_xlabel('False Positive Rate (FPR)')
     ax1.set_ylabel('True Positive Rate (TPR)')
     ax1.legend(loc='lower right')
@@ -487,7 +404,7 @@ def create_three_model_roc_comparison(all_results, save_path):
         best_auc = auc_values[best_model_idx]
         best_name = display_names[best_model_idx]
         
-        ax4.text(0.5, 0.95, f'最佳: {best_name} (AUC={best_auc:.3f})', 
+        ax4.text(0.5, 0.95, f'Best: {best_name} (AUC={best_auc:.3f})', 
                 transform=ax4.transAxes, ha='center', va='top',
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7),
                 fontsize=10, fontweight='bold')
@@ -635,10 +552,10 @@ def create_three_model_timeline_comparison(all_results, save_path):
                 sample_data[model_name] = sample_result
     
     if not sample_data:
-        print("   ⚠️ 没有找到可用的样本数据")
+        print("   ⚠️ No available sample data found")
         return
     
-    print(f"   📋 使用样本 {target_sample} 进行时序比较")
+    print(f"   📋 Using sample {target_sample} for timeline comparison")
     
     # 为每个模型生成子图
     for i, (model_name, result) in enumerate(all_results.items()):
@@ -821,13 +738,13 @@ def generate_comprehensive_analysis(all_results):
         best_display_name = model_metrics[best_model_name]['display_name']
         
         recommendations = [
-            f"综合性能最佳模型: {best_display_name}",
-            f"综合得分: {ranked_models[0][1]:.3f}",
+            f"Best Overall Performance Model: {best_display_name}",
+            f"Composite Score: {ranked_models[0][1]:.3f}",
             ""
         ]
         
         # 各指标最佳模型
-        recommendations.append("各指标最佳模型:")
+        recommendations.append("Best Models by Metric:")
         for metric, winner in metric_winners.items():
             recommendations.append(f"  {METRIC_MAPPING.get(metric, metric)}: {winner['display_name']} ({winner['score']:.3f})")
         
@@ -916,7 +833,7 @@ def create_excel_comparison_report(all_results, analysis, save_dir):
                 'Rank': i + 1,
                 'Model': config['display_name'],
                 'Composite_Score': score,
-                'Performance_Level': '优秀' if score >= 0.8 else '良好' if score >= 0.6 else '一般'
+                'Performance_Level': 'Excellent' if score >= 0.8 else 'Good' if score >= 0.6 else 'Average'
             })
         
         ranking_df = pd.DataFrame(ranking_data)
@@ -938,17 +855,17 @@ def create_excel_comparison_report(all_results, analysis, save_dir):
 
 #----------------------------------------主执行流程------------------------------
 def main():
-    """主执行函数"""
-    print("\n🚀 开始三模型综合比较分析...")
+    """Main execution function"""
+    print("\n🚀 Starting three-model comprehensive comparison analysis...")
     
     # 加载所有模型结果
     all_results = load_all_model_results()
     
     if len(all_results) == 0:
-        print("❌ 没有找到任何模型的测试结果，请先运行各模型的测试脚本")
+        print("❌ No test results found for any model. Please run the test scripts for each model first.")
         return
     
-    print(f"\n📊 成功加载 {len(all_results)} 个模型的结果:")
+    print(f"\n📊 Successfully loaded results for {len(all_results)} models:")
     for model_name, result in all_results.items():
         config = result['config']
         print(f"   • {config['display_name']}: {result['result_dir']}")
@@ -963,43 +880,43 @@ def main():
     
     # 输出总结
     print("\n" + "="*80)
-    print("🎉 三模型综合比较分析完成！")
+    print("🎉 Three-Model Comprehensive Comparison Analysis Completed!")
     print("="*80)
     
-    print(f"\n📊 比较结果总结:")
-    print(f"   • 参与比较的模型: {len(all_results)} 个")
+    print(f"\n📊 Comparison Results Summary:")
+    print(f"   • Models compared: {len(all_results)}")
     for model_name, result in all_results.items():
         config = result['config']
         print(f"     - {config['display_name']}")
     
     if analysis['summary']['best_model']:
         best_model_config = MODEL_CONFIGS[analysis['summary']['best_model']]
-        print(f"\n🏆 综合性能最佳模型: {best_model_config['display_name']}")
-        print(f"   综合得分: {analysis['summary']['best_score']:.3f}")
+        print(f"\n🏆 Best Overall Performance Model: {best_model_config['display_name']}")
+        print(f"   Composite Score: {analysis['summary']['best_score']:.3f}")
     
-    print(f"\n🎯 性能排名:")
+    print(f"\n🎯 Performance Ranking:")
     for i, (model_name, score) in enumerate(analysis['ranking']['ranked_list']):
         config = MODEL_CONFIGS[model_name]
         print(f"   {i+1}. {config['display_name']}: {score:.3f}")
     
-    print(f"\n📁 结果文件:")
-    print(f"   • 结果目录: {save_dir}")
-    print(f"   • 可视化图表: {save_dir}/visualizations/")
-    print(f"     - ROC曲线比较: three_model_roc_comparison.png")
-    print(f"     - 雷达图比较: three_model_radar_comparison.png") 
-    print(f"     - 时序图比较: three_model_timeline_comparison.png")
-    print(f"     - 混淆矩阵比较: three_model_confusion_matrix_comparison.png")
-    print(f"   • 分析报告: comprehensive_analysis.json")
-    print(f"   • Excel报告: three_model_comparison_report.xlsx")
+    print(f"\n📁 Result Files:")
+    print(f"   • Result Directory: {save_dir}")
+    print(f"   • Visualization Charts: {save_dir}/visualizations/")
+    print(f"     - ROC Curve Comparison: three_model_roc_comparison.png")
+    print(f"     - Radar Chart Comparison: three_model_radar_comparison.png") 
+    print(f"     - Timeline Comparison: three_model_timeline_comparison.png")
+    print(f"     - Confusion Matrix Comparison: three_model_confusion_matrix_comparison.png")
+    print(f"   • Analysis Report: comprehensive_analysis.json")
+    print(f"   • Excel Report: three_model_comparison_report.xlsx")
     
     if 'recommendations' in analysis:
-        print(f"\n💡 推荐建议:")
+        print(f"\n💡 Recommendations:")
         for rec in analysis['recommendations']:
             if rec.strip():
                 print(f"   • {rec}")
     
     print("\n" + "="*80)
-    print("三模型比较分析完成！请查看生成的可视化图表和分析报告。")
+    print("Three-Model Comparison Analysis Completed! Please check the generated visualization charts and analysis reports.")
     print("="*80)
 
 if __name__ == "__main__":
