@@ -36,7 +36,7 @@ def test_configuration():
         print()
         
         print("📊 文件模式配置:")
-        for pattern_type, patterns in runner.file_patterns.items():
+        for pattern_type, patterns in runner.model_file_patterns.items():
             print(f"   • {pattern_type}: {patterns}")
         print()
         
@@ -50,7 +50,7 @@ def test_configuration():
             print(f"❌ 配置错误！应该是3个模型，但发现{model_count}个")
             
         # 检查模型名称
-        expected_models = {'bilstm', 'transformer_back', 'transformer_for_back'}
+        expected_models = {'bilstm', 'transformer_positive', 'transformer_pn'}
         actual_models = set(runner.model_paths.keys())
         
         print(f"\n🔍 模型名称检查:")
@@ -83,8 +83,8 @@ def test_model_scripts():
     
     expected_scripts = {
         'bilstm': ['Train_BILSTM_Only.py', 'Train_BILSTM.py'],
-        'transformer_back': ['Train_Transformer_BackwardFeedback.py'],
-        'transformer_for_back': ['Train_Transformer_HybridFeedback.py']
+        'transformer_positive': ['Train_Transformer_HybridFeedback.py'],
+        'transformer_pn': ['Train_Transformer_PN_HybridFeedback.py']
     }
     
     current_dir = os.path.dirname(os.path.abspath(__file__))
