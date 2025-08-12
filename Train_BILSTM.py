@@ -1480,25 +1480,28 @@ print("✅ 使用单卡A100优化模式")
 print(f"   GPU设备: {device}")
 print(f"   显存优化: 针对80GB显存特别优化")
 
-optimizer = torch.optim.Adam(net.parameters(), lr=INIT_LR)
-l1_lambda = 0.01
-loss_f = nn.MSELoss()
+def main():
+    """主训练函数"""
+    optimizer = torch.optim.Adam(net.parameters(), lr=INIT_LR)
+    l1_lambda = 0.01
+    loss_f = nn.MSELoss()
 
-# 启用混合精度训练
-scaler = torch.cuda.amp.GradScaler()
-print("✅ 启用混合精度训练 (AMP)")
-for epoch in range(EPOCH):
-    total_loss = 0
-    num_batches = 0
+    # 启用混合精度训练
+    scaler = torch.cuda.amp.GradScaler()
+    print("✅ 启用混合精度训练 (AMP)")
     
-    # 更新学习率
-    current_lr = get_lr(epoch)
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = current_lr
-    
-    # 每个epoch开始时清理缓存
-    clear_gpu_cache()
-    
+    for epoch in range(EPOCH):
+        total_loss = 0
+        num_batches = 0
+        
+        # 更新学习率
+        current_lr = get_lr(epoch)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = current_lr
+        
+        # 每个epoch开始时清理缓存
+        clear_gpu_cache()
+        
         for iteration, (x, y, z, q) in enumerate(train_loader_u):
             x = x.to(device)
             y = y.to(device)
@@ -1549,68 +1552,68 @@ for epoch in range(EPOCH):
                     continue
                 else:
                     raise e
-                    
+                        
             # 检查损失值是否为NaN
             if torch.isnan(loss_u) or torch.isinf(loss_u):
-                print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
-                print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
-                print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
-                print(f"损失值: {loss_u.item()}")
-                print("跳过此批次，不进行反向传播")
-                continue
+            print(f"警告：第{epoch}轮第{iteration}批次检测到NaN/Inf损失值")
+            print(f"输入范围: [{x.min():.4f}, {x.max():.4f}]")
+            print(f"输出范围: [{recon_im.min():.4f}, {recon_im.max():.4f}]")
+            print(f"损失值: {loss_u.item()}")
+            print("跳过此批次，不进行反向传播")
+            continue
+        
+        total_loss += loss_u.item()
+        num_batches += 1
+        
+        optimizer.zero_grad()
+        
+        # 使用混合精度训练
+        scaler.scale(loss_u).backward()
+        
+        # 检查梯度是否为NaN或无穷大
+        grad_norm = 0
+        has_grad_issue = False
+        
+        # 安全地处理梯度
+        try:
+            # 在检查梯度前unscale
+            scaler.unscale_(optimizer)
             
-            total_loss += loss_u.item()
-            num_batches += 1
+            for name, param in net.named_parameters():
+                if param.grad is not None:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
+                        has_grad_issue = True
+                        break
+                    grad_norm += param.grad.data.norm(2).item() ** 2
             
-            optimizer.zero_grad()
-            
-            # 使用混合精度训练
-            scaler.scale(loss_u).backward()
-            
-            # 检查梯度是否为NaN或无穷大
-            grad_norm = 0
-            has_grad_issue = False
-            
-            # 安全地处理梯度
-            try:
-                # 在检查梯度前unscale
-                scaler.unscale_(optimizer)
-                
-                for name, param in net.named_parameters():
-                    if param.grad is not None:
-                        if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                            print(f"警告：参数 {name} 的梯度出现NaN或无穷大，跳过此批次")
-                            has_grad_issue = True
-                            break
-                        grad_norm += param.grad.data.norm(2).item() ** 2
-                
-                if has_grad_issue:
-                    # 重置scaler状态
-                    scaler.update()
-                    continue
-                
-                grad_norm = grad_norm ** 0.5
-                
-                # 渐进式梯度裁剪 - 只显示异常情况
-                if grad_norm > MAX_GRAD_NORM:
-                    torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
-                    print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
-                elif grad_norm < MIN_GRAD_NORM:
-                    print(f"⚠️  梯度过小: {grad_norm:.4f} < {MIN_GRAD_NORM}")
-                
-                # 执行优化器步骤
-                scaler.step(optimizer)
-                scaler.update()
-                
-            except Exception as e:
-                print(f"优化器步骤失败: {e}")
-                print("跳过此批次并重置scaler状态")
+            if has_grad_issue:
                 # 重置scaler状态
                 scaler.update()
                 continue
             
-            # 及时释放不需要的张量
-            del x, y, z, q, recon_im, recon_p, loss_u
+            grad_norm = grad_norm ** 0.5
+            
+            # 渐进式梯度裁剪 - 只显示异常情况
+            if grad_norm > MAX_GRAD_NORM:
+                torch.nn.utils.clip_grad_norm_(net.parameters(), MAX_GRAD_NORM)
+                print(f"⚠️  梯度裁剪: {grad_norm:.4f} -> {MAX_GRAD_NORM}")
+            elif grad_norm < MIN_GRAD_NORM:
+                print(f"⚠️  梯度过小: {grad_norm:.4f} < {MIN_GRAD_NORM}")
+            
+            # 执行优化器步骤
+            scaler.step(optimizer)
+            scaler.update()
+            
+        except Exception as e:
+            print(f"优化器步骤失败: {e}")
+            print("跳过此批次并重置scaler状态")
+            # 重置scaler状态
+            scaler.update()
+            continue
+        
+        # 及时释放不需要的张量
+        del x, y, z, q, recon_im, recon_p, loss_u
     
     avg_loss = total_loss / num_batches
     train_losses_mcae1.append(avg_loss)
@@ -1916,4 +1919,7 @@ print("📊 比对说明：")
 print("   - 此模式建立BiLSTM基准性能")
 print("   - 可与Transformer模式进行公平对比")
 print("   - 便于评估Transformer替换的效果")
-print("   - 训练时间更短，适合快速验证") 
+print("   - 训练时间更短，适合快速验证")
+
+if __name__ == "__main__":
+    main() 
